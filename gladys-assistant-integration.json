@@ -1,0 +1,134 @@
+{
+  "manifest_version": 1,
+  "type": "device",
+  "name": "Devmel",
+  "description": {
+    "en": "Control the shutters, switches, lights and sensors of a Devmel AirSend radio gateway (433 and 868 MHz).",
+    "fr": "Pilotez les volets, interrupteurs, lampes et capteurs d'une passerelle radio Devmel AirSend (433 et 868 MHz)."
+  },
+  "version": "1.0.0",
+  "docker_image": "ghcr.io/prohand/gladys-devmel:1.0.0",
+  "gladys_version": ">=4.85.0",
+  "cover_image": "https://raw.githubusercontent.com/prohand/gladys-devmel/main/cover.png",
+  "transports": ["local", "cloud"],
+  "webhooks": [
+    {
+      "key": "events",
+      "label": {
+        "en": "AirSend radio events",
+        "fr": "Événements radio AirSend"
+      },
+      "mode": "fire_and_forget"
+    }
+  ],
+  "config_schema": [
+    {
+      "key": "intro",
+      "type": "section",
+      "label": { "en": "Getting started", "fr": "Pour commencer" },
+      "description": {
+        "en": "Devices are configured in the AirSend app, then exported from airsend.cloud (Import/Export -> Export YAML, with the spurl option for the local connection). Paste that export below: the integration reads it as is.",
+        "fr": "Les appareils se configurent dans l'application AirSend, puis s'exportent depuis airsend.cloud (Import/Export -> Export YAML, avec l'option spurl pour la connexion locale). Collez cet export ci-dessous : l'intégration le lit tel quel."
+      },
+      "links": [
+        {
+          "url": "https://airsend.cloud",
+          "label": { "en": "airsend.cloud", "fr": "airsend.cloud" }
+        },
+        {
+          "url": "https://github.com/prohand/gladys-devmel",
+          "label": { "en": "Integration documentation", "fr": "Documentation de l'intégration" }
+        }
+      ]
+    },
+    {
+      "key": "service_url",
+      "type": "string",
+      "label": { "en": "AirSend Web Service URL", "fr": "URL du service AirSend" },
+      "description": {
+        "en": "Address of the AirSend Web Service on your network, e.g. http://192.168.1.50:33863/. Required for the local connection and for sensors.",
+        "fr": "Adresse du service AirSend sur votre réseau, par exemple http://192.168.1.50:33863/. Nécessaire pour la connexion locale et pour les capteurs."
+      },
+      "required": false,
+      "placeholder": "http://192.168.1.50:33863/"
+    },
+    {
+      "key": "spurl",
+      "type": "password",
+      "label": { "en": "Local connection string", "fr": "Chaîne de connexion locale" },
+      "description": {
+        "en": "The sp:// URL exported by airsend.cloud, e.g. sp://password@[fe80::...]?gw=0&rhost=192.168.1.50",
+        "fr": "L'URL sp:// exportée par airsend.cloud, par exemple sp://motdepasse@[fe80::...]?gw=0&rhost=192.168.1.50"
+      },
+      "required": false
+    },
+    {
+      "key": "api_key",
+      "type": "password",
+      "label": { "en": "airsend.cloud API key", "fr": "Clé d'API airsend.cloud" },
+      "description": {
+        "en": "Used as a fallback when the local box is unreachable, and as the only channel if you do not run the AirSend Web Service.",
+        "fr": "Utilisée en repli quand le boîtier local est injoignable, et comme unique canal si vous ne faites pas tourner le service AirSend."
+      },
+      "required": false
+    },
+    {
+      "key": "devices",
+      "type": "textarea",
+      "label": { "en": "Devices", "fr": "Appareils" },
+      "description": {
+        "en": "The YAML (or JSON) exported from airsend.cloud. One entry per device, with its type and its radio channel.",
+        "fr": "Le YAML (ou JSON) exporté depuis airsend.cloud. Une entrée par appareil, avec son type et son canal radio."
+      },
+      "required": false,
+      "placeholder": "devices:\n  Living room shutter:\n    type: 4098\n    channel:\n      id: 25455\n      source: 94311"
+    },
+    {
+      "key": "listen_channel",
+      "type": "number",
+      "label": { "en": "Listening channel", "fr": "Canal d'écoute" },
+      "description": {
+        "en": "Radio channel the box listens to in order to push what it hears (wall remotes, sensors) to Gladys. 0 disables listening. Requires Gladys Plus.",
+        "fr": "Canal radio que le boîtier écoute pour pousser vers Gladys ce qu'il entend (télécommandes murales, capteurs). 0 désactive l'écoute. Nécessite Gladys Plus."
+      },
+      "required": false,
+      "default": 1,
+      "min": 0,
+      "max": 65535
+    },
+    {
+      "key": "poll_frequency",
+      "type": "number",
+      "label": { "en": "Refresh interval (s)", "fr": "Intervalle de rafraîchissement (s)" },
+      "description": {
+        "en": "How often the box sensors are read, in seconds. A device can override it with its own refresh value.",
+        "fr": "Fréquence de lecture des capteurs du boîtier, en secondes. Un appareil peut la surcharger avec sa propre valeur refresh."
+      },
+      "required": false,
+      "default": 300,
+      "min": 30,
+      "max": 3600
+    }
+  ],
+  "actions": [
+    {
+      "key": "test_connection",
+      "label": { "en": "Test the connection", "fr": "Tester la connexion" },
+      "timeout_seconds": 30
+    },
+    {
+      "key": "identify",
+      "label": { "en": "Identify a device", "fr": "Identifier un appareil" },
+      "timeout_seconds": 30,
+      "fields": [
+        {
+          "key": "device",
+          "type": "select",
+          "source": "devices",
+          "label": { "en": "Device", "fr": "Appareil" },
+          "required": true
+        }
+      ]
+    }
+  ]
+}
