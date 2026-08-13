@@ -124,33 +124,102 @@ sous `channel` plutôt que le couple `pid` / `addr` à plat. Cela reste du JSON 
 
 ### Types d'appareils
 
-| `type` | Appareil               | Ce que vous obtenez dans Gladys                   |
-| ------ | ---------------------- | ------------------------------------------------- |
-| `0`    | Boîtier AirSend        | Ses capteurs de température et de luminosité      |
-| `1`    | Capteur / télécommande | Ce qu'il émet (voir `features` ci-dessous)        |
-| `4096` | Bouton                 | Un bouton poussoir qui envoie TOGGLE              |
-| `4097` | Interrupteur           | Marche/Arrêt                                      |
-| `4098` | Volet                  | Ouvrir / Stop / Fermer                            |
-| `4099` | Volet avec position    | Ouvrir / Stop / Fermer **+** une position 0-100 % |
-| `4100` | Lampe variable         | Marche/Arrêt **+** luminosité                     |
+| `type` | Appareil               | Ce que vous obtenez dans Gladys                        |
+| ------ | ---------------------- | ------------------------------------------------------ |
+| `0`    | Boîtier AirSend        | Ses capteurs de température et de luminosité           |
+| `1`    | Capteur / télécommande | Ce qu'il émet (voir `features` ci-dessous)             |
+| `4096` | Bouton                 | Un bouton poussoir qui envoie TOGGLE                   |
+| `4097` | Interrupteur           | Marche/Arrêt                                           |
+| `4098` | Volet                  | Ouvrir / Stop / Fermer (**+** position si chronométré) |
+| `4099` | Volet avec position    | Ouvrir / Stop / Fermer **+** une position 0-100 %      |
+| `4100` | Lampe variable         | Marche/Arrêt **+** luminosité                          |
 
 ### Options d'un appareil
 
-| Option     | Signification                                                                  |
-| ---------- | ------------------------------------------------------------------------------ |
-| `type`     | Type d'appareil (tableau ci-dessus), **obligatoire**                           |
-| `channel`  | Canal radio (`id`, `source`, `mac`, `seed`), **obligatoire**                   |
-| `pid`      | Le `channel.id` de l'export JSON (utilisez l'un ou l'autre)                    |
-| `addr`     | Le `channel.source` de l'export JSON                                           |
-| `spurl`    | Chaîne de connexion propre à cet appareil, si différente de la globale         |
-| `wait`     | Attendre la confirmation radio avant de répondre (`false` par défaut)          |
-| `invert`   | Inverser ouverture et fermeture, pour les volets posés à l'envers              |
-| `sensors`  | Sur un boîtier (`type: 0`), exposer ses capteurs de température et lumière     |
-| `refresh`  | Intervalle de lecture de ces capteurs, en secondes                             |
-| `features` | Sur un capteur (`type: 1`) : `temperature`, `humidity`, `illuminance`, `click` |
+| Option              | Signification                                                                  |
+| ------------------- | ------------------------------------------------------------------------------ |
+| `type`              | Type d'appareil (tableau ci-dessus), **obligatoire**                           |
+| `channel`           | Canal radio (`id`, `source`, `mac`, `seed`), **obligatoire**                   |
+| `pid`               | Le `channel.id` de l'export JSON (utilisez l'un ou l'autre)                    |
+| `addr`              | Le `channel.source` de l'export JSON                                           |
+| `spurl`             | Chaîne de connexion propre à cet appareil, si différente de la globale         |
+| `wait`              | Attendre la confirmation radio avant de répondre (`false` par défaut)          |
+| `invert`            | Inverser ouverture et fermeture, pour les volets posés à l'envers              |
+| `travel_up`         | Sur un volet : durée d'une ouverture complète, en secondes (voir plus bas)     |
+| `travel_down`       | Sur un volet : durée d'une fermeture complète, en secondes                     |
+| `travel`            | Les deux à la fois, pour un moteur qui se comporte pareil dans les deux sens   |
+| `favorite_position` | Sur un volet : la position programmée dans le moteur, en %                     |
+| `sensors`           | Sur un boîtier (`type: 0`), exposer ses capteurs de température et lumière     |
+| `refresh`           | Intervalle de lecture de ces capteurs, en secondes                             |
+| `features`          | Sur un capteur (`type: 1`) : `temperature`, `humidity`, `illuminance`, `click` |
 
 Un boîtier déclaré sans `sensors: true` ne crée aucun appareil dans Gladys :
 il n'est là que pour porter la chaîne de connexion.
+
+## La position d'un volet
+
+Un volet 433 MHz ne dit jamais où il est : la radio transporte des ordres, pas
+des positions. Ce qu'il a, en revanche, c'est une **durée** — un moteur donné
+met toujours le même temps pour aller d'une butée à l'autre. Chronométrez cette
+course une fois, et la position devient calculable.
+
+Chronomètre en main, du démarrage du volet jusqu'à son arrêt tout seul, notez
+les deux durées :
+
+```json
+{
+  "devices": {
+    "Volet salon": {
+      "type": 4098,
+      "travel_up": 22,
+      "travel_down": 20,
+      "channel": { "id": 25455, "source": 94311 }
+    }
+  }
+}
+```
+
+L'intégration suit alors le volet seconde par seconde, que l'ordre vienne de
+Gladys ou d'une télécommande murale entendue à la radio (ce qui suppose le
+canal d'écoute décrit plus bas). Trois conséquences :
+
+- un **`4098` obtient lui aussi une position** — la fonctionnalité apparaît dès
+  que le volet est chronométré, et son curseur pilote le moteur par un
+  Ouvrir/Stop minuté : l'intégration lance le volet dans le bon sens et lui
+  envoie le Stop au moment où la course dit qu'il est arrivé ;
+- **le stop ne ment plus** : un volet arrêté à mi-course remonte la position
+  qu'il a réellement atteinte, au lieu de conserver les 100 % annoncés par
+  l'ordre ;
+- **l'estimation se répare toute seule** : un volet qu'on laisse aller jusqu'à
+  sa butée est exactement à 0 % ou à 100 %, puisque le moteur s'y arrête
+  physiquement. Chaque ouverture ou fermeture complète efface l'erreur
+  accumulée par les courses partielles précédentes.
+
+Comptez ±5 % de précision : un moteur ralentit en charge et par temps froid. Si
+un volet dérive, un scénario qui l'ouvre entièrement une fois par jour suffit à
+le remettre d'aplomb.
+
+Un volet que vous n'avez pas chronométré garde le comportement précédent :
+Gladys affiche la destination du dernier ordre, ce qui est tout ce qu'un
+protocole unidirectionnel peut offrir.
+
+Deux détails qui comptent :
+
+- tant qu'il n'a pas fait sa première course complète, la position d'un volet
+  chronométré est **inconnue**, et l'intégration ne publie rien plutôt que
+  d'inventer une valeur. Ouvrez-le ou fermez-le une fois et c'est réglé.
+  Demander une position avant cela envoie le volet à la butée la plus proche,
+  ce qui est précisément ce qui établit la référence ;
+- la position **survit aux redémarrages** de l'intégration : elle repart de la
+  valeur conservée par Gladys.
+
+### La position favorite
+
+Beaucoup de moteurs ont une position à eux, programmée dans le matériel (le
+bouton « my » de Somfy). La radio dit « va à ta position » sans jamais dire
+laquelle. Mesurez-la une fois et déclarez-la avec `"favorite_position": 40` :
+appuyer sur ce bouton remonte alors 40 % dans Gladys. Sans elle, le volet est
+signalé arrêté quelque part entre les deux — la réponse honnête.
 
 ## Écouter la radio (optionnel, nécessite Gladys Plus)
 
@@ -179,7 +248,8 @@ boîtier sont rafraîchis par interrogation périodique.
 
 - Le 433 MHz est un protocole **unidirectionnel** pour la plupart des
   équipements : rien ne confirme qu'un ordre a été reçu, et Gladys affiche la
-  valeur envoyée. L'écoute (ci-dessus) transforme cette hypothèse en état réel.
+  valeur envoyée. L'écoute (ci-dessus) transforme cette hypothèse en état réel,
+  et chronométrer un volet (ci-dessus) lui donne une position.
 - Les capteurs sont lus **dans le boîtier**, par le canal local.
 - Le service intégré joint votre boîtier **depuis le conteneur de
   l'intégration**, à travers votre réseau : le `rhost=<IPv4>` de la chaîne de
@@ -191,16 +261,18 @@ boîtier sont rafraîchis par interrogation périodique.
 
 ## En cas de problème
 
-| Symptôme                               | À vérifier                                                                             |
-| -------------------------------------- | -------------------------------------------------------------------------------------- |
-| `Invalid connection string`            | L'URL `sp://`, et que son mot de passe correspond au boîtier                           |
-| `Invalid input`                        | Le `channel` de l'appareil (`id`/`pid` et `source`/`addr`)                             |
-| `no radio channel` (logs)              | L'entrée n'a pas de canal : il lui faut `channel.id`, ou le couple `pid`/`addr`        |
-| `no radio confirmation`                | Normal sans retour d'état : laissez `wait: false`                                      |
-| Aucun appareil dans « Découverte »     | **Tester la connexion** : la liste n'a sans doute pas été lue                          |
-| Le boîtier est injoignable             | La partie `?gw=0&rhost=<IPv4>` de la chaîne de connexion                               |
-| `Service AirSend intégré indisponible` | Les logs de l'intégration : le service y journalise son démarrage                      |
-| Le boîtier répond à la main, pas ici   | L'IPv4 `rhost=` doit être joignable **depuis le conteneur**, pas seulement de votre PC |
+| Symptôme                               | À vérifier                                                                                 |
+| -------------------------------------- | ------------------------------------------------------------------------------------------ |
+| `Invalid connection string`            | L'URL `sp://`, et que son mot de passe correspond au boîtier                               |
+| `Invalid input`                        | Le `channel` de l'appareil (`id`/`pid` et `source`/`addr`)                                 |
+| `no radio channel` (logs)              | L'entrée n'a pas de canal : il lui faut `channel.id`, ou le couple `pid`/`addr`            |
+| `no radio confirmation`                | Normal sans retour d'état : laissez `wait: false`                                          |
+| Aucun appareil dans « Découverte »     | **Tester la connexion** : la liste n'a sans doute pas été lue                              |
+| Le boîtier est injoignable             | La partie `?gw=0&rhost=<IPv4>` de la chaîne de connexion                                   |
+| `Service AirSend intégré indisponible` | Les logs de l'intégration : le service y journalise son démarrage                          |
+| Le boîtier répond à la main, pas ici   | L'IPv4 `rhost=` doit être joignable **depuis le conteneur**, pas seulement de votre PC     |
+| Un volet n'affiche pas de position     | Chronométrez-le : `travel_up` / `travel_down`, puis ouvrez-le ou fermez-le à fond une fois |
+| La position dérive avec le temps       | Rechronométrez la course, et ouvrez le volet à fond une fois par jour pour le recaler      |
 
 L'intégration journalise tout ce qu'elle fait : consultez les logs de
 l'intégration depuis l'interface de Gladys (ou `docker logs` sur l'hôte), avec

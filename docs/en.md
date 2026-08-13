@@ -117,33 +117,100 @@ under `channel` instead of the flat `pid` / `addr` pair. It stays JSON:
 
 ### Device types
 
-| `type` | Device                | What you get in Gladys                       |
-| ------ | --------------------- | -------------------------------------------- |
-| `0`    | AirSend box           | Its temperature and light sensors            |
-| `1`    | Radio sensor / remote | The readings it emits (see `features` below) |
-| `4096` | Button                | A push button sending TOGGLE                 |
-| `4097` | Switch                | On/Off                                       |
-| `4098` | Shutter               | Open / Stop / Close                          |
-| `4099` | Shutter with position | Open / Stop / Close **+** a 0-100 % position |
-| `4100` | Dimmable light        | On/Off **+** brightness                      |
+| `type` | Device                | What you get in Gladys                          |
+| ------ | --------------------- | ----------------------------------------------- |
+| `0`    | AirSend box           | Its temperature and light sensors               |
+| `1`    | Radio sensor / remote | The readings it emits (see `features` below)    |
+| `4096` | Button                | A push button sending TOGGLE                    |
+| `4097` | Switch                | On/Off                                          |
+| `4098` | Shutter               | Open / Stop / Close (**+** position once timed) |
+| `4099` | Shutter with position | Open / Stop / Close **+** a 0-100 % position    |
+| `4100` | Dimmable light        | On/Off **+** brightness                         |
 
 ### Device options
 
-| Option     | Meaning                                                                    |
-| ---------- | -------------------------------------------------------------------------- |
-| `type`     | Device type (table above), **required**                                    |
-| `channel`  | Radio channel (`id`, `source`, `mac`, `seed`), **required**                |
-| `pid`      | The `channel.id` of the JSON export (use either form)                      |
-| `addr`     | The `channel.source` of the JSON export                                    |
-| `spurl`    | Connection string of this device, if it differs from the global one        |
-| `wait`     | Wait for the radio confirmation before answering (`false` by default)      |
-| `invert`   | Swap open and close, for shutters installed the other way round            |
-| `sensors`  | On a box (`type: 0`), expose its temperature and light sensors             |
-| `refresh`  | Read interval of those sensors, in seconds                                 |
-| `features` | On a sensor (`type: 1`): `temperature`, `humidity`, `illuminance`, `click` |
+| Option              | Meaning                                                                    |
+| ------------------- | -------------------------------------------------------------------------- |
+| `type`              | Device type (table above), **required**                                    |
+| `channel`           | Radio channel (`id`, `source`, `mac`, `seed`), **required**                |
+| `pid`               | The `channel.id` of the JSON export (use either form)                      |
+| `addr`              | The `channel.source` of the JSON export                                    |
+| `spurl`             | Connection string of this device, if it differs from the global one        |
+| `wait`              | Wait for the radio confirmation before answering (`false` by default)      |
+| `invert`            | Swap open and close, for shutters installed the other way round            |
+| `travel_up`         | On a shutter: seconds for a full opening (see below)                       |
+| `travel_down`       | On a shutter: seconds for a full closing                                   |
+| `travel`            | Both at once, for a motor that behaves the same in either direction        |
+| `favorite_position` | On a shutter: the position programmed in the motor, in %                   |
+| `sensors`           | On a box (`type: 0`), expose its temperature and light sensors             |
+| `refresh`           | Read interval of those sensors, in seconds                                 |
+| `features`          | On a sensor (`type: 1`): `temperature`, `humidity`, `illuminance`, `click` |
 
 A box declared without `sensors: true` creates no device in Gladys — it is
 only there to carry the connection string.
+
+## The position of a shutter
+
+A 433 MHz shutter never says where it is: the radio carries orders, not
+positions. What it does have is a **duration** — a given motor always takes the
+same time to travel from one end stop to the other. Time that travel once and
+the position becomes computable.
+
+Time your shutter with a stopwatch, from the moment it starts moving to the
+moment it stops by itself, and write the two durations down:
+
+```json
+{
+  "devices": {
+    "Living room shutter": {
+      "type": 4098,
+      "travel_up": 22,
+      "travel_down": 20,
+      "channel": { "id": 25455, "source": 94311 }
+    }
+  }
+}
+```
+
+From then on the integration follows the shutter second by second, whether the
+order came from Gladys or from a wall remote it heard on the radio (which needs
+the listening channel below). Three things follow:
+
+- a **`4098` gets a position too** — the feature appears as soon as the shutter
+  is timed, and its slider drives the motor with a timed Open/Stop: the
+  integration starts the shutter in the right direction and sends the Stop at
+  the moment the travel says it has arrived;
+- **Stop is honest**: a shutter stopped half-way reports the position it
+  actually reached, instead of keeping the 100 % the order had announced;
+- **the estimate repairs itself**: a shutter allowed to reach an end stop is at
+  exactly 0 % or 100 %, because the motor physically stops there. Every full
+  open or close wipes the error accumulated by the previous partial travels.
+
+Expect around ±5 % of accuracy: a motor slows down under load and in the cold.
+If a shutter drifts, a scenario opening it fully once a day is enough to keep
+it in step.
+
+A shutter you did not time keeps its previous behaviour: Gladys shows the
+destination of the last order, which is all a one-way protocol can offer.
+
+Two more things worth knowing:
+
+- until its first full travel, a timed shutter's position is **unknown**, and
+  the integration publishes nothing rather than inventing a value. Open or
+  close it once and it is set. Asking for a position before that sends the
+  shutter to the nearest end stop, which is exactly what establishes the
+  reference;
+- the position is **remembered across restarts** of the integration: it starts
+  again from the value Gladys kept.
+
+### The favourite position
+
+Many motors have a position of their own, programmed in the hardware (the
+Somfy "my" button). The radio says "go to your position" without ever saying
+what that position is. Measure it once and declare it with
+`"favorite_position": 40`: pressing that button then reports 40 % in Gladys.
+Without it, the shutter is reported as stopped somewhere in between — the
+honest answer.
 
 ## Listening to the radio (optional, needs Gladys Plus)
 
@@ -171,7 +238,8 @@ refreshed by polling.
 
 - 433 MHz is a **one-way** protocol for most equipment: nothing confirms an
   order was received, and Gladys shows the value it sent. Listening (above) is
-  what turns that assumption into a real state.
+  what turns that assumption into a real state, and timing a shutter (above) is
+  what gives it a position.
 - Sensors are read from the **box itself**, over the local channel.
 - The built-in service reaches your box **from inside the integration's
   container**, over your LAN: the `rhost=<IPv4>` of the connection string is
@@ -191,6 +259,8 @@ refreshed by polling.
 | The box is unreachable            | The `?gw=0&rhost=<IPv4>` part of the connection string                                 |
 | `Built-in service unavailable`    | The integration logs: the service logs its own startup there                           |
 | The box answers by hand, not here | The `rhost=` IPv4 must be reachable **from the container**, not just from your desktop |
+| A shutter shows no position       | Time it: `travel_up` / `travel_down`, then open or close it fully once                 |
+| The position drifts over time     | Re-time the travel, and open the shutter fully once a day to resynchronize it          |
 
 The integration logs everything it does: read the integration logs from the
 Gladys UI (or `docker logs` on the host), with `LOG_LEVEL=debug` for the full

@@ -23,6 +23,8 @@ import {
   buildTransportEntries,
   findDeviceByExternalId,
   identifyDevice,
+  restoreDeviceStates,
+  stopDeviceTracking,
 } from './src/devices/index.js';
 import { boxDevices, describeConnection, testConnection } from './src/devmel/connection.js';
 import { AirSendService } from './src/devmel/service.js';
@@ -179,6 +181,18 @@ async function initialize(rawConfig) {
   // publishDiscoveredDevices is idempotent (upsert by external_id).
   await gladys.publishDiscoveredDevices(buildDiscoveredDevices(gladys, config));
 
+  // Resume where the last run left off: the position of a shutter is computed
+  // from the travel of its motor, so it has to start from the value Gladys
+  // kept rather than from "unknown".
+  const known = await gladys.getDevices().catch((err) => {
+    logger.warn(`Could not read back the states of the devices: ${err.message}`);
+    return null;
+  });
+  const restored = await restoreDeviceStates(gladys, config, known);
+  if (restored > 0) {
+    logger.info(`${restored} device(s) resumed from their last known state`);
+  }
+
   eventsWebhookUrl = webhookUrlOf(await gladys.getWebhooks().catch(() => null));
   await startListening();
 
@@ -260,6 +274,7 @@ function parseWebhookBody(request) {
 gladys.handleShutdown(async (signal) => {
   logger.info(`Received ${signal} -> graceful shutdown`);
   stopListening();
+  stopDeviceTracking();
   // The AirSend Web Service daemonizes: nothing would reap it for us.
   await service.stop();
 });
