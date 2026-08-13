@@ -53,9 +53,18 @@ badge, with an orange dot when it ran degraded (local refused, cloud fallback).
 ## The device list
 
 On airsend.cloud, open **Import/Export → Export YAML** and tick `spurl` for the
-local connection. Paste the file as is in the **Devices** field: the
-`!secret spurl` and `!secret apiKey` references it contains are resolved with
-the credentials you filled in above. JSON is accepted too.
+local connection. That export is what the **Devices** field expects, and the
+`!secret spurl` / `!secret apiKey` references it contains are resolved with the
+credentials you filled in above.
+
+The field is a single-line input, so the safest paste is the **JSON** form of
+that list — the same content, on one line:
+
+```json
+{ "Living room shutter": { "type": 4098, "channel": { "id": 25455, "source": 94311 } } }
+```
+
+The YAML export is read as well when the line breaks survive the paste:
 
 ```yaml
 devices:

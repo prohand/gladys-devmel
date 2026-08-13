@@ -60,10 +60,19 @@ son dernier ordre, avec un point orange s'il a fonctionné en mode dégradé
 ## La liste d'appareils
 
 Sur airsend.cloud, ouvrez **Import/Export → Export YAML** et cochez `spurl`
-pour la connexion locale. Collez le fichier tel quel dans le champ
-**Appareils** : les références `!secret spurl` et `!secret apiKey` qu'il
-contient sont résolues avec les identifiants saisis plus haut. Le JSON est
-également accepté.
+pour la connexion locale. C'est cet export qu'attend le champ **Appareils**,
+et les références `!secret spurl` / `!secret apiKey` qu'il contient sont
+résolues avec les identifiants saisis plus haut.
+
+Le champ est une saisie sur une seule ligne : le collage le plus sûr est donc
+la forme **JSON** de cette liste — le même contenu, sur une ligne :
+
+```json
+{ "Volet salon": { "type": 4098, "channel": { "id": 25455, "source": 94311 } } }
+```
+
+L'export YAML est lu également, tant que les retours à la ligne survivent au
+collage :
 
 ```yaml
 devices:
