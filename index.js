@@ -25,9 +25,14 @@ import {
   identifyDevice,
 } from './src/devices/index.js';
 import { boxDevices, describeConnection, testConnection } from './src/devmel/connection.js';
+import { AirSendService } from './src/devmel/service.js';
 
 const gladys = new GladysIntegration();
 const client = new AirSendClient();
+
+// The AirSend Web Service, running in this very container unless the user
+// pointed the configuration at one of their own.
+const service = new AirSendService();
 
 // Current configuration (hot-reloaded via onConfigUpdated).
 let config = normalizeConfig();
@@ -112,7 +117,7 @@ gladys.onWebhookUpdated(async (info) => {
 // --- Manifest actions: buttons in the Configuration screen -------------------
 gladys.onAction('test_connection', async () => {
   logger.info('Action test_connection');
-  return testConnection(client, config);
+  return testConnection(client, config, service);
 });
 
 // The `identify` action targets ONE device chosen by the user: its manifest
@@ -161,6 +166,13 @@ gladys.on('disconnected', () => {
  */
 async function initialize(rawConfig) {
   config = normalizeConfig(rawConfig);
+
+  // Before anything talks to the box: bring the local channel up. `apply()`
+  // starts the bundled service, stops it when the user switched to their own,
+  // and never throws — a missing local channel is not a reason to give up on
+  // airsend.cloud.
+  await service.apply(config);
+
   client.configure(config);
   logger.info(`${config.devmelDevices.length} Devmel device(s) configured`);
 
@@ -175,7 +187,7 @@ async function initialize(rawConfig) {
   // Application-level status, shown in the Configuration screen: distinct from
   // the container state machine, an integration can be RUNNING and still unable
   // to reach the box.
-  const status = await describeConnection(client, config);
+  const status = await describeConnection(client, config, service);
   await gladys.setConnectionStatus(status.connected, status.message);
 }
 
@@ -247,9 +259,11 @@ function parseWebhookBody(request) {
 }
 
 // --- Graceful shutdown -------------------------------------------------------
-gladys.handleShutdown((signal) => {
+gladys.handleShutdown(async (signal) => {
   logger.info(`Received ${signal} -> graceful shutdown`);
   stopListening();
+  // The AirSend Web Service daemonizes: nothing would reap it for us.
+  await service.stop();
 });
 
 // --- Startup -----------------------------------------------------------------

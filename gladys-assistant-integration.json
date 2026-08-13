@@ -27,27 +27,41 @@
       "type": "section",
       "label": { "en": "Getting started", "fr": "Pour commencer" },
       "description": {
-        "en": "Devices are configured in the AirSend app, then exported from airsend.cloud (Import/Export -> Export YAML, with the spurl option for the local connection). Paste that export below: the integration reads it as is.",
-        "fr": "Les appareils se configurent dans l'application AirSend, puis s'exportent depuis airsend.cloud (Import/Export -> Export YAML, avec l'option spurl pour la connexion locale). Collez cet export ci-dessous : l'intégration le lit tel quel."
+        "en": "The AirSend Web Service is included: it runs inside this integration, on http://127.0.0.1:33863, and there is nothing to install on your network. All it needs is the sp:// connection string of your box. Devices are configured in the AirSend app, then exported from airsend.cloud (Import/Export -> Export YAML, with the spurl option): paste that export below, the integration reads it as is.",
+        "fr": "Le service AirSend est inclus : il tourne dans cette intégration, sur http://127.0.0.1:33863, et il n'y a rien à installer sur votre réseau. Il lui faut seulement la chaîne de connexion sp:// de votre boîtier. Les appareils se configurent dans l'application AirSend, puis s'exportent depuis airsend.cloud (Import/Export -> Export YAML, avec l'option spurl) : collez cet export ci-dessous, l'intégration le lit tel quel."
       },
       "links": [
         {
-          "url": "https://airsend.cloud",
+          "url": "https://app.airsend.cloud",
           "label": { "en": "airsend.cloud", "fr": "airsend.cloud" }
         },
         {
-          "url": "https://github.com/prohand/gladys-devmel",
+          "url": "https://github.com/prohand/gladys-devmel/blob/main/docs/en.md",
           "label": { "en": "Integration documentation", "fr": "Documentation de l'intégration" }
         }
       ]
+    },
+    {
+      "key": "use_embedded_service",
+      "type": "boolean",
+      "label": {
+        "en": "Use the built-in AirSend service",
+        "fr": "Utiliser le service AirSend intégré"
+      },
+      "description": {
+        "en": "Run the AirSend Web Service inside the integration, on http://127.0.0.1:33863. Leave it on unless you already run that service elsewhere on your network.",
+        "fr": "Fait tourner le service AirSend dans l'intégration, sur http://127.0.0.1:33863. Laissez activé, sauf si vous faites déjà tourner ce service ailleurs sur votre réseau."
+      },
+      "required": false,
+      "default": true
     },
     {
       "key": "service_url",
       "type": "string",
       "label": { "en": "AirSend Web Service URL", "fr": "URL du service AirSend" },
       "description": {
-        "en": "Address of the AirSend Web Service on your network, e.g. http://192.168.1.50:33863/. Required for the local connection and for sensors.",
-        "fr": "Adresse du service AirSend sur votre réseau, par exemple http://192.168.1.50:33863/. Nécessaire pour la connexion locale et pour les capteurs."
+        "en": "Only if you run the AirSend Web Service yourself (Home Assistant add-on, Jeedom daemon, your own container): its address on your network, e.g. http://192.168.1.50:33863/. Leave empty to use the built-in one.",
+        "fr": "Uniquement si vous faites tourner le service AirSend vous-même (add-on Home Assistant, démon Jeedom, votre propre conteneur) : son adresse sur votre réseau, par exemple http://192.168.1.50:33863/. Laissez vide pour utiliser celui intégré."
       },
       "required": false,
       "placeholder": {
@@ -70,12 +84,38 @@
       }
     },
     {
+      "key": "cloud",
+      "type": "section",
+      "label": { "en": "airsend.cloud (optional)", "fr": "airsend.cloud (facultatif)" },
+      "description": {
+        "en": "The cloud channel is a fallback: it takes over when the box cannot be reached locally, and it can only send orders (sensors and radio listening are local-only). Skip this block entirely if you do not want it. The API key belongs to your airsend.cloud account, where your devices are declared: sign in and look for the API key of your account. It also travels in the YAML export, as the !secret apiKey reference this field fills in.",
+        "fr": "Le canal cloud est un repli : il prend le relais quand le boîtier est injoignable en local, et il ne sait qu'envoyer des ordres (capteurs et écoute radio sont uniquement locaux). Passez ce bloc si vous n'en voulez pas. La clé d'API est celle de votre compte airsend.cloud, là où vos appareils sont déclarés : connectez-vous et cherchez la clé d'API de votre compte. Elle voyage aussi dans l'export YAML, sous la référence !secret apiKey que ce champ vient remplir."
+      },
+      "links": [
+        {
+          "url": "https://app.airsend.cloud",
+          "label": {
+            "en": "Open my airsend.cloud account",
+            "fr": "Ouvrir mon compte airsend.cloud"
+          }
+        },
+        {
+          "url": "https://asp.devmel.com/api-docs",
+          "label": { "en": "airsend.cloud API reference", "fr": "Référence de l'API airsend.cloud" }
+        },
+        {
+          "url": "https://github.com/prohand/gladys-devmel/blob/main/docs/en.md#the-cloud-api-key",
+          "label": { "en": "Where to find the key", "fr": "Où trouver la clé" }
+        }
+      ]
+    },
+    {
       "key": "api_key",
       "type": "secret",
       "label": { "en": "airsend.cloud API key", "fr": "Clé d'API airsend.cloud" },
       "description": {
-        "en": "Used as a fallback when the local box is unreachable, and as the only channel if you do not run the AirSend Web Service.",
-        "fr": "Utilisée en repli quand le boîtier local est injoignable, et comme unique canal si vous ne faites pas tourner le service AirSend."
+        "en": "Optional. Used as a fallback when the local box is unreachable, and as the only channel if you turn the AirSend service off. Each device also needs its airsend.cloud id for this channel to work.",
+        "fr": "Facultative. Utilisée en repli quand le boîtier local est injoignable, et comme unique canal si vous désactivez le service AirSend. Chaque appareil doit aussi porter son identifiant airsend.cloud pour que ce canal fonctionne."
       },
       "required": false
     },

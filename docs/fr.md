@@ -19,38 +19,73 @@ mieux : ils se relaient.
 ### Local (recommandé)
 
 Le canal local dialogue avec le **service web AirSend**, le petit serveur HTTP
-fourni par Devmel pour piloter le boîtier depuis votre réseau. Faites-le
-tourner où vous voulez sur le réseau (l'add-on Home Assistant, le démon
-Jeedom, ou le binaire dans son propre conteneur) ; il écoute sur le port
-`33863`.
+fourni par Devmel pour piloter le boîtier depuis votre réseau.
 
-Vous aurez besoin :
+**Il est inclus.** L'intégration le fait tourner dans son propre conteneur, sur
+`http://127.0.0.1:33863`, et le surveille : rien à installer à côté de Gladys,
+aucune URL à renseigner. C'est l'interrupteur **Utiliser le service AirSend
+intégré**, activé par défaut, qui le commande.
 
-- de son URL, par exemple `http://192.168.1.50:33863/` ;
-- de la **chaîne de connexion** exportée par airsend.cloud, de la forme
-  `sp://motdepasse@[fe80::xxxx:xxxx:xxxx:xxxx]?gw=0&rhost=192.168.1.50`.
+La seule chose que le canal local attend de vous est donc la **chaîne de
+connexion** exportée par airsend.cloud, de la forme :
+
+```
+sp://motdepasse@[fe80::xxxx:xxxx:xxxx:xxxx]?gw=0&rhost=192.168.1.50
+```
 
 Conservez toujours la partie `?gw=0&rhost=<IPv4 du boîtier>` : sans elle le
 boîtier n'est joignable qu'en IPv6 lien-local et le service renvoie des
 erreurs inattendues.
 
+#### Utiliser un service que vous faites déjà tourner
+
+Si le service web AirSend tourne déjà quelque part sur votre réseau — l'add-on
+Home Assistant, le démon Jeedom, un conteneur à vous — renseignez simplement le
+champ **URL du service AirSend** (`http://192.168.1.50:33863/`). Une URL saisie
+là l'emporte : l'intégration l'utilise et ne démarre rien de son côté.
+
 ### Cloud
 
 Le canal cloud appelle directement `airsend.cloud` avec la **clé d'API** de
-votre compte. Il ne demande aucun service local, mais il ne sait qu'envoyer
-des ordres : les capteurs et les trames radio entrantes sont réservés au
-canal local.
+votre compte. C'est un **repli**, totalement facultatif : il prend le relais
+quand le boîtier est injoignable en local. Il ne sait qu'envoyer des ordres —
+les capteurs et les trames radio entrantes sont réservés au canal local — et
+chaque appareil doit porter son `id` airsend.cloud pour qu'il fonctionne.
+
+#### La clé d'API du cloud
+
+La clé est celle de votre **compte airsend.cloud**, celui où vos appareils sont
+déclarés : connectez-vous sur [app.airsend.cloud](https://app.airsend.cloud) et
+cherchez la clé d'API de votre compte.
+
+Deux choses à savoir avant de partir à sa recherche :
+
+- **vous n'en avez probablement pas besoin.** Avec le service intégré
+  ci-dessus, le canal local fonctionne seul ; la clé n'achète qu'un repli pour
+  les moments où le boîtier est injoignable, et les ordres envoyés pendant ce
+  temps-là ;
+- **elle est peut-être déjà dans votre export.** L'export YAML la référence
+  sous la forme `!secret apiKey`, et ce champ est ce que cette référence vient
+  chercher. Un export qui porte la clé en clair (`apiKey: xxxxx`) est utilisé
+  tel quel, appareil par appareil — rien à renseigner du tout.
+
+L'API elle-même est documentée sur
+[asp.devmel.com/api-docs](https://asp.devmel.com/api-docs).
 
 ## Configuration
 
 1. Ouvrez l'onglet **Configuration** de l'intégration.
-2. Renseignez l'**URL du service AirSend** et la **chaîne de connexion**,
-   et/ou la **clé d'API airsend.cloud**.
+2. Collez la **chaîne de connexion** de votre boîtier. C'est suffisant : le
+   service AirSend tourne déjà dans l'intégration.
 3. Collez votre **liste d'appareils** (voir plus bas).
 4. Enregistrez, puis cliquez sur **Tester la connexion** : le résultat indique
-   l'état des deux canaux et le nombre d'appareils compris.
+   l'état du service intégré, des deux canaux, et le nombre d'appareils
+   compris.
 5. Les appareils apparaissent dans l'onglet **Découverte**, prêts à être
    ajoutés à Gladys.
+
+L'**URL du service AirSend** et la **clé d'API airsend.cloud** ne servent que
+dans les deux cas décrits plus haut : un service à vous, et le repli cloud.
 
 L'interrupteur **Préférer la connexion locale** décide du canal essayé en
 premier. Chaque appareil affiche en pastille le canal qui a réellement porté
@@ -165,19 +200,25 @@ boîtier sont rafraîchis par interrogation périodique.
   équipements : rien ne confirme qu'un ordre a été reçu, et Gladys affiche la
   valeur envoyée. L'écoute (ci-dessus) transforme cette hypothèse en état réel.
 - Les capteurs sont lus **dans le boîtier** : ils nécessitent le canal local.
+- Le service intégré joint votre boîtier **depuis le conteneur de
+  l'intégration**, à travers votre réseau : le `rhost=<IPv4>` de la chaîne de
+  connexion est l'adresse qu'il compose, et elle doit être routable depuis
+  l'hôte Gladys.
 - Changer le `type` d'un appareil dans la liste crée un nouvel appareil dans
   Gladys (l'identifiant change) — sauf entre `4098` et `4099`, qui le
   partagent.
 
 ## En cas de problème
 
-| Symptôme                           | À vérifier                                                    |
-| ---------------------------------- | ------------------------------------------------------------- |
-| `Invalid connection string`        | L'URL `sp://`, et que son mot de passe correspond au boîtier  |
-| `Invalid input`                    | Le `channel` de l'appareil (`id` et `source`)                 |
-| `no radio confirmation`            | Normal sans retour d'état : laissez `wait: false`             |
-| Aucun appareil dans « Découverte » | **Tester la connexion** : la liste n'a sans doute pas été lue |
-| Le boîtier est injoignable         | La partie `?gw=0&rhost=<IPv4>` de la chaîne de connexion      |
+| Symptôme                               | À vérifier                                                                             |
+| -------------------------------------- | -------------------------------------------------------------------------------------- |
+| `Invalid connection string`            | L'URL `sp://`, et que son mot de passe correspond au boîtier                           |
+| `Invalid input`                        | Le `channel` de l'appareil (`id` et `source`)                                          |
+| `no radio confirmation`                | Normal sans retour d'état : laissez `wait: false`                                      |
+| Aucun appareil dans « Découverte »     | **Tester la connexion** : la liste n'a sans doute pas été lue                          |
+| Le boîtier est injoignable             | La partie `?gw=0&rhost=<IPv4>` de la chaîne de connexion                               |
+| `Service AirSend intégré indisponible` | Les logs de l'intégration : le service y journalise son démarrage                      |
+| Le boîtier répond à la main, pas ici   | L'IPv4 `rhost=` doit être joignable **depuis le conteneur**, pas seulement de votre PC |
 
 L'intégration journalise tout ce qu'elle fait : consultez les logs de
 l'intégration depuis l'interface de Gladys (ou `docker logs` sur l'hôte), avec

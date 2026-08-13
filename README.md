@@ -34,11 +34,19 @@ Two transports, declared in the manifest and selected by the standard
 **"Prefer the local connection"** toggle:
 
 - **local** — the [AirSend Web Service](https://github.com/devmel/hass_airsend-addon)
-  on the LAN (port `33863`): `POST /airsend/transfer` to send radio notes,
+  (port `33863`): `POST /airsend/transfer` to send radio notes,
   `POST /airsend/bind` to subscribe to the ones it hears, authenticated with the
   `sp://` connection string;
 - **cloud** — `GET https://airsend.cloud/device/<id>/<action>/<value>/` with the
   account API key. Commands only.
+
+The image **ships that service** and runs it in the integration's own
+container, on `http://127.0.0.1:33863`: a fresh install needs the connection
+string of the box and nothing else. `src/devmel/service.js` starts it, watches
+it and restarts it; the binary comes from Devmel at build time (see the
+`Dockerfile`), daemonizes, and leaves its pid in `AirSendWebService.lock` in
+`/data`. Filling in the service URL by hand still wins, for anyone who already
+runs it elsewhere.
 
 Each one is the other's fallback: a device reports the channel that actually
 carried its last order (`publishTransports`), flagged **degraded** when the
@@ -59,6 +67,7 @@ working.
 │  ├─ config.js                      # config defaults + the airsend.cloud device list parser
 │  ├─ devmel/                        # the AirSend driver
 │  │  ├─ client.js                   #   local + cloud transport, fallback, transport badge
+│  │  ├─ service.js                  #   the bundled AirSend Web Service (start, watch, stop)
 │  │  ├─ notes.js                    #   the radio "notes" protocol (build & decode)
 │  │  └─ connection.js               #   connection status + the "Test the connection" action
 │  └─ devices/                       # one file per device type
@@ -90,6 +99,15 @@ The three `GLADYS_*` variables are injected by the Gladys supervisor when the
 integration runs inside its sandboxed container. The SDK reads them
 automatically.
 
+Outside the image there is no bundled AirSend Web Service, so the local channel
+is simply reported as unavailable. To exercise it, unpack Devmel's tarball
+somewhere and point the two optional variables at it:
+
+```bash
+DEVMEL_SERVICE_DIR=/opt/airsend   # holds bin/unix/<arch>/AirSendWebService
+DEVMEL_DATA_DIR=/tmp/gladys-devmel # writable, for the daemon's pid file
+```
+
 ## Quality checks
 
 The same three checks run on every push and pull request (see
@@ -120,8 +138,12 @@ carry the `gladys-assistant-integration` GitHub topic.
 
 The AirSend HTTP API and its radio note protocol are the ones Devmel documents
 through its official [Home Assistant](https://github.com/devmel/hass_airsend)
-and [Jeedom](https://github.com/devmel/jeedom_airsend) integrations. This
-project is not affiliated with Devmel.
+and [Jeedom](https://github.com/devmel/jeedom_airsend) integrations. The
+AirSend Web Service the image bundles is Devmel's own binary, downloaded at
+build time from `devmel.com` exactly as their
+[Home Assistant add-on](https://github.com/devmel/hass_airsend-addon) does; it
+is redistributed unmodified and remains their work. This project is not
+affiliated with Devmel.
 
 ## License
 

@@ -17,34 +17,70 @@ back each other up.
 ### Local (recommended)
 
 The local channel talks to the **AirSend Web Service**, the small HTTP server
-Devmel ships to drive the box over your LAN. Run it wherever you like on the
-network (the Home Assistant add-on, the Jeedom daemon, or the binary in its
-own container); it listens on port `33863`.
+Devmel ships to drive the box over your LAN.
 
-You need:
+**It is included.** The integration runs it inside its own container, on
+`http://127.0.0.1:33863`, and supervises it: nothing to install next to
+Gladys, no URL to fill in. The **Use the built-in AirSend service** switch, on
+by default, is what controls it.
 
-- its URL, e.g. `http://192.168.1.50:33863/`;
-- the **connection string** exported by airsend.cloud, which looks like
-  `sp://password@[fe80::xxxx:xxxx:xxxx:xxxx]?gw=0&rhost=192.168.1.50`.
+So the only thing the local channel needs from you is the **connection
+string** exported by airsend.cloud, which looks like:
+
+```
+sp://password@[fe80::xxxx:xxxx:xxxx:xxxx]?gw=0&rhost=192.168.1.50
+```
 
 Always keep the `?gw=0&rhost=<box IPv4>` part: without it the box is reached
 by IPv6 link-local only and the service answers unexpected errors.
 
+#### Using a service you already run
+
+If the AirSend Web Service is already running somewhere on your network — the
+Home Assistant add-on, the Jeedom daemon, a container of your own — just fill
+in the **AirSend Web Service URL** field (`http://192.168.1.50:33863/`). A URL
+typed there wins: the integration uses it and starts nothing of its own.
+
 ### Cloud
 
 The cloud channel calls `airsend.cloud` directly with your account **API key**.
-It needs no local service, but it can only send orders: sensors and incoming
-radio frames are local-only features.
+It is a **fallback**, entirely optional: it takes over when the box cannot be
+reached locally. It can only send orders — sensors and incoming radio frames
+are local-only features — and each device needs its airsend.cloud `id` for it
+to work.
+
+#### The cloud API key
+
+The key belongs to your **airsend.cloud account**, the one where your devices
+are declared: sign in on [app.airsend.cloud](https://app.airsend.cloud) and
+look for the API key of your account.
+
+Two things worth knowing before you go hunting for it:
+
+- **you probably do not need it.** With the built-in service above, the local
+  channel works on its own; the key only buys you a fallback for when the box
+  is unreachable, and orders sent while it is;
+- **it may already be in your export.** The YAML export references it as
+  `!secret apiKey`, and this field is what that reference resolves to. An
+  export that carries the key inline (`apiKey: xxxxx`) is used as is, per
+  device — nothing to fill in at all.
+
+The API itself is documented at
+[asp.devmel.com/api-docs](https://asp.devmel.com/api-docs).
 
 ## Configuration
 
 1. Open the **Configuration** tab of the integration.
-2. Fill in the **AirSend Web Service URL** and the **connection string**,
-   and/or the **airsend.cloud API key**.
+2. Paste the **connection string** of your box. That is enough: the AirSend
+   service is already running inside the integration.
 3. Paste your **device list** (see below).
-4. Save, then click **Test the connection**: it reports both channels and how
-   many devices it understood.
+4. Save, then click **Test the connection**: it reports the built-in service,
+   both channels, and how many devices it understood.
 5. The devices appear in the **Discovery** tab, ready to be added to Gladys.
+
+The **AirSend Web Service URL** and the **airsend.cloud API key** are only
+needed in the two cases described above: a service of your own, and the cloud
+fallback.
 
 The **Prefer the local connection** toggle decides which channel is tried
 first. Each device shows the channel that actually carried its last order as a
@@ -156,18 +192,23 @@ refreshed by polling.
   order was received, and Gladys shows the value it sent. Listening (above) is
   what turns that assumption into a real state.
 - Sensors are read from the **box itself**, so they need the local channel.
+- The built-in service reaches your box **from inside the integration's
+  container**, over your LAN: the `rhost=<IPv4>` of the connection string is
+  the address it dials, and it has to be routable from the Gladys host.
 - Changing the `type` of a device in the list creates a new device in Gladys
   (the identifier changes) — except between `4098` and `4099`, which share it.
 
 ## Troubleshooting
 
-| Symptom                        | What to check                                                   |
-| ------------------------------ | --------------------------------------------------------------- |
-| `Invalid connection string`    | The `sp://` URL, and that its password matches the box          |
-| `Invalid input`                | The `channel` of the device (`id` and `source`)                 |
-| `no radio confirmation`        | Normal on equipment without feedback: set `wait: false`         |
-| No device in the Discovery tab | **Test the connection**: the device list probably did not parse |
-| The box is unreachable         | The `?gw=0&rhost=<IPv4>` part of the connection string          |
+| Symptom                           | What to check                                                                          |
+| --------------------------------- | -------------------------------------------------------------------------------------- |
+| `Invalid connection string`       | The `sp://` URL, and that its password matches the box                                 |
+| `Invalid input`                   | The `channel` of the device (`id` and `source`)                                        |
+| `no radio confirmation`           | Normal on equipment without feedback: set `wait: false`                                |
+| No device in the Discovery tab    | **Test the connection**: the device list probably did not parse                        |
+| The box is unreachable            | The `?gw=0&rhost=<IPv4>` part of the connection string                                 |
+| `Built-in service unavailable`    | The integration logs: the service logs its own startup there                           |
+| The box answers by hand, not here | The `rhost=` IPv4 must be reachable **from the container**, not just from your desktop |
 
 The integration logs everything it does: read the integration logs from the
 Gladys UI (or `docker logs` on the host), with `LOG_LEVEL=debug` for the full
