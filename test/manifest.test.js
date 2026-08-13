@@ -34,6 +34,57 @@ test('every manifest webhook is handled in index.js', () => {
   }
 });
 
+// The store schema is the admission authority: a field type outside this list,
+// or a placeholder that is not a multi-language object, gets the integration
+// rejected by the indexer.
+const FIELD_TYPES = [
+  'string',
+  'number',
+  'boolean',
+  'select',
+  'multi_select',
+  'secret',
+  'oauth2',
+  'section',
+];
+
+test('every field uses a type the store accepts', () => {
+  const allFields = [
+    ...manifest.config_schema,
+    ...(manifest.actions ?? []).flatMap((a) => a.fields ?? []),
+  ];
+  for (const field of allFields) {
+    assert.ok(
+      FIELD_TYPES.includes(field.type),
+      `field "${field.key}": unknown type "${field.type}"`,
+    );
+    assert.match(field.key, /^[a-z0-9_]+$/, `field key "${field.key}" must be snake_case`);
+    if (field.placeholder !== undefined) {
+      // Placeholders are multi-language objects, and only string/number/secret
+      // fields may carry one.
+      assert.equal(typeof field.placeholder, 'object', `field "${field.key}": placeholder object`);
+      assert.ok(field.placeholder.en, `field "${field.key}": placeholder needs English`);
+      assert.ok(
+        ['string', 'number', 'secret'].includes(field.type),
+        `field "${field.key}": a ${field.type} field cannot have a placeholder`,
+      );
+    }
+    if (field.min !== undefined || field.max !== undefined) {
+      assert.equal(field.type, 'number', `field "${field.key}": min/max are number-only`);
+    }
+  }
+});
+
+test('the description fits what the store allows', () => {
+  assert.ok(manifest.name.length >= 3 && manifest.name.length <= 30);
+  for (const [language, text] of Object.entries(manifest.description)) {
+    assert.ok(
+      text.length >= 10 && text.length <= 100,
+      `description.${language} must be 10-100 characters, got ${text.length}`,
+    );
+  }
+});
+
 test('config_schema defaults stay consistent with DEFAULT_CONFIG', () => {
   for (const field of manifest.config_schema) {
     if (field.default !== undefined) {
