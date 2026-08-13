@@ -168,3 +168,33 @@ test('turning the bundled service off leaves no local channel at all', () => {
   assert.equal(config.embeddedService, false);
   assert.equal(config.effectiveServiceUrl, '');
 });
+
+test('parseDevices reads the travel times a shutter position is computed from', () => {
+  const [timed, symmetrical, plain] = parseDevices(
+    `{"devices":{
+      "Timed": { "type": 4098, "travel_up": 22, "travel_down": "19.5", "favorite_position": 40,
+                 "channel": { "id": 1 } },
+      "Symmetrical": { "type": 4098, "travel": 20, "channel": { "id": 2 } },
+      "Plain": { "type": 4098, "travel_up": 0, "favorite_position": 250, "channel": { "id": 3 } }
+    }}`,
+  );
+
+  assert.equal(timed.travelUp, 22);
+  assert.equal(timed.travelDown, 19.5);
+  assert.equal(timed.favoritePosition, 40);
+
+  // One time for a motor that behaves the same both ways.
+  assert.equal(symmetrical.travelUp, 20);
+  assert.equal(symmetrical.travelDown, 20);
+
+  // Nonsense is dropped rather than tracked: an untimed shutter keeps the
+  // behaviour it had before, a percentage stays a percentage.
+  assert.equal(plain.travelUp, null);
+  assert.equal(plain.travelDown, null);
+  assert.equal(plain.favoritePosition, 100);
+
+  // A shutter that was never timed says so, instead of defaulting to a value.
+  const [untimed] = parseDevices('[{"name":"Untimed","type":4099,"channel":{"id":4}}]');
+  assert.equal(untimed.travelUp, null);
+  assert.equal(untimed.favoritePosition, null);
+});

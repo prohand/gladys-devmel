@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  COMMANDS,
   decodeNotes,
   isSameChannel,
   levelNote,
@@ -66,12 +67,34 @@ test('the other notes keep their own kind', () => {
     ]),
     [
       { kind: READINGS.TOGGLE, value: 'TOGGLE' },
-      { kind: READINGS.STATE, value: 'stop' },
+      { kind: READINGS.STATE, value: 'stop', command: COMMANDS.STOP },
       { kind: READINGS.HUMIDITY, value: 63 },
       { kind: READINGS.ILLUMINANCE, value: 1451 },
       { kind: READINGS.LEVEL, value: 30 },
     ],
   );
+});
+
+test('a movement order is told apart from a position the hardware reported', () => {
+  const [up, down, stop, favorite, on, level] = decodeNotes([
+    { type: NOTE_TYPES.STATE, value: STATE_VALUES.UP },
+    { type: NOTE_TYPES.STATE, value: STATE_VALUES.CLOSE },
+    { type: NOTE_TYPES.STATE, value: STATE_VALUES.STOP },
+    { type: NOTE_TYPES.STATE, value: STATE_VALUES.USERPOSITION },
+    { type: NOTE_TYPES.STATE, value: STATE_VALUES.ON },
+    { type: NOTE_TYPES.LEVEL, value: 100 },
+  ]);
+
+  // An order says where the device is going...
+  assert.equal(up.command, COMMANDS.UP);
+  assert.equal(down.command, COMMANDS.DOWN);
+  assert.equal(stop.command, COMMANDS.STOP);
+  assert.equal(favorite.command, COMMANDS.FAVORITE);
+  // ...a level says where it is, and so does the ON of a switch.
+  assert.equal(on.command, undefined);
+  assert.equal(level.command, undefined);
+  assert.equal(up.value, 100);
+  assert.equal(level.value, 100);
 });
 
 test('unreadable notes are ignored instead of crashing the event loop', () => {

@@ -77,6 +77,22 @@ export const READINGS = {
   DATA: 'data',
 };
 
+/**
+ * Movement orders, carried by the `command` field of a decoded reading.
+ *
+ * The distinction matters for anything that moves over time: a shutter that
+ * hears UP is *starting to open*, it is not at 100 %. The level such an order
+ * decodes to is where the device will end up, not where it is — only a reading
+ * with no `command` is a position the hardware actually reported.
+ */
+export const COMMANDS = {
+  UP: 'up',
+  DOWN: 'down',
+  STOP: 'stop',
+  /** The position the device was programmed with (Somfy "my", MIDDLE, USERPOSITION). */
+  FAVORITE: 'favorite',
+};
+
 /** Build a `{ method: SET, type: STATE, value }` note. */
 export function stateNote(value) {
   return { method: NOTE_METHODS.SET, type: NOTE_TYPES.STATE, value };
@@ -101,12 +117,16 @@ export function clampLevel(level) {
  * Decode the notes carried by an AirSend event into plain readings.
  *
  * Mirrors the conversion the official Home Assistant add-on does, notably:
- *   - ON/OFF and UP/DOWN are reported as a 0/100 level, because that is what
- *     the hardware means (a shutter that went up is at 100 %);
+ *   - ON/OFF and UP/DOWN are reported as a 0/100 level, because that is where
+ *     the hardware ends up;
  *   - temperatures come in Kelvin and are converted to Celsius.
  *
+ * A movement order additionally carries `command` (see {@link COMMANDS}): the
+ * level of an UP is a destination, and a reader that cares about the journey —
+ * a shutter — must not mistake it for a measured position.
+ *
  * @param {Array<{type: number|string, value: unknown}>} notes
- * @returns {Array<{ kind: string, value: number|string }>}
+ * @returns {Array<{ kind: string, value: number|string, command?: string }>}
  */
 export function decodeNotes(notes) {
   if (!Array.isArray(notes)) {
@@ -160,18 +180,20 @@ function decodeStateNote(raw) {
     case STATE_VALUES.TOGGLE:
       return { kind: READINGS.TOGGLE, value: STATE_LABELS[value] };
     case STATE_VALUES.OFF:
-    case STATE_VALUES.DOWN:
-    case STATE_VALUES.CLOSE:
       return { kind: READINGS.LEVEL, value: 0 };
     case STATE_VALUES.ON:
+      return { kind: READINGS.LEVEL, value: 100 };
+    case STATE_VALUES.DOWN:
+    case STATE_VALUES.CLOSE:
+      return { kind: READINGS.LEVEL, value: 0, command: COMMANDS.DOWN };
     case STATE_VALUES.UP:
     case STATE_VALUES.OPEN:
-      return { kind: READINGS.LEVEL, value: 100 };
+      return { kind: READINGS.LEVEL, value: 100, command: COMMANDS.UP };
     case STATE_VALUES.STOP:
-      return { kind: READINGS.STATE, value: 'stop' };
+      return { kind: READINGS.STATE, value: 'stop', command: COMMANDS.STOP };
     case STATE_VALUES.MIDDLE:
     case STATE_VALUES.USERPOSITION:
-      return { kind: READINGS.STATE, value: 'user' };
+      return { kind: READINGS.STATE, value: 'user', command: COMMANDS.FAVORITE };
     default:
       return { kind: READINGS.STATE, value: STATE_LABELS[value] ?? String(value) };
   }

@@ -172,6 +172,17 @@ function normalizeDevice(name, entry, config) {
     wait: toBoolean(entry.wait, false),
     // Some covers are wired the other way round (sun sails, screens).
     invert: toBoolean(entry.invert, false),
+    // How long a full travel takes, in seconds. This is what makes the position
+    // of a one-way shutter computable (see src/devmel/travel.js); a single
+    // `travel` serves both directions when the motor is symmetrical.
+    travelUp: toPositiveNumber(firstNumber(entry.travel_up, entry.travelUp, entry.travel), null),
+    travelDown: toPositiveNumber(
+      firstNumber(entry.travel_down, entry.travelDown, entry.travel),
+      null,
+    ),
+    // Where the shutter goes when its own "favourite position" order is used
+    // (the Somfy "my" button): the hardware knows it, the radio does not say it.
+    favoritePosition: toPercentage(firstNumber(entry.favorite_position, entry.favoritePosition)),
     // The AirSend box carries a temperature and a light sensor.
     sensors: toBoolean(entry.sensors, false),
     refresh: toPositiveNumber(entry.refresh, config.poll_frequency),
@@ -307,6 +318,15 @@ function toBoolean(value, fallback) {
 function toPositiveNumber(value, fallback) {
   const number = Number(value);
   return Number.isFinite(number) && number > 0 ? number : fallback;
+}
+
+/** A 0-100 percentage, or null when the user did not give one. */
+function toPercentage(value) {
+  if (value === undefined || value === null || value === '') {
+    return null;
+  }
+  const number = Number(value);
+  return Number.isFinite(number) ? Math.max(0, Math.min(100, Math.round(number))) : null;
 }
 
 function slug(value) {

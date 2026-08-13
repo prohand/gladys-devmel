@@ -8,10 +8,14 @@ import {
   findBlueprintByType,
   findDeviceByExternalId,
   identifyDevice,
+  restoreDeviceStates,
 } from '../src/devices/index.js';
+import { shutter } from '../src/devices/shutter.js';
 import { NOTE_TYPES, STATE_VALUES } from '../src/devmel/notes.js';
+import { ShutterTravel } from '../src/devmel/travel.js';
 import { createFakeGladys } from './helpers/fakeGladys.js';
 import { createFakeClient } from './helpers/fakeAirSend.js';
+import { createFakeClock } from './helpers/fakeClock.js';
 
 const DEVICES = JSON.stringify({
   devices: {
@@ -253,4 +257,250 @@ test('identify pings the chosen device and answers in both languages', async () 
   // A radio sensor cannot be asked anything: it only talks.
   const unknown = await identifyDevice(gladys, 'sensor:600-6', { config, client });
   assert.match(unknown.en, /cannot signal itself/);
+});
+
+// --- Timed shutters ----------------------------------------------------------
+// The radio says nothing about where a shutter is; a shutter given its travel
+// times has its position computed instead (see src/devmel/travel.js).
+
+const TIMED_DEVICES = JSON.stringify({
+  devices: {
+    // A plain 4098 — no positionable motor — but timed, so it gets a position.
+    'Timed shutter': {
+      type: 4098,
+      travel_up: 20,
+      travel_down: 10,
+      channel: { id: 700, source: 7 },
+    },
+    // Installed upside down, symmetrical, with a programmed "my" position.
+    'Sun sail': {
+      type: 4099,
+      invert: true,
+      travel: 10,
+      favorite_position: 40,
+      channel: { id: 800, source: 8 },
+    },
+  },
+});
+
+function setupTimed(t) {
+  const gladys = createFakeGladys();
+  const config = normalizeConfig({
+    devices: TIMED_DEVICES,
+    spurl: 'sp://pass@[fe80::1]?rhost=192.168.1.50',
+  });
+  const client = createFakeClient({ config });
+  const clock = createFakeClock();
+  const previous = shutter.travel;
+  shutter.travel = new ShutterTravel({ now: clock.now, timers: clock.timers, tickMs: 1000 });
+  t.after(() => {
+    shutter.travel.clear();
+    shutter.travel = previous;
+  });
+
+  const send = async (name, key, value) => {
+    const found = findDeviceByExternalId(gladys, config, deviceExternalId(config, name));
+    await found.blueprint.onSetValue(gladys, {
+      device: found.device,
+      feature: featureOf(gladys, config, name, key),
+      value,
+      client,
+    });
+  };
+  const positionsOf = (name) => gladys.statesOf(`${deviceExternalId(config, name)}:position`);
+  const statesOf = (name) => gladys.statesOf(`${deviceExternalId(config, name)}:state`);
+
+  return { gladys, config, client, clock, send, positionsOf, statesOf };
+}
+
+/** A radio frame heard on the channel of one of the timed shutters. */
+function radioState(config, name, value) {
+  return {
+    type: 3,
+    channel: deviceNamed(config, name).channel,
+    thingnotes: { notes: [{ type: NOTE_TYPES.STATE, value }] },
+  };
+}
+
+test('a timed shutter exposes a position even without a positionable motor', (t) => {
+  const { gladys, config } = setupTimed(t);
+  const devices = buildDiscoveredDevices(gladys, config);
+  const types = (name) =>
+    devices.find((device) => device.name === name).features.map((feature) => feature.type);
+
+  assert.deepEqual(types('Timed shutter'), ['state', 'position']);
+  assert.deepEqual(types('Sun sail'), ['state', 'position']);
+});
+
+test('the first full travel establishes the position, then it is followed live', async (t) => {
+  const { clock, send, positionsOf, statesOf } = setupTimed(t);
+
+  // Nothing is known yet: closing publishes nothing until the shutter reaches
+  // the bottom, where the motor physically stops — an exact 0 %.
+  await send('Timed shutter', 'state', -1);
+  await clock.advance(5000);
+  assert.deepEqual(positionsOf('Timed shutter'), []);
+  await clock.advance(5000);
+  assert.deepEqual(positionsOf('Timed shutter'), [0]);
+
+  // From a known position, the way up is published second by second.
+  await send('Timed shutter', 'state', 1);
+  await clock.advance(4000);
+  assert.deepEqual(positionsOf('Timed shutter'), [0, 5, 10, 15, 20]);
+
+  // And it lands exactly on the top end stop, which resynchronizes the estimate.
+  await clock.advance(16000);
+  assert.equal(positionsOf('Timed shutter').at(-1), 100);
+  // One state per order: arriving where the order said adds nothing to say.
+  assert.deepEqual(statesOf('Timed shutter'), [-1, 1]);
+});
+
+test('a shutter stopped mid-travel keeps the position it reached', async (t) => {
+  const { client, clock, send, positionsOf, statesOf } = setupTimed(t);
+
+  await send('Timed shutter', 'state', -1);
+  await clock.advance(10000);
+  await send('Timed shutter', 'state', 1);
+  await clock.advance(5000);
+  await send('Timed shutter', 'state', 0);
+
+  assert.equal(client.noteAt(2).value, STATE_VALUES.STOP);
+  // A quarter of the way up, and Gladys is told so instead of keeping the 100 %
+  // the order announced.
+  assert.equal(positionsOf('Timed shutter').at(-1), 25);
+  assert.equal(statesOf('Timed shutter').at(-1), 0);
+
+  await clock.advance(60000);
+  assert.equal(positionsOf('Timed shutter').at(-1), 25);
+});
+
+test('a wall remote heard on the radio moves the position too', async (t) => {
+  const { gladys, config, clock, send, positionsOf } = setupTimed(t);
+
+  await send('Timed shutter', 'state', -1);
+  await clock.advance(10000);
+
+  // Someone presses the wall remote: the box relays the order it heard.
+  await applyEvents(gladys, config, [radioState(config, 'Timed shutter', STATE_VALUES.UP)]);
+  await clock.advance(2000);
+
+  assert.deepEqual(positionsOf('Timed shutter'), [0, 5, 10]);
+});
+
+test('an inverted shutter travels the other way round', async (t) => {
+  const { gladys, config, clock, positionsOf, statesOf } = setupTimed(t);
+
+  // Wired upside down: the radio order to go UP closes it, in Gladys terms.
+  await applyEvents(gladys, config, [radioState(config, 'Sun sail', STATE_VALUES.UP)]);
+  await clock.advance(15000);
+
+  assert.equal(positionsOf('Sun sail').at(-1), 0);
+  assert.deepEqual(statesOf('Sun sail'), [-1]);
+});
+
+test('the favourite position of the motor is published when it was configured', async (t) => {
+  const { gladys, config, clock, positionsOf, statesOf } = setupTimed(t);
+
+  await applyEvents(gladys, config, [radioState(config, 'Sun sail', STATE_VALUES.USERPOSITION)]);
+  await clock.advance(1000);
+
+  assert.deepEqual(positionsOf('Sun sail'), [40]);
+  assert.deepEqual(statesOf('Sun sail'), [0]);
+});
+
+test('a shutter with no favourite position configured says nothing about it', async (t) => {
+  const { gladys, config, clock, send, positionsOf } = setupTimed(t);
+
+  await send('Timed shutter', 'state', -1);
+  await clock.advance(10000);
+  await applyEvents(gladys, config, [radioState(config, 'Timed shutter', STATE_VALUES.MIDDLE)]);
+
+  // The motor went to a position only it knows: inventing one would be worse
+  // than the 0 % Gladys already shows.
+  assert.deepEqual(positionsOf('Timed shutter'), [0]);
+});
+
+test('a shutter with no travel time still publishes the destination of the order', async (t) => {
+  const { gladys, config, client } = setup();
+  const previous = shutter.travel;
+  t.after(() => {
+    shutter.travel = previous;
+  });
+
+  const found = findDeviceByExternalId(gladys, config, deviceExternalId(config, 'Bedroom shutter'));
+  await found.blueprint.onSetValue(gladys, {
+    device: found.device,
+    feature: featureOf(gladys, config, 'Bedroom shutter', 'state'),
+    value: 1,
+    client,
+  });
+
+  assert.deepEqual(gladys.statesOf('shutter:400-4:position'), [100]);
+});
+
+test('the position of a shutter survives a restart of the integration', async (t) => {
+  const { gladys, config, clock, send, positionsOf } = setupTimed(t);
+
+  const restored = await restoreDeviceStates(gladys, config, [
+    {
+      external_id: deviceExternalId(config, 'Timed shutter'),
+      features: [
+        { external_id: `${deviceExternalId(config, 'Timed shutter')}:position`, last_value: 60 },
+      ],
+    },
+  ]);
+  assert.equal(restored, 1);
+
+  // No full travel needed to know where it is: closing from 60 % takes 6 s.
+  await send('Timed shutter', 'state', -1);
+  await clock.advance(2000);
+  assert.deepEqual(positionsOf('Timed shutter'), [50, 40]);
+});
+
+test('a timed shutter with no positionable motor is driven with a stopwatch', async (t) => {
+  const { client, clock, send, positionsOf, statesOf } = setupTimed(t);
+
+  // A reference first: the position slider needs to know where it starts from.
+  await send('Timed shutter', 'state', -1);
+  await clock.advance(10000);
+
+  await send('Timed shutter', 'position', 60);
+  assert.equal(client.noteAt(1).value, STATE_VALUES.UP);
+  await clock.advance(11000);
+
+  // Opening takes 20 s, so 60 % is 12 s of it: still running at 11 s...
+  assert.equal(positionsOf('Timed shutter').at(-1), 55);
+  assert.equal(client.sent.length, 2);
+
+  // ...and stopped by us on arrival, since no end stop would do it.
+  await clock.advance(1000);
+  assert.equal(positionsOf('Timed shutter').at(-1), 60);
+  assert.equal(client.noteAt(2).value, STATE_VALUES.STOP);
+  assert.deepEqual(statesOf('Timed shutter'), [-1, 1, 0]);
+});
+
+test('a timed shutter sent to an end stop lets the motor stop itself', async (t) => {
+  const { client, clock, send, positionsOf } = setupTimed(t);
+
+  await send('Timed shutter', 'state', -1);
+  await clock.advance(10000);
+  await send('Timed shutter', 'position', 100);
+  await clock.advance(25000);
+
+  assert.equal(positionsOf('Timed shutter').at(-1), 100);
+  // The open order, and nothing else: the top end stop is the motor's business.
+  assert.equal(client.sent.length, 2);
+});
+
+test('a shutter with no reference yet is sent to the nearest end stop', async (t) => {
+  const { client, clock, send, positionsOf } = setupTimed(t);
+
+  await send('Timed shutter', 'position', 30);
+  await clock.advance(15000);
+
+  // 30 % is nearer the bottom: it closes fully, which is what establishes the
+  // reference the next positioning needs.
+  assert.equal(client.noteAt(0).value, STATE_VALUES.DOWN);
+  assert.deepEqual(positionsOf('Timed shutter'), [0]);
+  assert.equal(client.sent.length, 1);
 });

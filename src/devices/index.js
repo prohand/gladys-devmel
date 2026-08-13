@@ -13,6 +13,7 @@
 //   - onSetValue(gladys, {...})      (optional): run a user command
 //   - onPoll(gladys, {...})          (optional): periodic read
 //   - applyReadings(gladys, {...})   (optional): publish decoded radio notes
+//   - restoreStates(gladys, {...})   (optional): resume from the states Gladys kept
 //   - identify(gladys, {...})        (optional): make the device signal itself
 // -----------------------------------------------------------------------------
 
@@ -65,6 +66,47 @@ export function findDeviceByExternalId(gladys, config, externalId) {
     }
   }
   return null;
+}
+
+/**
+ * Let the modules that track something over time pick it back up from what
+ * Gladys already knows. A shutter position is computed from the travel of the
+ * motor (see src/devmel/travel.js): without this, restarting the integration
+ * would forget where every shutter is and only a full open or close would tell
+ * it again.
+ *
+ * @param {Array<object>} gladysDevices the devices of `gladys.getDevices()`,
+ *   whose features carry the last value Gladys stored
+ * @returns {Promise<number>} how many devices were restored
+ */
+export async function restoreDeviceStates(gladys, config, gladysDevices) {
+  if (!Array.isArray(gladysDevices)) {
+    return 0;
+  }
+  let restored = 0;
+  for (const device of config.devmelDevices) {
+    const blueprint = findBlueprintByType(device.rtype);
+    if (!blueprint || typeof blueprint.restoreStates !== 'function') {
+      continue;
+    }
+    const externalId = idsFor(gladys, blueprint.key, device).device;
+    const known = gladysDevices.find((candidate) => candidate?.external_id === externalId);
+    if (!known) {
+      continue;
+    }
+    try {
+      await blueprint.restoreStates(gladys, { device, features: known.features ?? [] });
+      restored += 1;
+    } catch (err) {
+      logger.error(`Could not restore the states of "${device.name}"`, err);
+    }
+  }
+  return restored;
+}
+
+/** Drop every timer the device modules hold (integration shutdown). */
+export function stopDeviceTracking() {
+  shutter.travel.clear();
 }
 
 /**

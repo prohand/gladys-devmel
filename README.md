@@ -20,9 +20,15 @@ User documentation: [English](./docs/en.md) · [Français](./docs/fr.md).
 | Radio sensor / remote (`1`)    | Temperature, humidity, illuminance, click — push only |
 | Button (`4096`)                | Push button (TOGGLE)                                  |
 | Switch (`4097`)                | On/Off                                                |
-| Shutter (`4098`)               | Open / Stop / Close                                   |
+| Shutter (`4098`)               | Open / Stop / Close, **+** position once timed        |
 | Shutter with position (`4099`) | Open / Stop / Close **+** position (0-100 %)          |
 | Dimmable light (`4100`)        | On/Off **+** brightness                               |
+
+The radio carries orders, never positions. A shutter given its travel times
+(`travel_up` / `travel_down`) has its position computed from them instead —
+from Gladys orders and from the ones heard on the radio alike — and
+resynchronized on every end stop. See
+[the user documentation](./docs/en.md#the-position-of-a-shutter).
 
 Devices are not discovered over the air: they are the ones the user paired in
 the AirSend app and exported from airsend.cloud (Import/Export → Export JSON),
@@ -65,6 +71,7 @@ working.
 │  │  ├─ client.js                   #   the local transport and the transport badge
 │  │  ├─ service.js                  #   the bundled AirSend Web Service (start, watch, stop)
 │  │  ├─ notes.js                    #   the radio "notes" protocol (build & decode)
+│  │  ├─ travel.js                   #   shutter position, computed from the travel times
 │  │  └─ connection.js               #   connection status + the "Test the connection" action
 │  └─ devices/                       # one file per device type
 │     ├─ index.js                    #   registry: config -> Gladys devices, event routing
