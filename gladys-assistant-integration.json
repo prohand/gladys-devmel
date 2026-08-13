@@ -27,8 +27,8 @@
       "type": "section",
       "label": { "en": "Getting started", "fr": "Pour commencer" },
       "description": {
-        "en": "The AirSend Web Service is included: it runs inside this integration, on http://127.0.0.1:33863, and there is nothing to install on your network. All it needs is the sp:// connection string of your box. Devices are configured in the AirSend app, then exported from airsend.cloud (Import/Export -> Export YAML, with the spurl option): paste that export below, the integration reads it as is.",
-        "fr": "Le service AirSend est inclus : il tourne dans cette intégration, sur http://127.0.0.1:33863, et il n'y a rien à installer sur votre réseau. Il lui faut seulement la chaîne de connexion sp:// de votre boîtier. Les appareils se configurent dans l'application AirSend, puis s'exportent depuis airsend.cloud (Import/Export -> Export YAML, avec l'option spurl) : collez cet export ci-dessous, l'intégration le lit tel quel."
+        "en": "The AirSend Web Service is included: it runs inside this integration, on http://127.0.0.1:33863, and there is nothing to install on your network. All it needs is the sp:// connection string of your box. Devices are configured in the AirSend app, then exported from airsend.cloud (Import/Export, JSON or YAML): paste that export below, the integration reads it as is.",
+        "fr": "Le service AirSend est inclus : il tourne dans cette intégration, sur http://127.0.0.1:33863, et il n'y a rien à installer sur votre réseau. Il lui faut seulement la chaîne de connexion sp:// de votre boîtier. Les appareils se configurent dans l'application AirSend, puis s'exportent depuis airsend.cloud (Import/Export, JSON ou YAML) : collez cet export ci-dessous, l'intégration le lit tel quel."
       },
       "links": [
         {
@@ -124,13 +124,13 @@
       "type": "string",
       "label": { "en": "Devices", "fr": "Appareils" },
       "description": {
-        "en": "Your airsend.cloud export: one entry per device, with its type and its radio channel. JSON on a single line, or YAML. See the documentation.",
-        "fr": "Votre export airsend.cloud : une entrée par appareil, avec son type et son canal radio. JSON sur une ligne, ou YAML. Voir la documentation."
+        "en": "Your airsend.cloud export, pasted as is: one entry per device, with its type and its radio channel. Both exports are read — the JSON one (a devices list, the channel written as pid/addr) and the YAML one (a channel: block). See the documentation.",
+        "fr": "Votre export airsend.cloud, collé tel quel : une entrée par appareil, avec son type et son canal radio. Les deux exports sont lus — le JSON (une liste devices, le canal écrit pid/addr) et le YAML (un bloc channel:). Voir la documentation."
       },
       "required": false,
       "placeholder": {
-        "en": "{\"Living room shutter\": {\"type\": 4098, \"channel\": {\"id\": 25455, \"source\": 94311}}}",
-        "fr": "{\"Volet salon\": {\"type\": 4098, \"channel\": {\"id\": 25455, \"source\": 94311}}}"
+        "en": "{\"devices\":[{\"name\":\"Living room shutter\",\"type\":4098,\"pid\":25455,\"addr\":8295}]}",
+        "fr": "{\"devices\":[{\"name\":\"Volet salon\",\"type\":4098,\"pid\":25455,\"addr\":8295}]}"
       }
     },
     {

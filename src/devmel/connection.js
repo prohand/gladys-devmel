@@ -153,6 +153,18 @@ export async function testConnection(client, config, service = null) {
     fr.push(
       `Cloud : clé d'API renseignée, ${withId} appareil(s) avec un identifiant airsend.cloud.`,
     );
+    if (withId === 0 && config.devmelDevices.length > 0) {
+      // A device list without ids is normal — the export only carries them for
+      // devices registered in the cloud — and costs nothing but the fallback.
+      en.push(
+        '  The cloud channel needs an "id" per device: without it those devices are driven ' +
+          'locally only, which is enough as long as the box answers.',
+      );
+      fr.push(
+        "  Le canal cloud a besoin d'un « id » par appareil : sans lui, ces appareils sont " +
+          'pilotés uniquement en local, ce qui suffit tant que le boîtier répond.',
+      );
+    }
   } else {
     en.push('Cloud: no API key — optional, it is only the fallback when the box is unreachable.');
     fr.push(
