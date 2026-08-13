@@ -79,6 +79,49 @@ test('parseDevices accepts JSON, with or without the devices wrapper', () => {
   }
 });
 
+test('parseDevices reads the JSON exported by airsend.cloud (pid/addr)', () => {
+  // Verbatim shape of the "Export JSON" of airsend.cloud: a list, the channel
+  // flattened into `pid` (channel id) and `addr` (channel source).
+  const devices = parseDevices(
+    '{"devices":[{"name":"Baie vitree","localip":"fe80::dcf6:e5ff:fe8f:89cd","type":4098,"pid":25455,"addr":8295}]}',
+  );
+
+  assert.equal(devices.length, 1);
+  const [shutter] = devices;
+  assert.equal(shutter.name, 'Baie vitree');
+  assert.equal(shutter.rtype, 4098);
+  assert.deepEqual(shutter.channel, { id: 25455, source: 8295 });
+  assert.equal(shutter.localIp, 'fe80::dcf6:e5ff:fe8f:89cd');
+  assert.equal(shutter.id, null);
+  assert.equal(shutter.platformId, '25455-8295');
+});
+
+test('the cloud id is never mistaken for a channel id', () => {
+  const [cloudOnly, both] = parseDevices(`
+    Cloud only:
+      id: 12345
+      type: 4097
+    Both:
+      id: 54321
+      type: 4098
+      pid: 25455
+      addr: 8295
+  `);
+  // A device known by its cloud id alone has no radio channel at all...
+  assert.equal(cloudOnly.channel, null);
+  assert.equal(cloudOnly.platformId, '12345');
+  // ...and when both are there, each keeps its own meaning.
+  assert.equal(both.id, '54321');
+  assert.deepEqual(both.channel, { id: 25455, source: 8295 });
+});
+
+test('a nested channel wins over the flat fields of the JSON export', () => {
+  const [device] = parseDevices(
+    '[{"name":"Plug","type":4097,"pid":1,"channel":{"id":7,"source":2}}]',
+  );
+  assert.deepEqual(device.channel, { id: 7, source: 2 });
+});
+
 test('parseDevices drops what it cannot use', () => {
   const devices = parseDevices(`
     Unknown type:

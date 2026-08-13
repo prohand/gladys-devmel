@@ -94,20 +94,46 @@ son dernier ordre, avec un point orange s'il a fonctionné en mode dégradé
 
 ## La liste d'appareils
 
-Sur airsend.cloud, ouvrez **Import/Export → Export YAML** et cochez `spurl`
-pour la connexion locale. C'est cet export qu'attend le champ **Appareils**,
-et les références `!secret spurl` / `!secret apiKey` qu'il contient sont
-résolues avec les identifiants saisis plus haut.
+Sur airsend.cloud, ouvrez **Import/Export** et exportez vos appareils. Les deux
+formats proposés sont lus tels quels ; le champ **Appareils** étant une saisie
+sur une seule ligne, l'**export JSON** est le collage le plus sûr.
 
-Le champ est une saisie sur une seule ligne : le collage le plus sûr est donc
-la forme **JSON** de cette liste — le même contenu, sur une ligne :
+### L'export JSON
+
+Il se présente ainsi — une liste, et le canal radio écrit à plat :
 
 ```json
-{ "Volet salon": { "type": 4098, "channel": { "id": 25455, "source": 94311 } } }
+{
+  "devices": [
+    {
+      "name": "Baie vitrée",
+      "localip": "fe80::dcf6:e5ff:fe8f:89cd",
+      "type": 4098,
+      "pid": 25455,
+      "addr": 8295
+    }
+  ]
+}
 ```
 
-L'export YAML est lu également, tant que les retours à la ligne survivent au
-collage :
+Collez-le tel quel, y compris sur une seule ligne. `pid` et `addr` sont le
+canal radio de l'appareil : `pid` est ce que l'export YAML appelle
+`channel.id` (le protocole, partagé par tous les appareils pilotés de la même
+façon) et `addr` son `channel.source` (l'adresse de l'émetteur). `localip` est
+l'adresse du boîtier auquel l'appareil est rattaché ; le boîtier reste joint
+par la chaîne de connexion `sp://` saisie plus haut.
+
+Cet export ne porte pas d'`id` airsend.cloud : ces appareils sont donc pilotés
+par le **canal local** uniquement. C'est le fonctionnement normal — le cloud
+n'est qu'un repli — et il suffit d'ajouter un `id` à un appareil pour lui
+ouvrir aussi ce canal.
+
+### L'export YAML
+
+Cochez `spurl` à l'export pour la connexion locale : les références
+`!secret spurl` / `!secret apiKey` qu'il contient sont résolues avec les
+identifiants saisis plus haut. Il est lu tant que les retours à la ligne
+survivent au collage :
 
 ```yaml
 devices:
@@ -160,6 +186,8 @@ devices:
 | `type`     | Type d'appareil (tableau ci-dessus), **obligatoire**                           |
 | `id`       | Identifiant airsend.cloud — nécessaire pour le canal cloud                     |
 | `channel`  | Canal radio (`id`, `source`, `mac`, `seed`) — nécessaire pour le canal local   |
+| `pid`      | Le `channel.id` de l'export JSON (utilisez l'un ou l'autre)                    |
+| `addr`     | Le `channel.source` de l'export JSON                                           |
 | `spurl`    | Chaîne de connexion propre à cet appareil, si différente de la globale         |
 | `apiKey`   | Clé d'API propre à cet appareil, si différente de la globale                   |
 | `wait`     | Attendre la confirmation radio avant de répondre (`false` par défaut)          |
@@ -213,7 +241,8 @@ boîtier sont rafraîchis par interrogation périodique.
 | Symptôme                               | À vérifier                                                                             |
 | -------------------------------------- | -------------------------------------------------------------------------------------- |
 | `Invalid connection string`            | L'URL `sp://`, et que son mot de passe correspond au boîtier                           |
-| `Invalid input`                        | Le `channel` de l'appareil (`id` et `source`)                                          |
+| `Invalid input`                        | Le `channel` de l'appareil (`id`/`pid` et `source`/`addr`)                             |
+| `neither a cloud id nor…` (logs)       | L'entrée n'a pas de canal : il lui faut `channel.id`, ou `pid`/`addr`, ou un `id`      |
 | `no radio confirmation`                | Normal sans retour d'état : laissez `wait: false`                                      |
 | Aucun appareil dans « Découverte »     | **Tester la connexion** : la liste n'a sans doute pas été lue                          |
 | Le boîtier est injoignable             | La partie `?gw=0&rhost=<IPv4>` de la chaîne de connexion                               |

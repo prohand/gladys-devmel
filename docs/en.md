@@ -88,19 +88,44 @@ badge, with an orange dot when it ran degraded (local refused, cloud fallback).
 
 ## The device list
 
-On airsend.cloud, open **Import/Export → Export YAML** and tick `spurl` for the
-local connection. That export is what the **Devices** field expects, and the
-`!secret spurl` / `!secret apiKey` references it contains are resolved with the
-credentials you filled in above.
+On airsend.cloud, open **Import/Export** and export your devices. Both formats
+are read as they come; since the **Devices** field is a single-line input, the
+**JSON export** is the safest paste.
 
-The field is a single-line input, so the safest paste is the **JSON** form of
-that list — the same content, on one line:
+### The JSON export
+
+It looks like this — a list, with the radio channel written flat:
 
 ```json
-{ "Living room shutter": { "type": 4098, "channel": { "id": 25455, "source": 94311 } } }
+{
+  "devices": [
+    {
+      "name": "Living room shutter",
+      "localip": "fe80::dcf6:e5ff:fe8f:89cd",
+      "type": 4098,
+      "pid": 25455,
+      "addr": 8295
+    }
+  ]
+}
 ```
 
-The YAML export is read as well when the line breaks survive the paste:
+Paste it as is, one line included. `pid` and `addr` are the radio channel of
+the device: `pid` is what the YAML export calls `channel.id` (the protocol,
+shared by every device driven the same way) and `addr` its `channel.source`
+(the address of the emitter). `localip` is the address of the box the device
+belongs to; the box itself is still reached through the `sp://` connection
+string filled in above.
+
+That export carries no airsend.cloud `id`, so those devices are driven through
+the **local channel** only. This is the normal setup — the cloud is a fallback
+— and adding an `id` to a device is all it takes to open that channel too.
+
+### The YAML export
+
+Tick `spurl` when exporting for the local connection: the `!secret spurl` /
+`!secret apiKey` references it contains are resolved with the credentials you
+filled in above. It is read as long as the line breaks survive the paste:
 
 ```yaml
 devices:
@@ -153,6 +178,8 @@ devices:
 | `type`     | Device type (table above), **required**                                    |
 | `id`       | airsend.cloud device id — required for the cloud channel                   |
 | `channel`  | Radio channel (`id`, `source`, `mac`, `seed`) — required for the local one |
+| `pid`      | The `channel.id` of the JSON export (use either form)                      |
+| `addr`     | The `channel.source` of the JSON export                                    |
 | `spurl`    | Connection string of this device, if it differs from the global one        |
 | `apiKey`   | API key of this device, if it differs from the global one                  |
 | `wait`     | Wait for the radio confirmation before answering (`false` by default)      |
@@ -203,7 +230,8 @@ refreshed by polling.
 | Symptom                           | What to check                                                                          |
 | --------------------------------- | -------------------------------------------------------------------------------------- |
 | `Invalid connection string`       | The `sp://` URL, and that its password matches the box                                 |
-| `Invalid input`                   | The `channel` of the device (`id` and `source`)                                        |
+| `Invalid input`                   | The `channel` of the device (`id`/`pid` and `source`/`addr`)                           |
+| `neither a cloud id nor…` in logs | The entry carries no channel: it needs `channel.id`, or `pid`/`addr`, or an `id`       |
 | `no radio confirmation`           | Normal on equipment without feedback: set `wait: false`                                |
 | No device in the Discovery tab    | **Test the connection**: the device list probably did not parse                        |
 | The box is unreachable            | The `?gw=0&rhost=<IPv4>` part of the connection string                                 |

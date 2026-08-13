@@ -85,9 +85,10 @@ export function normalizeConfig(raw = {}) {
  *
  * Accepted shapes, all of them straight out of airsend.cloud or written by
  * hand:
- *   devices: { "Living room shutter": { type: 4098, … } }   (the export)
+ *   devices: { "Living room shutter": { type: 4098, … } }   (the YAML export)
  *   { "Living room shutter": { … } }                        (without the wrapper)
  *   [ { name: "Living room shutter", type: 4098, … } ]      (a plain list)
+ *   { devices: [ { name: …, type: 4098, pid: …, addr: … } ] }  (the JSON export)
  *
  * @returns {Array<object>} normalized devices, invalid entries dropped
  */
@@ -163,12 +164,16 @@ function normalizeDevice(name, entry, config) {
   }
 
   const id = entry.id === undefined || entry.id === null ? null : String(entry.id);
-  const channel = normalizeChannel(entry.channel, rtype);
+  const channel = normalizeChannel(entry, rtype);
   const spurl = resolveSecret(entry.spurl, config);
   const apiKey = resolveSecret(entry.apiKey ?? entry.api_key, config);
+  const localIp = firstString(entry.localip, entry.localIp, entry.local_ip);
 
   if (!channel && !id) {
-    logger.warn(`Ignoring "${deviceName}": neither a cloud id nor a radio channel`);
+    logger.warn(
+      `Ignoring "${deviceName}": no radio channel (channel.id, or the pid/addr pair of the ` +
+        'JSON export) and no airsend.cloud id',
+    );
     return null;
   }
 
@@ -177,6 +182,9 @@ function normalizeDevice(name, entry, config) {
     rtype,
     id,
     channel,
+    // Link-local address of the box this device belongs to, as exported by
+    // airsend.cloud. Informative: the box is reached through the sp:// URL.
+    localIp,
     spurl,
     apiKey,
     // Wait for the radio confirmation before answering. Off by default: most
@@ -193,21 +201,72 @@ function normalizeDevice(name, entry, config) {
   return device;
 }
 
-function normalizeChannel(channel, rtype) {
+/**
+ * Where a radio channel field is read from, in order of preference.
+ *
+ * The YAML export nests them under `channel:`; the JSON export of the same
+ * screen flattens them into the device itself, under other names:
+ *
+ *   {"devices":[{"name":"Baie vitree","localip":"fe80::…","type":4098,
+ *                "pid":25455,"addr":8295}]}
+ *
+ * `pid` is what the box calls the channel id — the protocol, shared by every
+ * device driven the same way — and `addr` the address of the emitter, i.e.
+ * `channel.source`. Both exports therefore describe the same pair.
+ */
+const CHANNEL_FIELDS = {
+  // `id` is deliberately absent from the flat names: at the top level of a
+  // device it is the airsend.cloud id, never the channel.
+  id: { nested: ['id'], flat: ['pid', 'channelId', 'channel_id'] },
+  source: { nested: ['source'], flat: ['source', 'addr', 'address'] },
+  mac: { nested: ['mac'], flat: ['mac'] },
+  seed: { nested: ['seed'], flat: ['seed'] },
+};
+
+function normalizeChannel(entry, rtype) {
   // The box itself always answers on channel 1.
   if (rtype === DEVICE_TYPES.BOX) {
     return { id: 1 };
   }
-  if (!channel || typeof channel !== 'object' || channel.id === undefined) {
-    return null;
-  }
-  const normalized = { id: Number(channel.id) };
-  for (const field of ['source', 'mac', 'seed']) {
-    if (channel[field] !== undefined && channel[field] !== null) {
-      normalized[field] = Number(channel[field]);
+  const nested = entry.channel && typeof entry.channel === 'object' ? entry.channel : {};
+  const normalized = {};
+  for (const [field, names] of Object.entries(CHANNEL_FIELDS)) {
+    // A nested `channel:` wins over the flat aliases: an export carrying both
+    // says the same thing twice, and a hand-written list says what it means.
+    const value = firstNumber(
+      ...names.nested.map((name) => nested[name]),
+      ...names.flat.map((name) => entry[name]),
+    );
+    if (value !== null) {
+      normalized[field] = value;
     }
   }
-  return normalized;
+  return normalized.id === undefined ? null : normalized;
+}
+
+/** First value of the list that is a usable number, or null. */
+function firstNumber(...values) {
+  for (const value of values) {
+    if (value === undefined || value === null || value === '') {
+      continue;
+    }
+    const number = Number(value);
+    if (Number.isFinite(number)) {
+      return number;
+    }
+  }
+  return null;
+}
+
+/** First value of the list that is a non-empty string, or null. */
+function firstString(...values) {
+  for (const value of values) {
+    const text = value === undefined || value === null ? '' : String(value).trim();
+    if (text) {
+      return text;
+    }
+  }
+  return null;
 }
 
 /**
@@ -220,7 +279,7 @@ function buildPlatformId(device) {
     return slug(device.id);
   }
   if (device.rtype === DEVICE_TYPES.BOX) {
-    return slug(hostFromSpurl(device.spurl) ?? device.name);
+    return slug(hostFromSpurl(device.spurl) ?? device.localIp ?? device.name);
   }
   const parts = [device.channel.id];
   for (const field of ['source', 'mac', 'seed']) {
