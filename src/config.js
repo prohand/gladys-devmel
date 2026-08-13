@@ -7,13 +7,10 @@
 //
 // The interesting part is the `devices` field: rather than asking the user to
 // retype what they already declared in the AirSend app, the integration eats
-// the very file airsend.cloud exports (Import/Export → Export YAML). JSON is
-// accepted too — it is valid YAML — and the `!secret name` references the
-// export contains are resolved against the credentials filled above in the
-// same form.
+// the very file airsend.cloud exports (Import/Export → Export JSON), pasted as
+// is — one line included, which is what the single-line field allows.
 // -----------------------------------------------------------------------------
 
-import { parse as parseYaml } from 'yaml';
 import { createLogger } from '@gladysassistant/integration-sdk';
 import { SERVICE_URL as EMBEDDED_SERVICE_URL } from './devmel/service.js';
 
@@ -27,15 +24,9 @@ export const DEFAULT_CONFIG = {
   use_embedded_service: true, // run the bundled AirSend Web Service ourselves
   service_url: '', // an AirSend Web Service elsewhere, e.g. http://192.168.1.50:33863/
   spurl: '', // sp://password@[fe80::…]?gw=0&rhost=192.168.1.50
-  api_key: '', // airsend.cloud API key (cloud fallback)
-  devices: '', // YAML/JSON exported from airsend.cloud
+  devices: '', // JSON exported from airsend.cloud
   listen_channel: 1, // radio channel the box forwards to Gladys (0 = disabled)
   poll_frequency: 300, // seconds between two sensor reads
-  // Reserved key (NOT in config_schema): because the manifest declares both
-  // 'local' and 'cloud' in its `transports` field, Gladys shows a standard
-  // "Prefer the local connection" toggle and sends the user's choice here.
-  // Read-only for the integration; defaults to true.
-  GLADYS_PREFER_LOCAL: true,
 };
 
 /** AirSend device types, as numbered by airsend.cloud. */
@@ -60,11 +51,8 @@ export function normalizeConfig(raw = {}) {
     // Force the types: config may arrive as strings from a form.
     service_url: String(raw.service_url ?? DEFAULT_CONFIG.service_url).trim(),
     spurl: String(raw.spurl ?? DEFAULT_CONFIG.spurl).trim(),
-    api_key: String(raw.api_key ?? DEFAULT_CONFIG.api_key).trim(),
     listen_channel: Number(raw.listen_channel ?? DEFAULT_CONFIG.listen_channel),
     poll_frequency: Number(raw.poll_frequency ?? DEFAULT_CONFIG.poll_frequency),
-    // The preference is a boolean; anything but an explicit false means true.
-    GLADYS_PREFER_LOCAL: raw.GLADYS_PREFER_LOCAL !== false,
     use_embedded_service: raw.use_embedded_service !== false,
   };
 
@@ -85,10 +73,10 @@ export function normalizeConfig(raw = {}) {
  *
  * Accepted shapes, all of them straight out of airsend.cloud or written by
  * hand:
- *   devices: { "Living room shutter": { type: 4098, … } }   (the YAML export)
- *   { "Living room shutter": { … } }                        (without the wrapper)
- *   [ { name: "Living room shutter", type: 4098, … } ]      (a plain list)
- *   { devices: [ { name: …, type: 4098, pid: …, addr: … } ] }  (the JSON export)
+ *   { "devices": [ { "name": …, "type": 4098, "pid": …, "addr": … } ] }  (the export)
+ *   [ { "name": "Living room shutter", "type": 4098, … } ]               (a plain list)
+ *   { "devices": { "Living room shutter": { "type": 4098, … } } }        (keyed by name)
+ *   { "Living room shutter": { … } }                                     (without the wrapper)
  *
  * @returns {Array<object>} normalized devices, invalid entries dropped
  */
@@ -127,18 +115,14 @@ function parseDeviceSource(source) {
   if (typeof source === 'object') {
     return source;
   }
-  const text = String(source);
-  if (!text.trim()) {
+  const text = String(source).trim();
+  if (!text) {
     return null;
   }
   try {
-    // Note: the text is parsed as pasted. Trimming it would dedent the first
-    // line only, and YAML refuses a mapping whose keys are not aligned.
-    // `!secret spurl` is a Home Assistant tag, meaningless to a YAML parser:
-    // turn it into a plain marker resolved by normalizeDevice().
-    const parsed = parseYaml(text.replace(/!secret\s+([\w.-]+)/g, '"__secret__:$1"'));
+    const parsed = JSON.parse(text);
     if (!parsed || typeof parsed !== 'object') {
-      logger.error('The device list must be a YAML mapping or a JSON object');
+      logger.error('The device list must be a JSON object or a JSON array');
       return null;
     }
     return parsed;
@@ -163,16 +147,14 @@ function normalizeDevice(name, entry, config) {
     return null;
   }
 
-  const id = entry.id === undefined || entry.id === null ? null : String(entry.id);
   const channel = normalizeChannel(entry, rtype);
-  const spurl = resolveSecret(entry.spurl, config);
-  const apiKey = resolveSecret(entry.apiKey ?? entry.api_key, config);
+  const spurl = firstString(entry.spurl);
   const localIp = firstString(entry.localip, entry.localIp, entry.local_ip);
 
-  if (!channel && !id) {
+  if (!channel) {
     logger.warn(
       `Ignoring "${deviceName}": no radio channel (channel.id, or the pid/addr pair of the ` +
-        'JSON export) and no airsend.cloud id',
+        'export)',
     );
     return null;
   }
@@ -180,13 +162,11 @@ function normalizeDevice(name, entry, config) {
   const device = {
     name: deviceName,
     rtype,
-    id,
     channel,
     // Link-local address of the box this device belongs to, as exported by
     // airsend.cloud. Informative: the box is reached through the sp:// URL.
     localIp,
     spurl,
-    apiKey,
     // Wait for the radio confirmation before answering. Off by default: most
     // 433 MHz devices are write-only and never acknowledge.
     wait: toBoolean(entry.wait, false),
@@ -204,19 +184,20 @@ function normalizeDevice(name, entry, config) {
 /**
  * Where a radio channel field is read from, in order of preference.
  *
- * The YAML export nests them under `channel:`; the JSON export of the same
- * screen flattens them into the device itself, under other names:
+ * The airsend.cloud export flattens the channel into the device itself, under
+ * other names:
  *
  *   {"devices":[{"name":"Baie vitree","localip":"fe80::…","type":4098,
  *                "pid":25455,"addr":8295}]}
  *
  * `pid` is what the box calls the channel id — the protocol, shared by every
  * device driven the same way — and `addr` the address of the emitter, i.e.
- * `channel.source`. Both exports therefore describe the same pair.
+ * `channel.source`. A hand-written list may nest them under `channel:` instead;
+ * both spellings describe the same pair.
  */
 const CHANNEL_FIELDS = {
   // `id` is deliberately absent from the flat names: at the top level of a
-  // device it is the airsend.cloud id, never the channel.
+  // device it is the airsend.cloud device id, never the channel.
   id: { nested: ['id'], flat: ['pid', 'channelId', 'channel_id'] },
   source: { nested: ['source'], flat: ['source', 'addr', 'address'] },
   mac: { nested: ['mac'], flat: ['mac'] },
@@ -231,7 +212,7 @@ function normalizeChannel(entry, rtype) {
   const nested = entry.channel && typeof entry.channel === 'object' ? entry.channel : {};
   const normalized = {};
   for (const [field, names] of Object.entries(CHANNEL_FIELDS)) {
-    // A nested `channel:` wins over the flat aliases: an export carrying both
+    // A nested `channel` wins over the flat aliases: an export carrying both
     // says the same thing twice, and a hand-written list says what it means.
     const value = firstNumber(
       ...names.nested.map((name) => nested[name]),
@@ -271,13 +252,10 @@ function firstString(...values) {
 
 /**
  * Build the stable, unique id of a device on the Devmel side — what
- * `gladys.externalIds(type, platformId)` needs. Preference order: the cloud id,
- * then the radio channel, then (for a box, which has neither) its address.
+ * `gladys.externalIds(type, platformId)` needs: the radio channel, or (for a
+ * box, which shares channel 1 with every other box) its address.
  */
 function buildPlatformId(device) {
-  if (device.id) {
-    return slug(device.id);
-  }
   if (device.rtype === DEVICE_TYPES.BOX) {
     return slug(hostFromSpurl(device.spurl) ?? device.localIp ?? device.name);
   }
@@ -301,29 +279,6 @@ export function hostFromSpurl(spurl) {
   }
   const address = /@\[?([^\]/?]+)\]?/.exec(spurl);
   return address ? address[1] : null;
-}
-
-/**
- * Resolve the `!secret name` references of an airsend.cloud export against the
- * credentials the user typed in the configuration form.
- */
-function resolveSecret(value, config) {
-  if (typeof value !== 'string') {
-    return value ? String(value) : null;
-  }
-  const match = /^__secret__:(.+)$/.exec(value.trim());
-  if (!match) {
-    return value.trim() || null;
-  }
-  const name = match[1].toLowerCase();
-  if (name.includes('spurl') || name.includes('locator')) {
-    return config.spurl || null;
-  }
-  if (name.includes('key') || name.includes('token')) {
-    return config.api_key || null;
-  }
-  logger.warn(`Unknown secret "${match[1]}", falling back to the global credentials`);
-  return null;
 }
 
 /** Readings a generic radio sensor (type 1) exposes in Gladys. */

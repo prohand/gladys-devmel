@@ -1,38 +1,28 @@
 // -----------------------------------------------------------------------------
 // AirSend driver: the only module that talks to Devmel hardware.
 //
-// A Devmel device is reachable through two independent channels, and the
-// integration declares both in its manifest (`"transports": ["local","cloud"]`):
+// Everything goes through the LOCAL channel, the one the manifest declares
+// (`"transports": ["local"]`): the AirSend Web Service exposes an HTTP API on
+// port 33863. The integration ships it and runs it in its own container by
+// default (see service.js), and can just as well use one running elsewhere on
+// the LAN. `POST /airsend/transfer` sends radio notes,
+// `POST /airsend/bind` subscribes to incoming ones. It authenticates with the
+// `sp://` connection string exported from airsend.cloud.
 //
-//   - LOCAL — the AirSend Web Service exposes an HTTP API on port 33863. The
-//     integration ships it and runs it in its own container by default (see
-//     service.js), and can just as well use one running elsewhere on the LAN.
-//     `POST /airsend/transfer` sends radio notes,
-//     `POST /airsend/bind` subscribes to incoming ones. It authenticates with
-//     the `sp://` connection string exported from airsend.cloud.
-//
-//   - CLOUD — `GET https://airsend.cloud/device/<id>/<action>/<value>/`
-//     authenticated with the account API key. Commands only: the cloud path
-//     cannot read sensors, and knows nothing about raw radio channels.
-//
-// The user's "Prefer the local connection" toggle (the reserved
-// `GLADYS_PREFER_LOCAL` config key) decides which one is tried first; the other
-// one is the fallback. Every call reports which channel actually carried it, so
-// Gladys can show the per-device transport badge.
+// Every call reports the channel that carried it, so Gladys can show the
+// per-device transport badge: 'local' when the box answered, 'unreachable'
+// when there is nothing to talk to.
 // -----------------------------------------------------------------------------
 
 import { createHash } from 'node:crypto';
 import { createLogger, DEVICE_TRANSPORTS } from '@gladysassistant/integration-sdk';
-import { NOTE_METHODS, NOTE_TYPES, toCloudCommand, clampLevel } from './notes.js';
 
 const logger = createLogger({ name: 'airsend' });
 
-const CLOUD_BASE_URL = 'https://airsend.cloud';
 const USER_AGENT = 'gladys-devmel';
 const LOCAL_TIMEOUT_MS = 8000;
-const CLOUD_TIMEOUT_MS = 10000;
 
-/** Thrown when a request reached the box/cloud but was refused. */
+/** Thrown when a request reached the box but was refused. */
 export class AirSendError extends Error {
   constructor(message, { status, transport } = {}) {
     super(message);
@@ -72,17 +62,8 @@ export class AirSendClient {
     return device?.spurl || this.config?.spurl || null;
   }
 
-  /** Cloud API key of a device, falling back to the global one. */
-  apiKeyOf(device) {
-    return device?.apiKey || this.config?.api_key || null;
-  }
-
   canUseLocal(device) {
     return Boolean(this.serviceUrl && this.spurlOf(device));
-  }
-
-  canUseCloud(device) {
-    return Boolean(this.apiKeyOf(device) && device?.id);
   }
 
   /**
@@ -95,62 +76,25 @@ export class AirSendClient {
    * @param {boolean} [options.wait] wait for the radio confirmation (reads do)
    * @param {string} [options.callbackUrl] where the box pushes the answer when
    *   `wait` is false
-   * @returns {Promise<{ transport: string, notes: Array<object>, degraded: boolean,
-   *   message?: string }>}
+   * @returns {Promise<{ transport: string, notes: Array<object>, degraded: boolean }>}
    */
   async transfer(device, notes, options = {}) {
-    const preferLocal = this.config?.GLADYS_PREFER_LOCAL !== false;
-    const local = () => this.transferLocal(device, notes, options);
-    const cloud = () => this.transferCloud(device, notes);
-
-    const primary = preferLocal
-      ? { name: DEVICE_TRANSPORTS.LOCAL, usable: this.canUseLocal(device), run: local }
-      : { name: DEVICE_TRANSPORTS.CLOUD, usable: this.canUseCloud(device), run: cloud };
-    const fallback = preferLocal
-      ? { name: DEVICE_TRANSPORTS.CLOUD, usable: this.canUseCloud(device), run: cloud }
-      : { name: DEVICE_TRANSPORTS.LOCAL, usable: this.canUseLocal(device), run: local };
-
-    if (!primary.usable && !fallback.usable) {
+    if (!this.canUseLocal(device)) {
       this.rememberTransport(device, DEVICE_TRANSPORTS.UNREACHABLE);
       throw new AirSendError(`No transport configured for "${device.name}"`, {
         transport: DEVICE_TRANSPORTS.UNREACHABLE,
       });
     }
 
-    let firstError = null;
-    if (primary.usable) {
-      try {
-        const result = await primary.run();
-        this.rememberTransport(device, primary.name);
-        return { transport: primary.name, degraded: false, notes: result.notes ?? [] };
-      } catch (err) {
-        firstError = err;
-        logger.warn(`${primary.name} transfer failed for "${device.name}": ${err.message}`);
-      }
+    try {
+      const result = await this.transferLocal(device, notes, options);
+      this.rememberTransport(device, DEVICE_TRANSPORTS.LOCAL);
+      return { transport: DEVICE_TRANSPORTS.LOCAL, degraded: false, notes: result.notes ?? [] };
+    } catch (err) {
+      logger.warn(`Local transfer failed for "${device.name}": ${err.message}`);
+      this.rememberTransport(device, DEVICE_TRANSPORTS.UNREACHABLE);
+      throw err;
     }
-
-    if (fallback.usable) {
-      try {
-        const result = await fallback.run();
-        // "It works, but not in the nominal mode": the user asked for the other
-        // channel and we had to reroute. Gladys renders this as an orange dot.
-        const degraded = primary.usable;
-        const message = degraded ? fallbackMessage(primary.name, firstError) : undefined;
-        this.rememberTransport(device, fallback.name, degraded, message);
-        return { transport: fallback.name, degraded, message, notes: result.notes ?? [] };
-      } catch (err) {
-        logger.error(`${fallback.name} transfer failed for "${device.name}": ${err.message}`);
-        firstError = firstError ?? err;
-      }
-    }
-
-    this.rememberTransport(device, DEVICE_TRANSPORTS.UNREACHABLE);
-    throw (
-      firstError ??
-      new AirSendError(`"${device.name}" is unreachable`, {
-        transport: DEVICE_TRANSPORTS.UNREACHABLE,
-      })
-    );
   }
 
   /** Send notes through the local AirSend Web Service. */
@@ -184,38 +128,6 @@ export class AirSendClient {
       });
     }
     return { notes: payload?.thingnotes?.notes ?? [] };
-  }
-
-  /**
-   * Send a command through airsend.cloud. Only STATE and LEVEL writes have a
-   * cloud equivalent — reads and raw radio notes are local-only.
-   */
-  async transferCloud(device, notes) {
-    const [note] = notes;
-    const action = toCloudAction(note);
-    if (!action) {
-      throw new AirSendError('This note has no airsend.cloud equivalent', {
-        transport: DEVICE_TRANSPORTS.CLOUD,
-      });
-    }
-
-    const url = `${CLOUD_BASE_URL}/device/${device.id}/${action.action}/${action.value}/`;
-    const response = await fetch(url, {
-      method: 'GET',
-      headers: {
-        Authorization: `Bearer ${this.apiKeyOf(device)}`,
-        'content-type': 'application/json',
-        'User-Agent': USER_AGENT,
-      },
-      signal: AbortSignal.timeout(CLOUD_TIMEOUT_MS),
-    });
-    if (response.status !== 200) {
-      throw new AirSendError(`airsend.cloud answered HTTP ${response.status}`, {
-        status: response.status,
-        transport: DEVICE_TRANSPORTS.CLOUD,
-      });
-    }
-    return { notes: [] };
   }
 
   /**
@@ -279,27 +191,14 @@ export class AirSendClient {
     });
   }
 
-  rememberTransport(device, transport, degraded = false, message = undefined) {
-    this.transports.set(device.platformId, { transport, degraded, message });
+  rememberTransport(device, transport) {
+    this.transports.set(device.platformId, { transport, degraded: false });
   }
 
   /** Last known transport of a device, or `undefined` if never contacted. */
   transportOf(device) {
     return this.transports.get(device.platformId);
   }
-}
-
-function fallbackMessage(preferredTransport, error) {
-  const reason = error?.message ?? 'unreachable';
-  return preferredTransport === DEVICE_TRANSPORTS.LOCAL
-    ? {
-        en: `Local AirSend box unreachable (${reason}), fell back to airsend.cloud.`,
-        fr: `Boîtier AirSend local injoignable (${reason}), repli sur airsend.cloud.`,
-      }
-    : {
-        en: `airsend.cloud unreachable (${reason}), fell back to the local box.`,
-        fr: `airsend.cloud injoignable (${reason}), repli sur le boîtier local.`,
-      };
 }
 
 function localErrorMessage(status) {
@@ -313,20 +212,6 @@ function localErrorMessage(status) {
     default:
       return `AirSend Web Service answered HTTP ${status}`;
   }
-}
-
-function toCloudAction(note) {
-  if (!note || note.method !== NOTE_METHODS.SET) {
-    return null;
-  }
-  if (note.type === NOTE_TYPES.LEVEL) {
-    return { action: 'level', value: clampLevel(note.value) };
-  }
-  if (note.type === NOTE_TYPES.STATE) {
-    const value = toCloudCommand(note.value);
-    return value === undefined ? null : { action: 'command', value };
-  }
-  return null;
 }
 
 /**

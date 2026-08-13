@@ -25,20 +25,16 @@ User documentation: [English](./docs/en.md) · [Français](./docs/fr.md).
 | Dimmable light (`4100`)        | On/Off **+** brightness                               |
 
 Devices are not discovered over the air: they are the ones the user paired in
-the AirSend app and exported from airsend.cloud, pasted as is (YAML or JSON) in
-the configuration — `!secret` references included.
+the AirSend app and exported from airsend.cloud (Import/Export → Export JSON),
+pasted as is in the configuration.
 
 ## How it talks to the hardware
 
-Two transports, declared in the manifest and selected by the standard
-**"Prefer the local connection"** toggle:
-
-- **local** — the [AirSend Web Service](https://github.com/devmel/hass_airsend-addon)
-  (port `33863`): `POST /airsend/transfer` to send radio notes,
-  `POST /airsend/bind` to subscribe to the ones it hears, authenticated with the
-  `sp://` connection string;
-- **cloud** — `GET https://airsend.cloud/device/<id>/<action>/<value>/` with the
-  account API key. Commands only.
+One transport, declared in the manifest: **local** — the
+[AirSend Web Service](https://github.com/devmel/hass_airsend-addon)
+(port `33863`): `POST /airsend/transfer` to send radio notes,
+`POST /airsend/bind` to subscribe to the ones it hears, authenticated with the
+`sp://` connection string.
 
 The image **ships that service** and runs it in the integration's own
 container, on `http://127.0.0.1:33863`: a fresh install needs the connection
@@ -48,9 +44,9 @@ it and restarts it; the binary comes from Devmel at build time (see the
 `/data`. Filling in the service URL by hand still wins, for anyone who already
 runs it elsewhere.
 
-Each one is the other's fallback: a device reports the channel that actually
-carried its last order (`publishTransports`), flagged **degraded** when the
-preferred channel had to be rerouted.
+Each device reports the channel that actually carried its last order
+(`publishTransports`): `local` when the box answered, `unreachable` when
+nothing did.
 
 When the user has Gladys Plus, the box is bound to the listening channel and
 pushes every radio frame it hears to the integration's `events` webhook — so a
@@ -66,7 +62,7 @@ working.
 ├─ src/
 │  ├─ config.js                      # config defaults + the airsend.cloud device list parser
 │  ├─ devmel/                        # the AirSend driver
-│  │  ├─ client.js                   #   local + cloud transport, fallback, transport badge
+│  │  ├─ client.js                   #   the local transport and the transport badge
 │  │  ├─ service.js                  #   the bundled AirSend Web Service (start, watch, stop)
 │  │  ├─ notes.js                    #   the radio "notes" protocol (build & decode)
 │  │  └─ connection.js               #   connection status + the "Test the connection" action

@@ -1,7 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  CLOUD_COMMANDS,
   decodeNotes,
   isSameChannel,
   levelNote,
@@ -11,7 +10,6 @@ import {
   READINGS,
   stateNote,
   STATE_VALUES,
-  toCloudCommand,
 } from '../src/devmel/notes.js';
 
 test('notes are built with the method and type the box expects', () => {
@@ -79,12 +77,6 @@ test('the other notes keep their own kind', () => {
 test('unreadable notes are ignored instead of crashing the event loop', () => {
   assert.deepEqual(decodeNotes(null), []);
   assert.deepEqual(decodeNotes([null, 'nope', { type: 42, value: 1 }]), []);
-});
-
-test('states map to the airsend.cloud command values', () => {
-  assert.equal(toCloudCommand(STATE_VALUES.ON), CLOUD_COMMANDS.ON);
-  assert.equal(toCloudCommand('DOWN'), CLOUD_COMMANDS.DOWN);
-  assert.equal(toCloudCommand(STATE_VALUES.PING), undefined);
 });
 
 test('a channel is identified by its id and its source', () => {

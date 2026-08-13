@@ -66,16 +66,6 @@ const STATE_LABELS = Object.fromEntries(
   Object.entries(STATE_VALUES).map(([label, value]) => [value, label]),
 );
 
-/** Values of the `command` endpoint of the airsend.cloud API. */
-export const CLOUD_COMMANDS = {
-  OFF: 0,
-  ON: 1,
-  STOP: 3,
-  DOWN: 4,
-  UP: 5,
-  TOGGLE: 6,
-};
-
 /** Decoded note kinds returned by {@link decodeNotes}. */
 export const READINGS = {
   STATE: 'state',
@@ -105,16 +95,6 @@ export function queryNote(type) {
 /** Clamp a percentage to the 0-100 range the radio protocol expects. */
 export function clampLevel(level) {
   return Math.max(0, Math.min(100, Math.round(Number(level) || 0)));
-}
-
-/**
- * Translate a STATE note value into the airsend.cloud `command` value, so a
- * command can fall back to the cloud when the local box is unreachable.
- * Returns `undefined` when the state has no cloud equivalent.
- */
-export function toCloudCommand(stateValue) {
-  const label = typeof stateValue === 'string' ? stateValue : STATE_LABELS[stateValue];
-  return CLOUD_COMMANDS[label];
 }
 
 /**

@@ -13,10 +13,11 @@ Vos appareils s'appairent dans l'**application mobile AirSend** ou sur
 rejoue les ordres radio qu'ils connaissent déjà. Faites-les d'abord
 fonctionner là-bas.
 
-Il vous faut ensuite au moins un des deux canaux ci-dessous — les deux, c'est
-mieux : ils se relaient.
+Tout passe ensuite par le canal local ci-dessous : l'intégration pilote votre
+boîtier sur votre propre réseau, et n'appelle jamais airsend.cloud pour envoyer
+un ordre.
 
-### Local (recommandé)
+### Local
 
 Le canal local dialogue avec le **service web AirSend**, le petit serveur HTTP
 fourni par Devmel pour piloter le boîtier depuis votre réseau.
@@ -44,34 +45,6 @@ Home Assistant, le démon Jeedom, un conteneur à vous — renseignez simplement
 champ **URL du service AirSend** (`http://192.168.1.50:33863/`). Une URL saisie
 là l'emporte : l'intégration l'utilise et ne démarre rien de son côté.
 
-### Cloud
-
-Le canal cloud appelle directement `airsend.cloud` avec la **clé d'API** de
-votre compte. C'est un **repli**, totalement facultatif : il prend le relais
-quand le boîtier est injoignable en local. Il ne sait qu'envoyer des ordres —
-les capteurs et les trames radio entrantes sont réservés au canal local — et
-chaque appareil doit porter son `id` airsend.cloud pour qu'il fonctionne.
-
-#### La clé d'API du cloud
-
-La clé est celle de votre **compte airsend.cloud**, celui où vos appareils sont
-déclarés : connectez-vous sur [app.airsend.cloud](https://app.airsend.cloud) et
-cherchez la clé d'API de votre compte.
-
-Deux choses à savoir avant de partir à sa recherche :
-
-- **vous n'en avez probablement pas besoin.** Avec le service intégré
-  ci-dessus, le canal local fonctionne seul ; la clé n'achète qu'un repli pour
-  les moments où le boîtier est injoignable, et les ordres envoyés pendant ce
-  temps-là ;
-- **elle est peut-être déjà dans votre export.** L'export YAML la référence
-  sous la forme `!secret apiKey`, et ce champ est ce que cette référence vient
-  chercher. Un export qui porte la clé en clair (`apiKey: xxxxx`) est utilisé
-  tel quel, appareil par appareil — rien à renseigner du tout.
-
-L'API elle-même est documentée sur
-[asp.devmel.com/api-docs](https://asp.devmel.com/api-docs).
-
 ## Configuration
 
 1. Ouvrez l'onglet **Configuration** de l'intégration.
@@ -79,24 +52,22 @@ L'API elle-même est documentée sur
    service AirSend tourne déjà dans l'intégration.
 3. Collez votre **liste d'appareils** (voir plus bas).
 4. Enregistrez, puis cliquez sur **Tester la connexion** : le résultat indique
-   l'état du service intégré, des deux canaux, et le nombre d'appareils
-   compris.
+   l'état du service intégré, du canal local, et le nombre d'appareils compris.
 5. Les appareils apparaissent dans l'onglet **Découverte**, prêts à être
    ajoutés à Gladys.
 
-L'**URL du service AirSend** et la **clé d'API airsend.cloud** ne servent que
-dans les deux cas décrits plus haut : un service à vous, et le repli cloud.
+L'**URL du service AirSend** ne sert que dans le cas décrit plus haut : un
+service à vous.
 
-L'interrupteur **Préférer la connexion locale** décide du canal essayé en
-premier. Chaque appareil affiche en pastille le canal qui a réellement porté
-son dernier ordre, avec un point orange s'il a fonctionné en mode dégradé
-(local refusé, repli sur le cloud).
+Chaque appareil affiche en pastille le canal qui a porté son dernier ordre :
+`local` quand votre boîtier a répondu, `unreachable` quand il n'a pas pu être
+joint.
 
 ## La liste d'appareils
 
-Sur airsend.cloud, ouvrez **Import/Export** et exportez vos appareils. Les deux
-formats proposés sont lus tels quels ; le champ **Appareils** étant une saisie
-sur une seule ligne, l'**export JSON** est le collage le plus sûr.
+Sur airsend.cloud, ouvrez **Import/Export** et exportez vos appareils en
+**JSON**. Cet export est lu tel quel, y compris sur une seule ligne, ce qui est
+exactement ce qu'attend le champ **Appareils**.
 
 ### L'export JSON
 
@@ -117,54 +88,38 @@ Il se présente ainsi — une liste, et le canal radio écrit à plat :
 ```
 
 Collez-le tel quel, y compris sur une seule ligne. `pid` et `addr` sont le
-canal radio de l'appareil : `pid` est ce que l'export YAML appelle
-`channel.id` (le protocole, partagé par tous les appareils pilotés de la même
-façon) et `addr` son `channel.source` (l'adresse de l'émetteur). `localip` est
-l'adresse du boîtier auquel l'appareil est rattaché ; le boîtier reste joint
-par la chaîne de connexion `sp://` saisie plus haut.
+canal radio de l'appareil : `pid` en est l'identifiant de canal (le protocole,
+partagé par tous les appareils pilotés de la même façon) et `addr` sa source
+(l'adresse de l'émetteur). `localip` est l'adresse du boîtier auquel l'appareil
+est rattaché ; le boîtier reste joint par la chaîne de connexion `sp://` saisie
+plus haut.
 
-Cet export ne porte pas d'`id` airsend.cloud : ces appareils sont donc pilotés
-par le **canal local** uniquement. C'est le fonctionnement normal — le cloud
-n'est qu'un repli — et il suffit d'ajouter un `id` à un appareil pour lui
-ouvrir aussi ce canal.
+Une entrée sans canal radio est ignorée : le boîtier n'aurait rien à émettre
+pour elle. Le boîtier lui-même (`type: 0`) fait exception — il répond toujours
+sur le canal 1.
 
-### L'export YAML
+### Écrire la liste à la main
 
-Cochez `spurl` à l'export pour la connexion locale : les références
-`!secret spurl` / `!secret apiKey` qu'il contient sont résolues avec les
-identifiants saisis plus haut. Il est lu tant que les retours à la ligne
-survivent au collage :
+La même liste peut s'écrire à la main, indexée par nom, avec le canal imbriqué
+sous `channel` plutôt que le couple `pid` / `addr` à plat. Cela reste du JSON :
 
-```yaml
-devices:
-  Boîtier AirSend:
-    type: 0
-    spurl: !secret spurl
-    sensors: true
-    refresh: 300
-
-  Volet salon:
-    id: 12345
-    type: 4098
-    invert: true
-    apiKey: !secret apiKey
-    channel:
-      id: 25455
-      source: 94311
-
-  Lumière pergola:
-    id: 65838
-    type: 4100
-    channel:
-      id: 26848
-      source: 1442421508
-
-  Capteur extérieur:
-    type: 1
-    features: [temperature, humidity]
-    channel:
-      id: 1368
-      source: 542
+```json
+{
+  "devices": {
+    "Boîtier AirSend": { "type": 0, "sensors": true, "refresh": 300 },
+    "Volet salon": {
+      "type": 4098,
+      "invert": true,
+      "channel": { "id": 25455, "source": 94311 }
+    },
+    "Lumière pergola": { "type": 4100, "channel": { "id": 26848, "source": 1442421508 } },
+    "Capteur extérieur": {
+      "type": 1,
+      "features": ["temperature", "humidity"],
+      "channel": { "id": 1368, "source": 542 }
+    }
+  }
+}
 ```
 
 ### Types d'appareils
@@ -184,12 +139,10 @@ devices:
 | Option     | Signification                                                                  |
 | ---------- | ------------------------------------------------------------------------------ |
 | `type`     | Type d'appareil (tableau ci-dessus), **obligatoire**                           |
-| `id`       | Identifiant airsend.cloud — nécessaire pour le canal cloud                     |
-| `channel`  | Canal radio (`id`, `source`, `mac`, `seed`) — nécessaire pour le canal local   |
+| `channel`  | Canal radio (`id`, `source`, `mac`, `seed`), **obligatoire**                   |
 | `pid`      | Le `channel.id` de l'export JSON (utilisez l'un ou l'autre)                    |
 | `addr`     | Le `channel.source` de l'export JSON                                           |
 | `spurl`    | Chaîne de connexion propre à cet appareil, si différente de la globale         |
-| `apiKey`   | Clé d'API propre à cet appareil, si différente de la globale                   |
 | `wait`     | Attendre la confirmation radio avant de répondre (`false` par défaut)          |
 | `invert`   | Inverser ouverture et fermeture, pour les volets posés à l'envers              |
 | `sensors`  | Sur un boîtier (`type: 0`), exposer ses capteurs de température et lumière     |
@@ -216,7 +169,7 @@ boîtier sont rafraîchis par interrogation périodique.
 
 ## Actions
 
-- **Tester la connexion** — vérifie les deux canaux et indique les appareils
+- **Tester la connexion** — vérifie le canal local et indique les appareils
   lus. Le moyen le plus rapide de repérer une chaîne de connexion mal saisie
   ou une liste d'appareils qui n'a pas été comprise.
 - **Identifier un appareil** — choisissez un appareil, un PING lui est envoyé.
@@ -227,7 +180,7 @@ boîtier sont rafraîchis par interrogation périodique.
 - Le 433 MHz est un protocole **unidirectionnel** pour la plupart des
   équipements : rien ne confirme qu'un ordre a été reçu, et Gladys affiche la
   valeur envoyée. L'écoute (ci-dessus) transforme cette hypothèse en état réel.
-- Les capteurs sont lus **dans le boîtier** : ils nécessitent le canal local.
+- Les capteurs sont lus **dans le boîtier**, par le canal local.
 - Le service intégré joint votre boîtier **depuis le conteneur de
   l'intégration**, à travers votre réseau : le `rhost=<IPv4>` de la chaîne de
   connexion est l'adresse qu'il compose, et elle doit être routable depuis
@@ -242,7 +195,7 @@ boîtier sont rafraîchis par interrogation périodique.
 | -------------------------------------- | -------------------------------------------------------------------------------------- |
 | `Invalid connection string`            | L'URL `sp://`, et que son mot de passe correspond au boîtier                           |
 | `Invalid input`                        | Le `channel` de l'appareil (`id`/`pid` et `source`/`addr`)                             |
-| `neither a cloud id nor…` (logs)       | L'entrée n'a pas de canal : il lui faut `channel.id`, ou `pid`/`addr`, ou un `id`      |
+| `no radio channel` (logs)              | L'entrée n'a pas de canal : il lui faut `channel.id`, ou le couple `pid`/`addr`        |
 | `no radio confirmation`                | Normal sans retour d'état : laissez `wait: false`                                      |
 | Aucun appareil dans « Découverte »     | **Tester la connexion** : la liste n'a sans doute pas été lue                          |
 | Le boîtier est injoignable             | La partie `?gw=0&rhost=<IPv4>` de la chaîne de connexion                               |

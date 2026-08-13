@@ -68,9 +68,8 @@ export function findDeviceByExternalId(gladys, config, externalId) {
 }
 
 /**
- * Build the `publishTransports` payload: which channel — local box or
- * airsend.cloud — actually carried the last exchange of each device, and
- * whether it was the nominal one.
+ * Build the `publishTransports` payload: whether the local box actually
+ * carried the last exchange of each device.
  *
  * Devices never contacted yet report the channel they WOULD use, so the badge
  * is meaningful before the first command instead of empty.
@@ -90,16 +89,7 @@ export function buildTransportEntries(gladys, config, client) {
 }
 
 function expectedTransport(client, device) {
-  const preferLocal = client.config?.GLADYS_PREFER_LOCAL !== false;
-  const local = client.canUseLocal(device);
-  const cloud = client.canUseCloud(device);
-  if (preferLocal ? local : cloud) {
-    return preferLocal ? 'local' : 'cloud';
-  }
-  if (preferLocal ? cloud : local) {
-    return preferLocal ? 'cloud' : 'local';
-  }
-  return 'unreachable';
+  return client.canUseLocal(device) ? 'local' : 'unreachable';
 }
 
 /**

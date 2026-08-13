@@ -7,10 +7,8 @@ import { NOTE_TYPES, stateNote, STATE_VALUES } from '../src/devmel/notes.js';
 const DEVICE = {
   name: 'Kitchen plug',
   platformId: '200-2',
-  id: '9000',
   channel: { id: 200, source: 2 },
   spurl: null,
-  apiKey: null,
   wait: false,
 };
 
@@ -41,7 +39,6 @@ function clientWith(overrides = {}) {
     normalizeConfig({
       service_url: 'http://192.168.1.50:33863',
       spurl: 'sp://pass@[fe80::1]?rhost=192.168.1.50',
-      api_key: 'cloud-key',
       ...overrides,
     }),
   );
@@ -105,45 +102,29 @@ test('an unanswered read is an error, not a silent success', async () => {
   const client = clientWith();
 
   await assert.rejects(
-    () => client.transfer({ ...DEVICE, id: null }, [stateNote(STATE_VALUES.ON)], { wait: true }),
+    () => client.transfer(DEVICE, [stateNote(STATE_VALUES.ON)], { wait: true }),
     /No radio confirmation/,
   );
 });
 
-test('an unreachable box falls back to airsend.cloud, flagged as degraded', async () => {
-  stubFetch((url) => {
-    if (url.includes('192.168.1.50')) {
-      throw new Error('connect ECONNREFUSED');
-    }
-    return jsonResponse(200);
+test('an unreachable box is reported as such, with no other channel to try', async () => {
+  stubFetch(() => {
+    throw new Error('connect ECONNREFUSED');
   });
   const client = clientWith();
 
-  const result = await client.transfer(DEVICE, [stateNote(STATE_VALUES.OFF)]);
-
-  assert.equal(result.transport, 'cloud');
-  assert.equal(result.degraded, true);
-  assert.match(result.message.fr, /repli sur airsend.cloud/);
-  assert.equal(calls[1].url, 'https://airsend.cloud/device/9000/command/0/');
-  assert.equal(calls[1].options.headers.Authorization, 'Bearer cloud-key');
-  // The badge remembers the channel that actually carried the order.
-  assert.deepEqual(client.transportOf(DEVICE).transport, 'cloud');
+  await assert.rejects(
+    () => client.transfer(DEVICE, [stateNote(STATE_VALUES.OFF)]),
+    /connect ECONNREFUSED/,
+  );
+  assert.equal(calls.length, 1);
+  // The badge remembers that nothing carried the order.
+  assert.equal(client.transportOf(DEVICE).transport, 'unreachable');
 });
 
-test('preferring the cloud sends the cloud request first, without degrading', async () => {
+test('a device with no transport reports itself unreachable', async () => {
   stubFetch(() => jsonResponse(200));
-  const client = clientWith({ GLADYS_PREFER_LOCAL: false });
-
-  const result = await client.transfer(DEVICE, [{ method: 1, type: NOTE_TYPES.LEVEL, value: 42 }]);
-
-  assert.equal(result.transport, 'cloud');
-  assert.equal(result.degraded, false);
-  assert.equal(calls[0].url, 'https://airsend.cloud/device/9000/level/42/');
-});
-
-test('a device with neither transport reports itself unreachable', async () => {
-  stubFetch(() => jsonResponse(200));
-  const client = clientWith({ service_url: '', spurl: '', api_key: '' });
+  const client = clientWith({ service_url: '', spurl: '', use_embedded_service: false });
 
   await assert.rejects(
     () => client.transfer(DEVICE, [stateNote(STATE_VALUES.ON)]),
@@ -155,7 +136,7 @@ test('a device with neither transport reports itself unreachable', async () => {
 
 test('a refused connection string is reported with what to fix', async () => {
   stubFetch(() => jsonResponse(401));
-  const client = clientWith({ api_key: '' });
+  const client = clientWith();
 
   await assert.rejects(
     () => client.transfer(DEVICE, [stateNote(STATE_VALUES.ON)]),
