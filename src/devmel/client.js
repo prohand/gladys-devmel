@@ -4,9 +4,10 @@
 // A Devmel device is reachable through two independent channels, and the
 // integration declares both in its manifest (`"transports": ["local","cloud"]`):
 //
-//   - LOCAL — the AirSend Web Service (the `airsend` Home Assistant add-on, the
-//     Jeedom daemon, or the same binary run standalone in Docker) exposes an
-//     HTTP API on port 33863. `POST /airsend/transfer` sends radio notes,
+//   - LOCAL — the AirSend Web Service exposes an HTTP API on port 33863. The
+//     integration ships it and runs it in its own container by default (see
+//     service.js), and can just as well use one running elsewhere on the LAN.
+//     `POST /airsend/transfer` sends radio notes,
 //     `POST /airsend/bind` subscribes to incoming ones. It authenticates with
 //     the `sp://` connection string exported from airsend.cloud.
 //
@@ -54,8 +55,12 @@ export class AirSendClient {
     this.config = config;
   }
 
+  /**
+   * Where the AirSend Web Service answers: the URL the user typed, or the
+   * loopback address of the one we run ourselves (see src/devmel/service.js).
+   */
   get serviceUrl() {
-    const raw = this.config?.service_url?.trim();
+    const raw = this.config?.effectiveServiceUrl?.trim();
     if (!raw) {
       return null;
     }

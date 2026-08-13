@@ -15,13 +15,17 @@
 
 import { parse as parseYaml } from 'yaml';
 import { createLogger } from '@gladysassistant/integration-sdk';
+import { SERVICE_URL as EMBEDDED_SERVICE_URL } from './devmel/service.js';
 
 const logger = createLogger({ name: 'config' });
+
+export { EMBEDDED_SERVICE_URL };
 
 // Defaults: they MUST stay consistent with the `default` values declared in the
 // `config_schema` of the manifest.
 export const DEFAULT_CONFIG = {
-  service_url: '', // AirSend Web Service, e.g. http://192.168.1.50:33863/
+  use_embedded_service: true, // run the bundled AirSend Web Service ourselves
+  service_url: '', // an AirSend Web Service elsewhere, e.g. http://192.168.1.50:33863/
   spurl: '', // sp://password@[fe80::…]?gw=0&rhost=192.168.1.50
   api_key: '', // airsend.cloud API key (cloud fallback)
   devices: '', // YAML/JSON exported from airsend.cloud
@@ -61,7 +65,17 @@ export function normalizeConfig(raw = {}) {
     poll_frequency: Number(raw.poll_frequency ?? DEFAULT_CONFIG.poll_frequency),
     // The preference is a boolean; anything but an explicit false means true.
     GLADYS_PREFER_LOCAL: raw.GLADYS_PREFER_LOCAL !== false,
+    use_embedded_service: raw.use_embedded_service !== false,
   };
+
+  // Who serves the local channel. A URL typed by the user wins: someone who
+  // already runs the service (the Home Assistant add-on, the Jeedom daemon)
+  // points at it and we start nothing. Otherwise the bundled one is started
+  // inside our own container and answers on the loopback address.
+  config.embeddedService = config.use_embedded_service && !config.service_url;
+  config.effectiveServiceUrl =
+    config.service_url || (config.embeddedService ? EMBEDDED_SERVICE_URL : '');
+
   config.devmelDevices = parseDevices(raw.devices, config);
   return config;
 }

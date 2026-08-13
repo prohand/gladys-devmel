@@ -1,6 +1,12 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { DEFAULT_CONFIG, hostFromSpurl, normalizeConfig, parseDevices } from '../src/config.js';
+import {
+  DEFAULT_CONFIG,
+  EMBEDDED_SERVICE_URL,
+  hostFromSpurl,
+  normalizeConfig,
+  parseDevices,
+} from '../src/config.js';
 
 test('normalizeConfig falls back to the defaults', () => {
   const config = normalizeConfig();
@@ -117,4 +123,25 @@ test('hostFromSpurl extracts the box address', () => {
   assert.equal(hostFromSpurl('sp://pass@[fe80::1234]?gw=0&rhost=192.168.1.50'), '192.168.1.50');
   assert.equal(hostFromSpurl('sp://pass@[fe80::1234]?gw=0'), 'fe80::1234');
   assert.equal(hostFromSpurl(''), null);
+});
+
+test('the bundled service serves the local channel out of the box', () => {
+  const config = normalizeConfig({ spurl: 'sp://pass@[fe80::1]?rhost=192.168.1.50' });
+  assert.equal(config.use_embedded_service, true);
+  assert.equal(config.embeddedService, true);
+  assert.equal(config.effectiveServiceUrl, EMBEDDED_SERVICE_URL);
+  assert.equal(config.effectiveServiceUrl, 'http://127.0.0.1:33863');
+});
+
+test('a service URL typed by the user wins over the bundled one', () => {
+  const config = normalizeConfig({ service_url: 'http://192.168.1.50:33863/' });
+  // Nothing to start in our own container: the user runs the service already.
+  assert.equal(config.embeddedService, false);
+  assert.equal(config.effectiveServiceUrl, 'http://192.168.1.50:33863/');
+});
+
+test('turning the bundled service off leaves no local channel at all', () => {
+  const config = normalizeConfig({ use_embedded_service: false });
+  assert.equal(config.embeddedService, false);
+  assert.equal(config.effectiveServiceUrl, '');
 });
