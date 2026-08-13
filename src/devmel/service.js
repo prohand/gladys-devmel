@@ -107,8 +107,8 @@ export class AirSendService {
 
   /**
    * Start or stop the service to match a configuration. Never throws: a service
-   * that will not start is a degraded local channel, not a broken integration —
-   * airsend.cloud may well be carrying the commands.
+   * that will not start is reported in the connection status, and the user may
+   * still point the configuration at a service of their own.
    */
   async apply(config) {
     this.wanted = config?.embeddedService === true;
@@ -153,7 +153,7 @@ export class AirSendService {
     if (!binary) {
       this.running = false;
       this.error = `No AirSend Web Service binary for this architecture (${process.arch}) in ${this.serviceDir}`;
-      logger.warn(`${this.error}; fill in the service URL by hand or use airsend.cloud`);
+      logger.warn(`${this.error}; fill in the URL of a service you run yourself by hand`);
       return false;
     }
 

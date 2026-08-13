@@ -54,16 +54,6 @@ test('a bundled service that would not start says so, and why', async () => {
   assert.match(status.message.en, /Built-in AirSend service unavailable: binary missing/);
 });
 
-test('a bundled service that would not start still leaves airsend.cloud', async () => {
-  const service = fakeService({ wanted: true, running: false, error: 'binary missing' });
-  const config = normalizeConfig({ spurl: SPURL, api_key: 'cloud-key' });
-
-  const status = await describeConnection(fakeClient(), config, service);
-
-  assert.equal(status.connected, true);
-  assert.match(status.message.fr, /les commandes passent par airsend.cloud/);
-});
-
 test('a service the user runs themselves is never blamed on the bundled one', async () => {
   const service = fakeService({ wanted: false, running: false, error: null });
   const config = normalizeConfig({ service_url: 'http://192.168.1.50:33863', spurl: SPURL });
@@ -80,8 +70,6 @@ test('test_connection names the built-in service and its address', async () => {
   const report = await testConnection(fakeClient(), config, RUNNING);
 
   assert.match(report.en, /AirSend built-in service reachable at http:\/\/127\.0\.0\.1:33863/);
-  // The cloud key is optional, and the report says as much.
-  assert.match(report.en, /Cloud: no API key — optional/);
 });
 
 test('test_connection reports a local channel switched off entirely', async () => {

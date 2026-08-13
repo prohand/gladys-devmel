@@ -150,8 +150,8 @@ test('dynamic selects declare a source and no static options', () => {
   }
 });
 
-test('the manifest declares both transports and a label in both languages', () => {
-  assert.deepEqual(manifest.transports, ['local', 'cloud']);
+test('the manifest declares the local transport and a label in both languages', () => {
+  assert.deepEqual(manifest.transports, ['local']);
   for (const field of [...manifest.config_schema, ...(manifest.actions ?? [])]) {
     assert.ok(field.label?.en && field.label?.fr, `field "${field.key}" needs en/fr labels`);
   }

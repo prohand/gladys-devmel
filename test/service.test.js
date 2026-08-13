@@ -39,7 +39,7 @@ test('a configuration that wants no embedded service starts nothing', async () =
   });
 });
 
-test('a missing binary is reported, not thrown: airsend.cloud may still work', async () => {
+test('a missing binary is reported, not thrown: the integration keeps running', async () => {
   const service = new AirSendService({
     serviceDir: await mkdtemp(join(tmpdir(), 'devmel-empty-')),
     dataDir: await mkdtemp(join(tmpdir(), 'devmel-data-')),

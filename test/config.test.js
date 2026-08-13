@@ -12,7 +12,6 @@ test('normalizeConfig falls back to the defaults', () => {
   const config = normalizeConfig();
   assert.equal(config.poll_frequency, DEFAULT_CONFIG.poll_frequency);
   assert.equal(config.listen_channel, DEFAULT_CONFIG.listen_channel);
-  assert.equal(config.GLADYS_PREFER_LOCAL, true);
   assert.deepEqual(config.devmelDevices, []);
 });
 
@@ -21,31 +20,27 @@ test('normalizeConfig coerces the values coming from the form', () => {
     service_url: '  http://192.168.1.50:33863/  ',
     poll_frequency: '600',
     listen_channel: '3',
-    GLADYS_PREFER_LOCAL: false,
   });
   assert.equal(config.service_url, 'http://192.168.1.50:33863/');
   assert.equal(config.poll_frequency, 600);
   assert.equal(config.listen_channel, 3);
-  assert.equal(config.GLADYS_PREFER_LOCAL, false);
 });
 
-test('parseDevices reads the YAML exported by airsend.cloud', () => {
+test('parseDevices reads a device list keyed by name', () => {
   const devices = parseDevices(
-    `devices:
-  AirSend box:
-    type: 0
-    spurl: !secret spurl
-    sensors: true
-    refresh: 120
-  Living room shutter:
-    id: 12345
-    type: 4098
-    invert: true
-    apiKey: !secret apiKey
-    channel:
-      id: 25455
-      source: 94311`,
-    { spurl: 'sp://pass@[fe80::1]?rhost=192.168.1.50', api_key: 'cloud-key' },
+    `{"devices":{
+      "AirSend box": {
+        "type": 0,
+        "spurl": "sp://pass@[fe80::1]?rhost=192.168.1.50",
+        "sensors": true,
+        "refresh": 120
+      },
+      "Living room shutter": {
+        "type": 4098,
+        "invert": true,
+        "channel": { "id": 25455, "source": 94311 }
+      }
+    }}`,
   );
 
   assert.equal(devices.length, 2);
@@ -55,15 +50,14 @@ test('parseDevices reads the YAML exported by airsend.cloud', () => {
   assert.equal(box.sensors, true);
   assert.equal(box.refresh, 120);
   assert.deepEqual(box.channel, { id: 1 });
-  // `!secret spurl` resolves against the credentials of the configuration form.
+  // A box carries its own connection string, and is identified by its address.
   assert.equal(box.spurl, 'sp://pass@[fe80::1]?rhost=192.168.1.50');
   assert.equal(box.platformId, '192-168-1-50');
 
   assert.equal(shutter.rtype, 4098);
   assert.equal(shutter.invert, true);
-  assert.equal(shutter.apiKey, 'cloud-key');
   assert.deepEqual(shutter.channel, { id: 25455, source: 94311 });
-  assert.equal(shutter.platformId, '12345');
+  assert.equal(shutter.platformId, '25455-94311');
 });
 
 test('parseDevices accepts JSON, with or without the devices wrapper', () => {
@@ -92,27 +86,23 @@ test('parseDevices reads the JSON exported by airsend.cloud (pid/addr)', () => {
   assert.equal(shutter.rtype, 4098);
   assert.deepEqual(shutter.channel, { id: 25455, source: 8295 });
   assert.equal(shutter.localIp, 'fe80::dcf6:e5ff:fe8f:89cd');
-  assert.equal(shutter.id, null);
   assert.equal(shutter.platformId, '25455-8295');
 });
 
-test('the cloud id is never mistaken for a channel id', () => {
-  const [cloudOnly, both] = parseDevices(`
-    Cloud only:
-      id: 12345
-      type: 4097
-    Both:
-      id: 54321
-      type: 4098
-      pid: 25455
-      addr: 8295
-  `);
-  // A device known by its cloud id alone has no radio channel at all...
-  assert.equal(cloudOnly.channel, null);
-  assert.equal(cloudOnly.platformId, '12345');
-  // ...and when both are there, each keeps its own meaning.
-  assert.equal(both.id, '54321');
-  assert.deepEqual(both.channel, { id: 25455, source: 8295 });
+test('an airsend.cloud device id is never mistaken for a channel id', () => {
+  const devices = parseDevices(
+    '[{"name":"Cloud only","id":12345,"type":4097},' +
+      '{"name":"Radio","id":54321,"type":4098,"pid":25455,"addr":8295}]',
+  );
+  // A device known by its airsend.cloud id alone has no radio channel: nothing
+  // can drive it locally, so it is dropped...
+  assert.deepEqual(
+    devices.map((device) => device.name),
+    ['Radio'],
+  );
+  // ...and where a channel is there, the device id never stands in for it.
+  assert.deepEqual(devices[0].channel, { id: 25455, source: 8295 });
+  assert.equal(devices[0].platformId, '25455-8295');
 });
 
 test('a nested channel wins over the flat fields of the JSON export', () => {
@@ -123,19 +113,12 @@ test('a nested channel wins over the flat fields of the JSON export', () => {
 });
 
 test('parseDevices drops what it cannot use', () => {
-  const devices = parseDevices(`
-    Unknown type:
-      type: 9999
-      channel: { id: 1 }
-    No channel nor id:
-      type: 4097
-    Valid:
-      type: 4097
-      channel: { id: 1, source: 2 }
-    Duplicate:
-      type: 4097
-      channel: { id: 1, source: 2 }
-  `);
+  const devices = parseDevices(
+    `[{"name":"Unknown type","type":9999,"channel":{"id":1}},
+      {"name":"No channel","type":4097},
+      {"name":"Valid","type":4097,"channel":{"id":1,"source":2}},
+      {"name":"Duplicate","type":4097,"channel":{"id":1,"source":2}}]`,
+  );
   assert.deepEqual(
     devices.map((device) => device.name),
     ['Valid'],
@@ -143,21 +126,18 @@ test('parseDevices drops what it cannot use', () => {
 });
 
 test('parseDevices survives a broken paste', () => {
-  assert.deepEqual(parseDevices('this is: not: valid: yaml'), []);
+  assert.deepEqual(parseDevices('{"devices":[{"name":"Plug"'), []);
+  assert.deepEqual(parseDevices('devices:\n  Plug:\n    type: 4097'), []);
   assert.deepEqual(parseDevices('   '), []);
   assert.deepEqual(parseDevices(undefined), []);
 });
 
 test('a sensor declares the readings it emits, and clicks by default', () => {
-  const [withFeatures, bare] = parseDevices(`
-    Outdoor sensor:
-      type: 1
-      features: [temperature, humidity, nonsense]
-      channel: { id: 1368, source: 542 }
-    Original remote:
-      type: 1
-      channel: { id: 13920, source: 568745 }
-  `);
+  const [withFeatures, bare] = parseDevices(
+    `[{"name":"Outdoor sensor","type":1,"features":["temperature","humidity","nonsense"],
+       "channel":{"id":1368,"source":542}},
+      {"name":"Original remote","type":1,"channel":{"id":13920,"source":568745}}]`,
+  );
   assert.deepEqual(withFeatures.features, ['temperature', 'humidity']);
   assert.deepEqual(bare.features, ['click']);
 });

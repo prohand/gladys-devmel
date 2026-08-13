@@ -24,10 +24,6 @@ export function createFakeClient({ answers = [], config = {} } = {}) {
       return true;
     },
 
-    canUseCloud(device) {
-      return Boolean(device.id);
-    },
-
     transportOf() {
       return undefined;
     },

@@ -13,33 +13,22 @@ import { NOTE_TYPES, STATE_VALUES } from '../src/devmel/notes.js';
 import { createFakeGladys } from './helpers/fakeGladys.js';
 import { createFakeClient } from './helpers/fakeAirSend.js';
 
-const DEVICES = `devices:
-  AirSend box:
-    type: 0
-    sensors: true
-  Silent box:
-    type: 0
-    id: 999
-  Garage:
-    type: 4096
-    channel: { id: 100, source: 1 }
-  Kitchen plug:
-    type: 4097
-    channel: { id: 200, source: 2 }
-  Living room shutter:
-    type: 4098
-    channel: { id: 300, source: 3 }
-  Bedroom shutter:
-    type: 4099
-    invert: true
-    channel: { id: 400, source: 4 }
-  Pergola light:
-    type: 4100
-    channel: { id: 500, source: 5 }
-  Outdoor sensor:
-    type: 1
-    features: [temperature, humidity]
-    channel: { id: 600, source: 6 }`;
+const DEVICES = JSON.stringify({
+  devices: {
+    'AirSend box': { type: 0, sensors: true },
+    'Silent box': { type: 0 },
+    Garage: { type: 4096, channel: { id: 100, source: 1 } },
+    'Kitchen plug': { type: 4097, channel: { id: 200, source: 2 } },
+    'Living room shutter': { type: 4098, channel: { id: 300, source: 3 } },
+    'Bedroom shutter': { type: 4099, invert: true, channel: { id: 400, source: 4 } },
+    'Pergola light': { type: 4100, channel: { id: 500, source: 5 } },
+    'Outdoor sensor': {
+      type: 1,
+      features: ['temperature', 'humidity'],
+      channel: { id: 600, source: 6 },
+    },
+  },
+});
 
 function setup() {
   const gladys = createFakeGladys();

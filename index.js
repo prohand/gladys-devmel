@@ -169,8 +169,8 @@ async function initialize(rawConfig) {
 
   // Before anything talks to the box: bring the local channel up. `apply()`
   // starts the bundled service, stops it when the user switched to their own,
-  // and never throws — a missing local channel is not a reason to give up on
-  // airsend.cloud.
+  // and never throws — a service that would not start is reported in the
+  // connection status, not by crashing the integration.
   await service.apply(config);
 
   client.configure(config);
@@ -227,10 +227,8 @@ function stopListening() {
 }
 
 /**
- * Publish the effective transport of every device ('local' | 'cloud' |
- * 'unreachable'), rendered as a badge in the Gladys UI. An entry can also flag
- * a degraded state (orange dot + reason): local preferred but refused, cloud
- * fallback used.
+ * Publish the effective transport of every device ('local' | 'unreachable'),
+ * rendered as a badge in the Gladys UI.
  */
 async function publishDeviceTransports() {
   const entries = buildTransportEntries(gladys, config, client);
