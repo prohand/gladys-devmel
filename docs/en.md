@@ -212,19 +212,38 @@ what that position is. Measure it once and declare it with
 Without it, the shutter is reported as stopped somewhere in between — the
 honest answer.
 
-## Listening to the radio (optional, needs Gladys Plus)
+## Listening to the radio
 
 The AirSend box can forward every frame it hears — a wall remote pressed by
 hand, a weather sensor waking up — so Gladys follows what happens in the house
-instead of only what it ordered itself.
+instead of only what it ordered itself. It is what makes the position of a
+shutter move when it is opened from its own remote.
 
-The box pushes those frames to a public URL, which Gladys Plus provides: link
-your Gladys Plus account and paste your Open API key in the **Webhooks** block
-of the Configuration screen. The integration then subscribes the box to the
-**listening channel** (channel `1` by default; `0` disables it).
+It is **on by default**: the integration subscribes the box to the **listening
+channel** (`1` by default, `0` disables it) and receives the frames itself.
+Nothing to install, nothing to link.
 
-Without Gladys Plus everything else keeps working, and the box sensors are
-refreshed by polling.
+### Choosing the listening channel
+
+Channel `1` is **generic 433 MHz listening**: it covers most equipment, and it
+is the right place to start. If your remote is not heard, its protocol is not
+part of that generic listening: enter the **`pid` of the device** (the one from
+your device list) as the listening channel instead. The box listens to one
+channel at a time.
+
+To check, click **Test the connection**: the _Listening_ line says where the
+frames are pushed, or why they are not. Frames heard on a channel no device
+declares are logged by the integration with their `pid` and `addr` — everything
+you need to complete your device list.
+
+### If you run the AirSend service elsewhere
+
+The AirSend Web Service pushes the frames from the machine it runs on. When the
+integration is the one running it (the default), it pushes them straight to the
+integration. A service running **on another machine** has no way to reach the
+integration, so the frames have to go through a public URL, which Gladys Plus
+provides: link your Gladys Plus account and paste your Open API key in the
+**Webhooks** block of the Configuration screen.
 
 ## Actions
 

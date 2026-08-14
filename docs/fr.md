@@ -221,20 +221,40 @@ laquelle. Mesurez-la une fois et déclarez-la avec `"favorite_position": 40` :
 appuyer sur ce bouton remonte alors 40 % dans Gladys. Sans elle, le volet est
 signalé arrêté quelque part entre les deux — la réponse honnête.
 
-## Écouter la radio (optionnel, nécessite Gladys Plus)
+## Écouter la radio
 
 Le boîtier AirSend peut retransmettre chaque trame qu'il entend — une
 télécommande murale actionnée à la main, un capteur météo qui se réveille —
 pour que Gladys suive ce qui se passe dans la maison, et pas seulement ce
-qu'il a lui-même commandé.
+qu'il a lui-même commandé. C'est ce qui fait bouger la position d'un volet
+quand on l'ouvre depuis sa télécommande.
 
-Le boîtier pousse ces trames vers une URL publique, fournie par Gladys Plus :
-liez votre compte Gladys Plus et collez votre clé Open API dans le bloc
-**Webhooks** de l'écran de configuration. L'intégration abonne alors le
-boîtier au **canal d'écoute** (canal `1` par défaut ; `0` désactive l'écoute).
+C'est **actif par défaut** : l'intégration abonne le boîtier au **canal
+d'écoute** (`1` par défaut, `0` désactive l'écoute) et reçoit les trames chez
+elle. Rien à installer, rien à lier.
 
-Sans Gladys Plus tout le reste continue de fonctionner, et les capteurs du
-boîtier sont rafraîchis par interrogation périodique.
+### Choisir le canal d'écoute
+
+Le canal `1` est l'**écoute générique 433 MHz** : elle couvre la plupart des
+équipements, et c'est le bon choix pour commencer. Si votre télécommande n'est
+pas entendue, c'est que son protocole n'entre pas dans cette écoute générique :
+saisissez alors le **`pid` de l'appareil** (celui de votre liste d'appareils)
+comme canal d'écoute. Le boîtier n'écoute qu'un canal à la fois.
+
+Pour vérifier, cliquez sur **Tester la connexion** : la ligne _Écoute_ dit vers
+où les trames sont poussées, ou pourquoi elles ne le sont pas. Les trames
+entendues sur un canal qu'aucun appareil ne déclare sont notées dans les logs
+de l'intégration, avec leur `pid` et leur `addr` — de quoi compléter votre
+liste d'appareils.
+
+### Si vous faites tourner le service AirSend ailleurs
+
+Le service web AirSend pousse les trames depuis la machine où il tourne. Quand
+c'est l'intégration qui le fait tourner (le cas par défaut), il les pousse
+directement chez elle. Un service qui tourne **sur une autre machine**, lui, ne
+sait pas joindre l'intégration : les trames doivent alors passer par une URL
+publique, fournie par Gladys Plus. Liez votre compte Gladys Plus et collez
+votre clé Open API dans le bloc **Webhooks** de l'écran de configuration.
 
 ## Actions
 

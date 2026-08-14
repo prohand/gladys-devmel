@@ -80,6 +80,40 @@ test('test_connection reports a local channel switched off entirely', async () =
   assert.match(report.en, /Local: disabled/);
 });
 
+test('test_connection says where the heard frames are pushed', async () => {
+  const config = normalizeConfig({ spurl: SPURL });
+
+  const report = await testConnection(fakeClient(), config, RUNNING, {
+    url: 'http://127.0.0.1:33864/',
+    error: null,
+  });
+
+  assert.match(report.en, /Listening: channel 1, frames pushed to http:\/\/127\.0\.0\.1:33864\//);
+  assert.match(report.fr, /Écoute : canal 1, trames poussées vers/);
+});
+
+test('test_connection reports a subscription the box refused', async () => {
+  const config = normalizeConfig({ spurl: SPURL });
+
+  const report = await testConnection(fakeClient(), config, RUNNING, {
+    url: null,
+    error: 'HTTP 405',
+  });
+
+  assert.match(report.en, /Listening: channel 1: the box refused the subscription \(HTTP 405\)/);
+});
+
+test('test_connection reports listening switched off, and a listener with no route', async () => {
+  const off = await testConnection(fakeClient(), normalizeConfig({ listen_channel: 0 }), RUNNING);
+  assert.match(off.en, /Listening: disabled/);
+
+  // A service the user runs elsewhere cannot reach our loopback: without the
+  // Gladys Plus relay there is nowhere for the frames to go.
+  const config = normalizeConfig({ spurl: SPURL, service_url: 'http://192.168.1.50:33863' });
+  const orphan = await testConnection(fakeClient(), config, null, { url: null, error: null });
+  assert.match(orphan.en, /no route for the frames.*Gladys Plus/s);
+});
+
 test('the implicit box follows the service that actually serves the local channel', () => {
   // No box in the device list: one is rebuilt from the global credentials, and
   // the bundled service is enough for it to exist.
