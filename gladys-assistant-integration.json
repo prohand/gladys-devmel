@@ -6,11 +6,13 @@
     "en": "Control the shutters, switches, lights and sensors of a Devmel AirSend radio gateway.",
     "fr": "Pilotez volets, interrupteurs, lampes et capteurs d'une passerelle radio Devmel AirSend."
   },
-  "version": "1.0.0",
-  "docker_image": "ghcr.io/prohand/gladys-devmel:1.0.0",
+  "version": "1.0.1",
+  "docker_image": "ghcr.io/prohand/gladys-devmel:1.0.1",
   "gladys_version": ">=4.85.0",
   "cover_image": "https://raw.githubusercontent.com/prohand/gladys-devmel/main/cover.png",
-  "transports": ["local"],
+  "transports": [
+    "local"
+  ],
   "webhooks": [
     {
       "key": "events",
@@ -25,7 +27,10 @@
     {
       "key": "intro",
       "type": "section",
-      "label": { "en": "Getting started", "fr": "Pour commencer" },
+      "label": {
+        "en": "Getting started",
+        "fr": "Pour commencer"
+      },
       "description": {
         "en": "The AirSend Web Service is included: it runs inside this integration, on http://127.0.0.1:33863, and there is nothing to install on your network. All it needs is the sp:// connection string of your box. Devices are configured in the AirSend app, then exported from airsend.cloud (Import/Export, JSON): paste that export below, the integration reads it as is.",
         "fr": "Le service AirSend est inclus : il tourne dans cette intégration, sur http://127.0.0.1:33863, et il n'y a rien à installer sur votre réseau. Il lui faut seulement la chaîne de connexion sp:// de votre boîtier. Les appareils se configurent dans l'application AirSend, puis s'exportent depuis airsend.cloud (Import/Export, JSON) : collez cet export ci-dessous, l'intégration le lit tel quel."
@@ -33,11 +38,17 @@
       "links": [
         {
           "url": "https://app.airsend.cloud",
-          "label": { "en": "airsend.cloud", "fr": "airsend.cloud" }
+          "label": {
+            "en": "airsend.cloud",
+            "fr": "airsend.cloud"
+          }
         },
         {
           "url": "https://github.com/prohand/gladys-devmel/blob/main/docs/en.md",
-          "label": { "en": "Integration documentation", "fr": "Documentation de l'intégration" }
+          "label": {
+            "en": "Integration documentation",
+            "fr": "Documentation de l'intégration"
+          }
         }
       ]
     },
@@ -58,7 +69,10 @@
     {
       "key": "service_url",
       "type": "string",
-      "label": { "en": "AirSend Web Service URL", "fr": "URL du service AirSend" },
+      "label": {
+        "en": "AirSend Web Service URL",
+        "fr": "URL du service AirSend"
+      },
       "description": {
         "en": "Only if you run the AirSend Web Service yourself (Home Assistant add-on, Jeedom daemon, your own container): its address on your network, e.g. http://192.168.1.50:33863/. Leave empty to use the built-in one.",
         "fr": "Uniquement si vous faites tourner le service AirSend vous-même (add-on Home Assistant, démon Jeedom, votre propre conteneur) : son adresse sur votre réseau, par exemple http://192.168.1.50:33863/. Laissez vide pour utiliser celui intégré."
@@ -72,7 +86,10 @@
     {
       "key": "spurl",
       "type": "secret",
-      "label": { "en": "Local connection string", "fr": "Chaîne de connexion locale" },
+      "label": {
+        "en": "Local connection string",
+        "fr": "Chaîne de connexion locale"
+      },
       "description": {
         "en": "The sp:// URL exported by airsend.cloud, e.g. sp://password@[fe80::...]?gw=0&rhost=192.168.1.50",
         "fr": "L'URL sp:// exportée par airsend.cloud, par exemple sp://motdepasse@[fe80::...]?gw=0&rhost=192.168.1.50"
@@ -86,7 +103,10 @@
     {
       "key": "devices",
       "type": "string",
-      "label": { "en": "Devices", "fr": "Appareils" },
+      "label": {
+        "en": "Devices",
+        "fr": "Appareils"
+      },
       "description": {
         "en": "Your airsend.cloud JSON export, pasted as is: one entry per device, with its type and its radio channel (written as pid/addr). See the documentation.",
         "fr": "Votre export JSON airsend.cloud, collé tel quel : une entrée par appareil, avec son type et son canal radio (écrit pid/addr). Voir la documentation."
@@ -100,7 +120,10 @@
     {
       "key": "listen_channel",
       "type": "number",
-      "label": { "en": "Listening channel", "fr": "Canal d'écoute" },
+      "label": {
+        "en": "Listening channel",
+        "fr": "Canal d'écoute"
+      },
       "description": {
         "en": "Radio channel the box listens to in order to push what it hears (wall remotes, sensors) to Gladys. 0 disables listening. Requires Gladys Plus.",
         "fr": "Canal radio que le boîtier écoute pour pousser vers Gladys ce qu'il entend (télécommandes murales, capteurs). 0 désactive l'écoute. Nécessite Gladys Plus."
@@ -113,7 +136,10 @@
     {
       "key": "poll_frequency",
       "type": "number",
-      "label": { "en": "Refresh interval (s)", "fr": "Intervalle de rafraîchissement (s)" },
+      "label": {
+        "en": "Refresh interval (s)",
+        "fr": "Intervalle de rafraîchissement (s)"
+      },
       "description": {
         "en": "How often the box sensors are read, in seconds. A device can override it with its own refresh value.",
         "fr": "Fréquence de lecture des capteurs du boîtier, en secondes. Un appareil peut la surcharger avec sa propre valeur refresh."
@@ -127,19 +153,28 @@
   "actions": [
     {
       "key": "test_connection",
-      "label": { "en": "Test the connection", "fr": "Tester la connexion" },
+      "label": {
+        "en": "Test the connection",
+        "fr": "Tester la connexion"
+      },
       "timeout_seconds": 30
     },
     {
       "key": "identify",
-      "label": { "en": "Identify a device", "fr": "Identifier un appareil" },
+      "label": {
+        "en": "Identify a device",
+        "fr": "Identifier un appareil"
+      },
       "timeout_seconds": 30,
       "fields": [
         {
           "key": "device",
           "type": "select",
           "source": "devices",
-          "label": { "en": "Device", "fr": "Appareil" },
+          "label": {
+            "en": "Device",
+            "fr": "Appareil"
+          },
           "required": true
         }
       ]
