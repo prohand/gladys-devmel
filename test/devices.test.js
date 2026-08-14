@@ -210,6 +210,37 @@ test('a radio frame updates the device sharing its channel', async () => {
   ]);
 });
 
+test('the wall remote of a shutter drives it like Gladys does', async () => {
+  // The AirSend emits on the shutter's protocol from its own address; the
+  // remote screwed on the wall emits on the same protocol from another one.
+  // Declared as a remote, it moves the same Gladys device.
+  const gladys = createFakeGladys();
+  const config = normalizeConfig({
+    devices: JSON.stringify({
+      devices: {
+        'Living room shutter': {
+          type: 4098,
+          travel: 20,
+          channel: { id: 300, source: 3 },
+          remotes: [42],
+        },
+      },
+    }),
+  });
+
+  const applied = await applyEvents(gladys, config, [
+    {
+      type: 3,
+      reliability: 0x20,
+      channel: { id: 300, source: 42, counter: 7 },
+      thingnotes: { notes: [{ type: NOTE_TYPES.STATE, value: STATE_VALUES.UP }] },
+    },
+  ]);
+
+  assert.equal(applied, 1);
+  shutter.travel.clear();
+});
+
 test('noisy and unknown radio frames are dropped', async () => {
   const { gladys, config } = setup();
   const applied = await applyEvents(gladys, config, [

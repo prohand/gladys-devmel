@@ -25,9 +25,15 @@ export const DEFAULT_CONFIG = {
   service_url: '', // an AirSend Web Service elsewhere, e.g. http://192.168.1.50:33863/
   spurl: '', // sp://password@[fe80::…]?gw=0&rhost=192.168.1.50
   devices: '', // JSON exported from airsend.cloud
-  listen_channel: 1, // radio channel the box forwards to Gladys (0 = disabled)
+  listen_channel: null, // radio protocol to listen to; null = deduced, 0 = disabled
   poll_frequency: 300, // seconds between two sensor reads
 };
+
+/**
+ * The generic 433 MHz decoder. It is a radio channel like any other, and the
+ * one the box falls back to when no protocol-specific decoder is known.
+ */
+export const GENERIC_433_CHANNEL = 1;
 
 /** AirSend device types, as numbered by airsend.cloud. */
 export const DEVICE_TYPES = {
@@ -51,8 +57,11 @@ export function normalizeConfig(raw = {}) {
     // Force the types: config may arrive as strings from a form.
     service_url: String(raw.service_url ?? DEFAULT_CONFIG.service_url).trim(),
     spurl: String(raw.spurl ?? DEFAULT_CONFIG.spurl).trim(),
-    listen_channel: Number(raw.listen_channel ?? DEFAULT_CONFIG.listen_channel),
-    poll_frequency: Number(raw.poll_frequency ?? DEFAULT_CONFIG.poll_frequency),
+    listen_channel: toListenChannel(raw.listen_channel),
+    // An emptied number field arrives as '', which `Number()` reads as 0: a
+    // refresh interval of zero, and (before `toListenChannel`) a radio listener
+    // silently turned off by a field nobody touched.
+    poll_frequency: toPositiveNumber(raw.poll_frequency, DEFAULT_CONFIG.poll_frequency),
     use_embedded_service: raw.use_embedded_service !== false,
   };
 
@@ -167,6 +176,11 @@ function normalizeDevice(name, entry, config) {
     // airsend.cloud. Informative: the box is reached through the sp:// URL.
     localIp,
     spurl,
+    // Other emitters that drive the same equipment: the wall remote next to it,
+    // a keyfob, a second AirSend. They speak the same protocol from another
+    // address, so the box hears them on another channel — and this device is
+    // what they act on (see `applyEvents`).
+    remotes: normalizeRemotes(firstDefined(entry.remotes, entry.remote), channel),
     // Wait for the radio confirmation before answering. Off by default: most
     // 433 MHz devices are write-only and never acknowledge.
     wait: toBoolean(entry.wait, false),
@@ -234,6 +248,40 @@ function normalizeChannel(entry, rtype) {
     }
   }
   return normalized.id === undefined ? null : normalized;
+}
+
+/**
+ * The channels of the other emitters declared for a device.
+ *
+ * The address is what changes from one remote to the next, so the short form is
+ * just that — `"remotes": [94311]`, read on the protocol of the device itself,
+ * which is what the log of an unclaimed frame prints. A remote on another
+ * protocol spells both out: `"remotes": [{ "pid": 1368, "addr": 542 }]`.
+ *
+ * @returns {Array<{id: number, source: number}>}
+ */
+function normalizeRemotes(source, channel) {
+  if (source === undefined || source === null || source === '') {
+    return [];
+  }
+  const list = Array.isArray(source) ? source : [source];
+  const remotes = [];
+  for (const entry of list) {
+    const flat = typeof entry === 'object' && entry !== null ? entry : { addr: entry };
+    const id = firstNumber(flat.pid, flat.id, flat.channelId, flat.channel_id, channel?.id);
+    const address = firstNumber(flat.addr, flat.source, flat.address);
+    if (id === null || address === null) {
+      logger.warn(`Ignoring a remote without an address: ${JSON.stringify(entry)}`);
+      continue;
+    }
+    remotes.push({ id, source: address });
+  }
+  return remotes;
+}
+
+/** First value of the list that is neither undefined nor null. */
+function firstDefined(...values) {
+  return values.find((value) => value !== undefined && value !== null);
 }
 
 /** First value of the list that is a usable number, or null. */
@@ -313,6 +361,32 @@ function toBoolean(value, fallback) {
     return value;
   }
   return ['1', 'true', 'yes', 'on'].includes(String(value).trim().toLowerCase());
+}
+
+/**
+ * The listening channel, as the user may leave it or fill it.
+ *
+ * What the box listens to is a *protocol*, not a device: `1` is the generic
+ * 433 MHz decoder, and every other value is one of the protocols the AirSend
+ * Web Service knows (see src/devmel/listening.js). So:
+ *
+ *   - `0`            listening off;
+ *   - empty, or `1`  deduce it from the device list — `1` is what the field
+ *                    defaulted to before it could be deduced, and a deduction
+ *                    that finds nothing better falls back to it anyway;
+ *   - anything else  that protocol, whatever the device list says.
+ *
+ * @returns {number|null} the forced channel, 0 to disable, null to deduce
+ */
+function toListenChannel(value) {
+  if (value === undefined || value === null || String(value).trim() === '') {
+    return null;
+  }
+  const number = Number(value);
+  if (!Number.isFinite(number) || number === GENERIC_433_CHANNEL) {
+    return null;
+  }
+  return number > 0 ? Math.trunc(number) : 0;
 }
 
 function toPositiveNumber(value, fallback) {

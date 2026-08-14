@@ -135,6 +135,7 @@ under `channel` instead of the flat `pid` / `addr` pair. It stays JSON:
 | `channel`           | Radio channel (`id`, `source`, `mac`, `seed`), **required**                |
 | `pid`               | The `channel.id` of the JSON export (use either form)                      |
 | `addr`              | The `channel.source` of the JSON export                                    |
+| `remotes`           | Other emitters driving the device (see "The wall remote")                  |
 | `spurl`             | Connection string of this device, if it differs from the global one        |
 | `wait`              | Wait for the radio confirmation before answering (`false` by default)      |
 | `invert`            | Swap open and close, for shutters installed the other way round            |
@@ -219,22 +220,56 @@ hand, a weather sensor waking up — so Gladys follows what happens in the house
 instead of only what it ordered itself. It is what makes the position of a
 shutter move when it is opened from its own remote.
 
-It is **on by default**: the integration subscribes the box to the **listening
-channel** (`1` by default, `0` disables it) and receives the frames itself.
-Nothing to install, nothing to link.
+It is **on by default**, and there is nothing to set: the integration
+subscribes the box to the radio protocol of your devices and receives the
+frames itself. Nothing to install, nothing to link.
 
-### Choosing the listening channel
+### The listening channel
 
-Channel `1` is **generic 433 MHz listening**: it covers most equipment, and it
-is the right place to start. If your remote is not heard, its protocol is not
-part of that generic listening: enter the **`pid` of the device** (the one from
-your device list) as the listening channel instead. The box listens to one
-channel at a time.
+What the box listens to is a **protocol**, not a device: it has one radio, and
+subscribing switches it to permanent reception **of a single protocol** at a
+time. Channel `1` is generic 433 MHz listening, which covers the protocols
+built to fit in it — but not the others, and a Somfy shutter listened to on
+channel `1` stays as silent as a remote nobody presses.
 
-To check, click **Test the connection**: the _Listening_ line says where the
-frames are pushed, or why they are not. Frames heard on a channel no device
-declares are logged by the integration with their `pid` and `addr` — everything
-you need to complete your device list.
+So the integration does not guess: it asks the AirSend service which channel
+decodes which protocol, and subscribes the box to the one your devices use.
+Leave the **Listening channel** field empty.
+
+Fill it in only to listen to something else: the `pid` of a protocol you have
+not declared yet, `1` for generic listening, or `0` to turn listening off.
+
+To check, click **Test the connection**: the _Listening_ line says which
+protocol is listened to, which devices it covers, and where the frames are
+pushed — or why they are not.
+
+### The wall remote
+
+One shutter is driven by several emitters: the AirSend box, and the remote
+screwed on the wall. They speak the same protocol from **different addresses**,
+so the box hears them on different channels, and a frame coming from the wall
+belongs to no declared device. It is logged by the integration, with its `pid`
+and its `addr`.
+
+Attach that address to the device it drives, and pressing the wall remote
+updates the shutter in Gladys just like Gladys itself would:
+
+```json
+{
+  "devices": {
+    "Living room shutter": {
+      "type": 4098,
+      "travel_up": 30,
+      "travel_down": 26,
+      "channel": { "id": 25455, "source": 8295 },
+      "remotes": [94311]
+    }
+  }
+}
+```
+
+A bare address is read on the protocol of the device itself; a remote on
+another protocol is written in full: `"remotes": [{ "pid": 1368, "addr": 542 }]`.
 
 ### If you run the AirSend service elsewhere
 

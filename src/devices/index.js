@@ -177,7 +177,7 @@ export async function applyEvents(gladys, config, events) {
     const createdAt = toDate(event.timestamp);
     let matched = 0;
     for (const device of config.devmelDevices) {
-      if (!isSameChannel(event.channel, device.channel)) {
+      if (!hearsChannel(device, event.channel)) {
         continue;
       }
       matched += 1;
@@ -193,16 +193,29 @@ export async function applyEvents(gladys, config, events) {
       }
     }
     if (matched === 0) {
-      // Worth saying out loud: this is what a frame from a remote that is not
-      // in the device list looks like, and the channel below is exactly the
-      // `pid` / `addr` pair to add to it.
+      // Worth saying out loud: this is what the wall remote of an equipment
+      // already in the list looks like — same protocol, its own address — and
+      // the pair below is exactly what `remotes` takes to attach it.
       logger.info(
         `Heard a frame on a channel no device declares: pid ${event.channel.id}` +
-          `${event.channel.source === undefined ? '' : `, addr ${event.channel.source}`}`,
+          `${event.channel.source === undefined ? '' : `, addr ${event.channel.source}`}` +
+          '. Add it to the "remotes" of the device it drives to follow it.',
       );
     }
   }
   return applied;
+}
+
+/**
+ * Does a frame heard on `channel` belong to this device? Its own channel is the
+ * obvious one; the emitters declared in `remotes` are the wall remote, the
+ * keyfob or the second AirSend driving the same equipment from another address.
+ */
+export function hearsChannel(device, channel) {
+  if (isSameChannel(channel, device.channel)) {
+    return true;
+  }
+  return (device.remotes ?? []).some((remote) => isSameChannel(channel, remote));
 }
 
 /**

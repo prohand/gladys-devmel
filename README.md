@@ -54,14 +54,22 @@ Each device reports the channel that actually carried its last order
 (`publishTransports`): `local` when the box answered, `unreachable` when
 nothing did.
 
-The box is bound to the listening channel, and every radio frame it hears — a
+The box is bound to a listening channel, and every radio frame it hears — a
 wall remote pressed by hand, a weather sensor waking up — comes back to the
-integration. It is the _service_ that calls the `bind` callback back, from the
-machine it runs on and in plain HTTP: when that machine is our own container,
-`src/devmel/callback.js` answers on its loopback. A service the user runs
-elsewhere cannot reach it, and its frames go through the `events` webhook
-relayed by Gladys Plus instead. Both routes hand the same payload to the same
-handler.
+integration. It is the _service_ that calls back, from the machine it runs on
+and in plain HTTP: when that machine is our own container,
+`src/devmel/callback.js` answers on its loopback, and that is where both the
+subscription and the answers to fire-and-forget transfers are pushed. A service
+the user runs elsewhere cannot reach it, and its frames go through the `events`
+webhook relayed by Gladys Plus instead. Both routes hand the same payload to
+the same handler.
+
+What is bound is a _protocol_, not a device: the box has one radio, and
+subscribing switches it to permanent reception of a single protocol.
+`src/devmel/listening.js` reads the protocol table of the service
+(`GET /channels/`, which says what decodes what) and deduces that protocol from
+the declared devices, rather than hoping the generic 433 MHz decoder covers
+them.
 
 ## Project structure
 
@@ -76,6 +84,7 @@ handler.
 │  │  ├─ notes.js                    #   the radio "notes" protocol (build & decode)
 │  │  ├─ travel.js                   #   shutter position, computed from the travel times
 │  │  ├─ callback.js                 #   where the service posts the frames it hears
+│  │  ├─ listening.js                #   which radio protocol the box is asked to listen to
 │  │  └─ connection.js               #   connection status + the "Test the connection" action
 │  └─ devices/                       # one file per device type
 │     ├─ index.js                    #   registry: config -> Gladys devices, event routing

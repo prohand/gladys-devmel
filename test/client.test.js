@@ -158,6 +158,30 @@ test('bind subscribes the box to a radio channel', async () => {
   });
 });
 
+test('listChannels reads the protocol table of the service', async () => {
+  const table = [
+    { id: 1, name: 'Generic 433MHz' },
+    { id: 25455, name: 'Somfy RTS', getDecoder: 25455 },
+  ];
+  stubFetch(() => jsonResponse(200, table));
+  const client = clientWith();
+
+  assert.deepEqual(await client.listChannels(), table);
+  assert.equal(calls[0].url, 'http://192.168.1.50:33863/channels/');
+  assert.equal(calls[0].options.method, 'GET');
+  // It describes the service, not a box: no connection string is involved.
+  assert.equal(calls[0].options.headers.Authorization, undefined);
+});
+
+test('listChannels refuses to guess when the service does not answer the table', async () => {
+  stubFetch(() => jsonResponse(500));
+  await assert.rejects(() => clientWith().listChannels(), /HTTP 500/);
+
+  // A body that is not the expected list is no table either.
+  stubFetch(() => jsonResponse(200, { error: 'nope' }));
+  assert.deepEqual(await clientWith().listChannels(), []);
+});
+
 test('pingLocal accepts the 401 the service answers on its root path', async () => {
   stubFetch(() => jsonResponse(401));
   assert.equal(await clientWith().pingLocal(), true);
