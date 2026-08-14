@@ -54,11 +54,14 @@ Each device reports the channel that actually carried its last order
 (`publishTransports`): `local` when the box answered, `unreachable` when
 nothing did.
 
-When the user has Gladys Plus, the box is bound to the listening channel and
-pushes every radio frame it hears to the integration's `events` webhook — so a
-wall remote pressed by hand, or a weather sensor waking up, reaches Gladys.
-Without it, the box sensors are refreshed by polling and everything else keeps
-working.
+The box is bound to the listening channel, and every radio frame it hears — a
+wall remote pressed by hand, a weather sensor waking up — comes back to the
+integration. It is the _service_ that calls the `bind` callback back, from the
+machine it runs on and in plain HTTP: when that machine is our own container,
+`src/devmel/callback.js` answers on its loopback. A service the user runs
+elsewhere cannot reach it, and its frames go through the `events` webhook
+relayed by Gladys Plus instead. Both routes hand the same payload to the same
+handler.
 
 ## Project structure
 
@@ -72,6 +75,7 @@ working.
 │  │  ├─ service.js                  #   the bundled AirSend Web Service (start, watch, stop)
 │  │  ├─ notes.js                    #   the radio "notes" protocol (build & decode)
 │  │  ├─ travel.js                   #   shutter position, computed from the travel times
+│  │  ├─ callback.js                 #   where the service posts the frames it hears
 │  │  └─ connection.js               #   connection status + the "Test the connection" action
 │  └─ devices/                       # one file per device type
 │     ├─ index.js                    #   registry: config -> Gladys devices, event routing

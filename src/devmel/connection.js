@@ -89,11 +89,15 @@ export async function describeConnection(client, config, service = null) {
 }
 
 /**
- * Handler of the `test_connection` manifest action: report the local channel
- * and what was understood from the device list, which is the fastest way to
- * spot a mistyped connection string or a device list that did not parse.
+ * Handler of the `test_connection` manifest action: report the local channel,
+ * the radio listener and what was understood from the device list, which is the
+ * fastest way to spot a mistyped connection string, a device list that did not
+ * parse, or a listener that was never armed.
+ *
+ * @param {object} [listen] state of the last binding attempt, as index.js keeps
+ *   it: `{ url, error }` — where the frames are pushed, or why they are not.
  */
-export async function testConnection(client, config, service = null) {
+export async function testConnection(client, config, service = null, listen = null) {
   const en = [];
   const fr = [];
 
@@ -126,10 +130,46 @@ export async function testConnection(client, config, service = null) {
     );
   }
 
+  en.push(`Listening: ${describeListening(config, listen, 'en')}`);
+  fr.push(`Écoute : ${describeListening(config, listen, 'fr')}`);
+
   en.push(`Devices: ${summarize(config, 'en')}`);
   fr.push(`Appareils : ${summarize(config, 'fr')}`);
 
   return { en: en.join('\n'), fr: fr.join('\n') };
+}
+
+/**
+ * What the radio listener is doing. Worth its own line: it is the only part of
+ * the integration whose silence looks exactly like a device that never emits.
+ */
+function describeListening(config, listen, language) {
+  const channel = config.listen_channel;
+  if (!(channel > 0)) {
+    return language === 'fr'
+      ? "désactivée (canal d'écoute à 0)."
+      : 'disabled (listening channel set to 0).';
+  }
+  if (listen?.error) {
+    return language === 'fr'
+      ? `canal ${channel} : le boîtier a refusé l'abonnement (${listen.error}).`
+      : `channel ${channel}: the box refused the subscription (${listen.error}).`;
+  }
+  if (listen?.url) {
+    return language === 'fr'
+      ? `canal ${channel}, trames poussées vers ${listen.url}.`
+      : `channel ${channel}, frames pushed to ${listen.url}.`;
+  }
+  // No route at all. With the bundled service that never happens (the loopback
+  // callback is always there); with a service of the user's own it does, and
+  // the relay is then the only way back in.
+  return language === 'fr'
+    ? `canal ${channel} : aucune route pour les trames. Un service AirSend que vous ` +
+        'faites tourner ailleurs ne peut pas joindre cette intégration directement : ' +
+        'liez Gladys Plus pour recevoir les trames.'
+    : `channel ${channel}: no route for the frames. An AirSend service you run ` +
+        'elsewhere cannot reach this integration directly: link Gladys Plus to ' +
+        'receive them.';
 }
 
 /**

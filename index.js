@@ -28,6 +28,7 @@ import {
 } from './src/devices/index.js';
 import { boxDevices, describeConnection, testConnection } from './src/devmel/connection.js';
 import { AirSendService } from './src/devmel/service.js';
+import { CallbackServer } from './src/devmel/callback.js';
 
 const gladys = new GladysIntegration();
 const client = new AirSendClient();
@@ -36,17 +37,30 @@ const client = new AirSendClient();
 // pointed the configuration at one of their own.
 const service = new AirSendService();
 
+// Where that service posts the radio frames it hears: a loopback HTTP server in
+// this same container. It is the service — not the box — that calls back, so
+// when it runs here, this is both the shortest route and the only one it can
+// take (it speaks plain HTTP, and knows nothing of Gladys Plus).
+const callbackServer = new CallbackServer();
+
 // Current configuration (hot-reloaded via onConfigUpdated).
 let config = normalizeConfig();
 
-// Public URL of the `events` webhook, relayed by Gladys Plus. It is what the
-// AirSend box posts its radio frames to; without Gladys Plus there is no
-// public URL, and the integration degrades to polling.
+// Public URL of the `events` webhook, relayed by Gladys Plus. It is the only
+// way in for frames when the AirSend Web Service runs on ANOTHER machine, which
+// cannot reach our loopback.
 let eventsWebhookUrl = null;
+
+// URL of the loopback callback above, once it listens.
+let localCallbackUrl = null;
 
 // Re-arms the box listening subscription (it forgets it when it restarts).
 let listenTimer = null;
 const LISTEN_REFRESH_MS = 10 * 60 * 1000;
+
+// What the last binding attempt did, so the "Test the connection" action can
+// say whether the box is actually forwarding anything.
+const listenState = { url: null, error: null };
 
 // --- Discovery: Gladys asks for the list of devices --------------------------
 gladys.onScanRequest(async () => {
@@ -90,36 +104,38 @@ gladys.onPoll(async (device) => {
 });
 
 // --- Incoming radio frames ---------------------------------------------------
-// The box pushes every frame it hears on the listening channel to the webhook
-// relayed by Gladys Plus: a wall remote pressed by hand, a weather sensor
-// waking up, the confirmation of an order we sent. `fire_and_forget` mode: the
-// box only awaits an acknowledgement, and states are dated with the box
-// timestamp because relayed events can arrive out of order.
+// Every frame the box hears on the listening channel — a wall remote pressed by
+// hand, a weather sensor waking up, the confirmation of an order we sent —
+// reaches this function, whichever route carried it: the loopback callback
+// above, or the `events` webhook relayed by Gladys Plus. States are dated with
+// the box timestamp, because relayed events can arrive out of order.
+async function handleRadioEvents(events, route) {
+  const applied = await applyEvents(gladys, config, events);
+  logger.debug(`${route}: ${events?.length ?? 0} event(s), ${applied} device(s) updated`);
+}
+
+// `fire_and_forget` mode: the caller only awaits an acknowledgement.
 gladys.onWebhook('events', async (request) => {
   const payload = parseWebhookBody(request);
   if (!payload) {
     return;
   }
-  const applied = await applyEvents(gladys, config, payload.events);
-  logger.debug(`Webhook: ${payload.events?.length ?? 0} event(s), ${applied} device(s) updated`);
+  await handleRadioEvents(payload.events, 'Webhook');
 });
 
 // The Gladys Plus link changed: pick up the fresh URL and re-register it at the
-// box, or fall back to polling when the relay is gone.
+// box. It only changes anything for a service running on another machine — the
+// bundled one posts to our loopback, relay or no relay.
 gladys.onWebhookUpdated(async (info) => {
   eventsWebhookUrl = webhookUrlOf(info);
-  logger.info(
-    eventsWebhookUrl
-      ? 'Webhook relay available -> listening to radio frames'
-      : 'No webhook relay -> sensors are refreshed by polling only',
-  );
+  logger.info(eventsWebhookUrl ? 'Webhook relay available' : 'No webhook relay');
   await startListening();
 });
 
 // --- Manifest actions: buttons in the Configuration screen -------------------
 gladys.onAction('test_connection', async () => {
   logger.info('Action test_connection');
-  return testConnection(client, config, service);
+  return testConnection(client, config, service, listenState);
 });
 
 // The `identify` action targets ONE device chosen by the user: its manifest
@@ -175,6 +191,12 @@ async function initialize(rawConfig) {
   // connection status, not by crashing the integration.
   await service.apply(config);
 
+  // The route the frames come back by. Started once, before anything is bound:
+  // a subscription is only worth making when there is somewhere to receive it.
+  localCallbackUrl = await callbackServer.start((events) =>
+    handleRadioEvents(events, 'AirSend callback'),
+  );
+
   client.configure(config);
   logger.info(`${config.devmelDevices.length} Devmel device(s) configured`);
 
@@ -206,28 +228,64 @@ async function initialize(rawConfig) {
 }
 
 /**
+ * Where the AirSend Web Service must post the frames it hears.
+ *
+ * It calls back from the machine it runs on, and speaks plain HTTP. So when it
+ * is the one bundled here, the answer is our own loopback server: no relay, no
+ * public URL, and nothing to subscribe to. A service the user runs somewhere
+ * else cannot reach that loopback, and only the Gladys Plus relay can carry its
+ * frames to us.
+ */
+function radioCallbackUrl() {
+  if (config.embeddedService && localCallbackUrl) {
+    return localCallbackUrl;
+  }
+  return eventsWebhookUrl;
+}
+
+/**
  * Ask every configured box to forward the frames it hears on the listening
  * channel. Renewed periodically: a box that reboots forgets its subscriptions.
  */
 async function startListening() {
   stopListening();
-  if (!eventsWebhookUrl || config.listen_channel <= 0) {
+  const callbackUrl = radioCallbackUrl();
+  listenState.url = null;
+  listenState.error = null;
+  if (!callbackUrl || config.listen_channel <= 0) {
+    logger.info(
+      config.listen_channel <= 0
+        ? 'Listening disabled (listening channel set to 0)'
+        : 'No route for the radio frames -> sensors are refreshed by polling only',
+    );
     return;
   }
-  await bindBoxes();
+  await bindBoxes(callbackUrl);
   listenTimer = setInterval(() => {
-    bindBoxes().catch((err) => logger.error('Could not renew the radio listener', err));
+    bindBoxes(radioCallbackUrl()).catch((err) =>
+      logger.error('Could not renew the radio listener', err),
+    );
   }, LISTEN_REFRESH_MS);
   // Do not hold the event loop open just to renew a subscription.
   listenTimer.unref?.();
 }
 
-async function bindBoxes() {
+async function bindBoxes(callbackUrl) {
+  if (!callbackUrl) {
+    return;
+  }
   for (const box of boxDevices(config)) {
     try {
-      await client.bind(config.listen_channel, eventsWebhookUrl, box);
-      logger.debug(`Listening on channel ${config.listen_channel} through "${box.name}"`);
+      await client.bind(config.listen_channel, callbackUrl, box);
+      listenState.url = callbackUrl;
+      listenState.error = null;
+      logger.info(
+        `Listening on channel ${config.listen_channel} through "${box.name}" -> ${callbackUrl}`,
+      );
     } catch (err) {
+      if (!listenState.url) {
+        listenState.error = err.message;
+      }
       logger.warn(`Could not listen through "${box.name}": ${err.message}`);
     }
   }
@@ -275,6 +333,7 @@ gladys.handleShutdown(async (signal) => {
   logger.info(`Received ${signal} -> graceful shutdown`);
   stopListening();
   stopDeviceTracking();
+  await callbackServer.stop();
   // The AirSend Web Service daemonizes: nothing would reap it for us.
   await service.stop();
 });

@@ -175,10 +175,12 @@ export async function applyEvents(gladys, config, events) {
       continue;
     }
     const createdAt = toDate(event.timestamp);
+    let matched = 0;
     for (const device of config.devmelDevices) {
       if (!isSameChannel(event.channel, device.channel)) {
         continue;
       }
+      matched += 1;
       const blueprint = findBlueprintByType(device.rtype);
       if (!blueprint || typeof blueprint.applyReadings !== 'function') {
         continue;
@@ -189,6 +191,15 @@ export async function applyEvents(gladys, config, events) {
       } catch (err) {
         logger.error(`Could not publish the states of "${device.name}"`, err);
       }
+    }
+    if (matched === 0) {
+      // Worth saying out loud: this is what a frame from a remote that is not
+      // in the device list looks like, and the channel below is exactly the
+      // `pid` / `addr` pair to add to it.
+      logger.info(
+        `Heard a frame on a channel no device declares: pid ${event.channel.id}` +
+          `${event.channel.source === undefined ? '' : `, addr ${event.channel.source}`}`,
+      );
     }
   }
   return applied;

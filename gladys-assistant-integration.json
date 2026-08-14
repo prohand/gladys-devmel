@@ -10,9 +10,7 @@
   "docker_image": "ghcr.io/prohand/gladys-devmel:1.0.1",
   "gladys_version": ">=4.85.0",
   "cover_image": "https://raw.githubusercontent.com/prohand/gladys-devmel/main/cover.png",
-  "transports": [
-    "local"
-  ],
+  "transports": ["local"],
   "webhooks": [
     {
       "key": "events",
@@ -125,8 +123,8 @@
         "fr": "Canal d'écoute"
       },
       "description": {
-        "en": "Radio channel the box listens to in order to push what it hears (wall remotes, sensors) to Gladys. 0 disables listening. Requires Gladys Plus.",
-        "fr": "Canal radio que le boîtier écoute pour pousser vers Gladys ce qu'il entend (télécommandes murales, capteurs). 0 désactive l'écoute. Nécessite Gladys Plus."
+        "en": "Radio channel the box listens to in order to push what it hears (wall remotes, sensors) to Gladys. 1 is generic 433 MHz listening, which covers most equipment; a device the box does not hear that way is listened to by entering its own pid here. 0 disables listening.",
+        "fr": "Canal radio que le boîtier écoute pour pousser vers Gladys ce qu'il entend (télécommandes murales, capteurs). 1 correspond à l'écoute générique 433 MHz, qui couvre la plupart des équipements ; un appareil que le boîtier n'entend pas ainsi s'écoute en saisissant ici son propre pid. 0 désactive l'écoute."
       },
       "required": false,
       "default": 1,
