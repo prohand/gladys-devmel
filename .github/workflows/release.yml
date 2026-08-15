@@ -47,6 +47,12 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 24
+          cache: npm
+
+      # Only for the Prettier pass below, which has to run the version this
+      # repository pins rather than whatever `npx` would fetch.
+      - name: Install dependencies
+        run: npm ci
 
       - name: Bump version and update the manifest
         id: bump
@@ -70,6 +76,13 @@ jobs:
             '.version = $version | .docker_image = $image' \
             gladys-assistant-integration.json > "$tmp"
           mv "$tmp" gladys-assistant-integration.json
+
+          # jq does not edit two fields, it reprints the whole document in its
+          # own style — one array element per line, whatever it found. So every
+          # release used to hand back a manifest that fails `format:check`, and
+          # the next CI run on main went red for a file no human had touched.
+          # Give it back to Prettier, which owns the formatting of this repo.
+          npx prettier --write gladys-assistant-integration.json
 
           echo "version=${new_version}" >> "$GITHUB_OUTPUT"
 
