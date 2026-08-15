@@ -275,6 +275,17 @@ async function startListening() {
     logger.info('No route for the radio frames -> sensors are refreshed by polling only');
     return;
   }
+  if (listenState.plan.fallback) {
+    // Binding still happens: generic 433 MHz is the only useful guess before
+    // anything is declared. But it is a default, and a default that cannot
+    // hear an 868 MHz remote at all — which is indistinguishable, from the
+    // outside, from a listener that was never armed.
+    logger.warn(
+      `No radio device declared: listening to generic 433 MHz (channel ${listenState.plan.channel}). ` +
+        'An 868 MHz protocol (Profalux, Somfy io) is not heard on it -> declare a device on it, ' +
+        'or set the listening channel to its pid.',
+    );
+  }
 
   await bindBoxes(callbackUrl);
   listenTimer = setInterval(() => {

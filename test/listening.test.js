@@ -127,6 +127,22 @@ test('the box itself never decides what is listened to', () => {
   assert.equal(planListening(configWith([box]), TABLE).channel, 1);
 });
 
+test('generic 433 MHz with nothing declared is a default, and says so', () => {
+  // The difference matters: an 868 MHz remote is not heard on channel 1 at
+  // all, and the user has no way to tell that from a listener that never
+  // armed. `fallback` is what lets the logs and the connection test say it.
+  const box = { name: 'AirSend box', type: 0, sensors: true };
+
+  assert.equal(planListening(configWith([box]), TABLE).fallback, true);
+  assert.equal(planListening(normalizeConfig(), TABLE).fallback, true);
+  // Deduced from a real device, forced by hand, or off: never a default.
+  assert.equal(planListening(configWith([SHUTTER]), TABLE).fallback, false);
+  assert.equal(planListening(configWith([CHEAP_SENSOR]), TABLE).channel, 1);
+  assert.equal(planListening(configWith([CHEAP_SENSOR]), TABLE).fallback, false);
+  assert.equal(planListening(configWith([], { listen_channel: 25605 }), TABLE).fallback, false);
+  assert.equal(planListening(configWith([SHUTTER], { listen_channel: 0 }), TABLE).fallback, false);
+});
+
 test('listening is off only when the user turns it off', () => {
   assert.equal(planListening(configWith([SHUTTER], { listen_channel: 0 }), TABLE).enabled, false);
   assert.equal(planListening(configWith([SHUTTER], { listen_channel: '' }), TABLE).enabled, true);

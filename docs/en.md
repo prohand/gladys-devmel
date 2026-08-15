@@ -243,6 +243,31 @@ To check, click **Test the connection**: the _Listening_ line says which
 protocol is listened to, which devices it covers, and where the frames are
 pushed — or why they are not.
 
+### 868 MHz and rolling code
+
+Channel `1`, the generic listening, **is 433 MHz**. An 868 MHz protocol —
+Profalux, Somfy io — is not heard on it at all. And as long as you have declared
+nothing, there is nothing to deduce from, so the integration falls back to that
+channel `1` by default: the box then listens to the wrong band, and the silence
+that follows looks exactly like a remote nobody presses. The integration now
+says so, in its logs and in **Test the connection**.
+
+Two ways out: declare a device on that protocol, or fill in its `pid` as the
+**Listening channel**.
+
+The **rolling code** of those remotes is not what stops the frames from coming
+in. It protects _emission_: to drive a Profalux shutter, the AirSend box has to
+have been paired with the motor, like one more remote. On _reception_ it gets in
+the way of nothing: the counter and the `mac` / `seed` fields change on every
+frame, and the integration ignores them on purpose — an emitter is identified by
+its `pid` and its `addr`, and those do not move.
+
+What the rolling code does change is the **decoding**: the AirSend service only
+partially decodes those protocols. The frame arrives, the emitter is named, but
+it carries no usable note. Such frames are now logged with their `pid` and
+`addr`: proof that the radio works, and what you need to attach the emitter to a
+device.
+
 ### The wall remote
 
 One shutter is driven by several emitters: the AirSend box, and the remote
@@ -332,6 +357,7 @@ provides: link your Gladys Plus account and paste your Open API key in the
 | The box answers by hand, not here | The `rhost=` IPv4 must be reachable **from the container**, not just from your desktop |
 | A shutter shows no position       | Time it: `travel_up` / `travel_down`, then open or close it fully once                 |
 | The position drifts over time     | Re-time the travel, and open the shutter fully once a day to resynchronize it          |
+| No frame from an 868 MHz remote   | **Test the connection**: channel `1` is 433 MHz. Declare the device, or its `pid`      |
 
 The integration logs everything it does: read the integration logs from the
 Gladys UI (or `docker logs` on the host), with `LOG_LEVEL=debug` for the full

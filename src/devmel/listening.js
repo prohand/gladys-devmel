@@ -71,7 +71,7 @@ export function channelName(channelId, table) {
  *   devices themselves
  * @returns {{
  *   enabled: boolean, channel: ?number, name: ?string, deduced: boolean,
- *   covered: Array<object>, uncovered: Array<object>
+ *   fallback: boolean, covered: Array<object>, uncovered: Array<object>
  * }}
  */
 export function planListening(config, table = new Map()) {
@@ -83,6 +83,7 @@ export function planListening(config, table = new Map()) {
       channel: null,
       name: null,
       deduced: false,
+      fallback: false,
       covered: [],
       uncovered: [],
     };
@@ -102,6 +103,12 @@ export function planListening(config, table = new Map()) {
     channel,
     name: channelName(channel, table),
     deduced,
+    // Nothing was declared to deduce from, so channel 1 is a default rather
+    // than a deduction — and it is the 433 MHz decoder, deaf to every 868 MHz
+    // protocol. Worth telling apart: a box listening to a default nobody chose
+    // is silent for exactly the same reason as a box listening to the wrong
+    // protocol, and neither looks any different from a remote nobody presses.
+    fallback: deduced && devices.length === 0,
     covered,
     uncovered,
   };

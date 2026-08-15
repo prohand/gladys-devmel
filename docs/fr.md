@@ -255,6 +255,32 @@ Pour vérifier, cliquez sur **Tester la connexion** : la ligne _Écoute_ dit que
 protocole est écouté, quels appareils il couvre, et vers où les trames sont
 poussées — ou pourquoi elles ne le sont pas.
 
+### Le 868 MHz et le code tournant
+
+Le canal `1`, l'écoute générique, **c'est du 433 MHz**. Un protocole 868 MHz —
+Profalux, Somfy io — n'y est pas entendu du tout. Or tant que vous n'avez rien
+déclaré, il n'y a rien à déduire, et l'intégration se rabat sur ce canal `1` par
+défaut : le boîtier écoute alors la mauvaise bande, et le silence qui en résulte
+ressemble trait pour trait à une télécommande sur laquelle personne n'appuie.
+L'intégration le dit désormais dans ses logs et dans **Tester la connexion**.
+
+Deux façons d'en sortir : déclarer un appareil sur le protocole en question, ou
+renseigner son `pid` dans le champ **Canal d'écoute**.
+
+Le **code tournant** de ces télécommandes, lui, n'est pas ce qui vous empêche de
+recevoir les trames. Il protège l'_émission_ : pour commander un volet Profalux,
+le boîtier AirSend doit avoir été appairé au moteur, comme une télécommande
+supplémentaire. En _réception_, il ne gêne rien : le compteur et les champs
+`mac` / `seed` changent à chaque trame, et l'intégration les ignore
+délibérément — un émetteur est identifié par son `pid` et son `addr`, qui eux ne
+bougent pas.
+
+Ce que le code tournant change, en revanche, c'est le **décodage** : le service
+AirSend ne décode ces protocoles que partiellement. La trame arrive, l'émetteur
+est nommé, mais elle ne porte aucune note exploitable. Ces trames-là sont
+maintenant journalisées avec leur `pid` et leur `addr` : c'est la preuve que la
+radio fonctionne, et de quoi rattacher l'émetteur à un appareil.
+
 ### La télécommande murale
 
 Un même volet est piloté par plusieurs émetteurs : le boîtier AirSend, et la
@@ -348,6 +374,7 @@ votre clé Open API dans le bloc **Webhooks** de l'écran de configuration.
 | Le boîtier répond à la main, pas ici   | L'IPv4 `rhost=` doit être joignable **depuis le conteneur**, pas seulement de votre PC     |
 | Un volet n'affiche pas de position     | Chronométrez-le : `travel_up` / `travel_down`, puis ouvrez-le ou fermez-le à fond une fois |
 | La position dérive avec le temps       | Rechronométrez la course, et ouvrez le volet à fond une fois par jour pour le recaler      |
+| Aucune trame d'une télécommande 868    | **Tester la connexion** : le canal `1` est du 433 MHz. Déclarez l'appareil, ou son `pid`   |
 
 L'intégration journalise tout ce qu'elle fait : consultez les logs de
 l'intégration depuis l'interface de Gladys (ou `docker logs` sur l'hôte), avec

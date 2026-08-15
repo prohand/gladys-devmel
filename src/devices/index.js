@@ -177,10 +177,14 @@ export async function applyEvents(gladys, config, events) {
       continue;
     }
 
+    const readings = decodeNotes(event.thingnotes?.notes);
+
     // Who the frame belongs to comes BEFORE what it says. An emitter nobody
     // declared is the one thing the user has to be told about, and telling
     // them must not depend on the notes decoding into something we know —
-    // an unknown remote is precisely where an unknown note type turns up.
+    // an unknown remote is precisely where an unknown note type turns up, and
+    // a rolling-code protocol the service only partially decodes carries no
+    // usable note at all.
     const listeners = config.devmelDevices.filter((device) => hearsChannel(device, event.channel));
     if (listeners.length === 0) {
       // Worth saying out loud: this is what the wall remote of an equipment
@@ -188,14 +192,21 @@ export async function applyEvents(gladys, config, events) {
       // the pair below is exactly what `remotes` takes to attach it.
       logger.info(
         `Heard a frame on a channel no device declares: ${describeChannel(event.channel)}` +
+          `${readings.length === 0 ? ' (no note the service could decode)' : ''}` +
           '. Add it to the "remotes" of the device it drives to follow it.',
       );
       continue;
     }
 
-    const readings = decodeNotes(event.thingnotes?.notes);
     if (readings.length === 0) {
-      logger.debug(`Nothing to publish from the frame of ${describeChannel(event.channel)}`);
+      // The box heard the emitter and named it, but the decoder turned nothing
+      // into a command. That is what a partially decoded protocol looks like
+      // (`getDecoder: 0` in the channel table): the frame proves the radio
+      // works, it just says nothing Gladys can publish.
+      logger.debug(
+        `Heard ${describeChannel(event.channel)}, but no note the service could decode: ` +
+          'this protocol is only partially decoded, nothing to publish',
+      );
       continue;
     }
     const createdAt = toDate(event.timestamp);
@@ -237,6 +248,12 @@ export function hearsChannel(device, channel) {
  * Radio is noisy: the box grades every frame it decodes, and only the reliable
  * ones are worth publishing. Error events (type >= 0x100) are dropped too.
  *
+ * Carrying no note is deliberately NOT a reason: a well-graded frame the
+ * decoder could not turn into a command still names its emitter, and that is
+ * the only thing a partially decoded protocol (a rolling-code 868 MHz remote,
+ * typically) ever gives away. Dropping it here made such a remote look exactly
+ * like a box that hears nothing — see `applyEvents`.
+ *
  * @returns {?string} why the frame goes no further, null when it is usable —
  *   a reason rather than a boolean, because a frame dropped in silence is
  *   indistinguishable from a remote nobody pressed.
@@ -244,9 +261,6 @@ export function hearsChannel(device, channel) {
 function whyUnusable(event) {
   if (!event || typeof event !== 'object' || !event.channel) {
     return 'no channel';
-  }
-  if (!event.thingnotes) {
-    return 'no note';
   }
   if (Number(event.type ?? 0) >= 0x100) {
     return `error event, type ${event.type}`;

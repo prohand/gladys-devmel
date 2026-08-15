@@ -206,7 +206,19 @@ function describeChannel(plan, language) {
  */
 function describeCoverage(plan, language) {
   if (plan.covered.length + plan.uncovered.length === 0) {
-    return '';
+    if (!plan.fallback) {
+      return '';
+    }
+    // Nothing declared: the generic 433 MHz decoder is what is left, and
+    // saying so is the whole point — it hears nothing at all of an 868 MHz
+    // protocol, which is the shape of "my remote never shows up".
+    return language === 'fr'
+      ? " Aucun appareil radio déclaré : c'est l'écoute générique 433 MHz par défaut, " +
+          'sourde aux protocoles 868 MHz (Profalux, Somfy io). Déclarez un appareil sur ' +
+          "ce protocole, ou renseignez son pid dans le canal d'écoute."
+      : ' No radio device declared: this is the default generic 433 MHz listening, ' +
+          'deaf to 868 MHz protocols (Profalux, Somfy io). Declare a device on that ' +
+          'protocol, or fill in its pid as the listening channel.';
   }
   const heard = names(plan.covered);
   if (plan.uncovered.length === 0) {
