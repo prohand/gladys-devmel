@@ -6,12 +6,17 @@
     "en": "Control the shutters, switches, lights and sensors of a Devmel AirSend radio gateway.",
     "fr": "Pilotez volets, interrupteurs, lampes et capteurs d'une passerelle radio Devmel AirSend."
   },
-  "version": "1.0.4",
-  "docker_image": "ghcr.io/prohand/gladys-devmel:1.0.4",
+  "version": "1.0.5",
+  "docker_image": "ghcr.io/prohand/gladys-devmel:1.0.5",
   "gladys_version": ">=4.86.0",
   "cover_image": "https://raw.githubusercontent.com/prohand/gladys-devmel/main/cover.png",
-  "categories": ["protocols", "lighting"],
-  "transports": ["local"],
+  "categories": [
+    "protocols",
+    "lighting"
+  ],
+  "transports": [
+    "local"
+  ],
   "webhooks": [
     {
       "key": "events",
