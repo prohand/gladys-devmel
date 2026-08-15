@@ -318,6 +318,42 @@ test('an undeclared emitter is named in the logs, whatever its notes say', async
   assert.match(lines.of('INFO')[0], /remotes/);
 });
 
+test('a frame carrying no decodable note still names its emitter', async () => {
+  // A rolling-code 868 MHz protocol (Profalux, Somfy io) is often only
+  // partially decoded: the box grades the frame, names the emitter, and hands
+  // over no note at all. Dropping it made the remote look exactly like a box
+  // that hears nothing — the one thing the user is trying to tell apart.
+  const { gladys, config } = setup();
+  const lines = captureLogs(async () =>
+    applyEvents(gladys, config, [
+      { type: 3, reliability: 0x20, channel: { id: 25605, source: 1187 } },
+    ]),
+  );
+
+  assert.equal(await lines.result, 0);
+  assert.equal(lines.of('INFO').length, 1);
+  assert.match(lines.of('INFO')[0], /pid 25605, addr 1187/);
+  assert.match(lines.of('INFO')[0], /no note the service could decode/);
+});
+
+test('a declared device whose frame decodes to nothing says so on the debug channel', async () => {
+  const { gladys, config } = setup();
+  const shutterChannel = deviceNamed(config, 'Living room shutter').channel;
+  const lines = captureLogs(
+    async () =>
+      applyEvents(gladys, config, [
+        { type: 3, reliability: 0x20, channel: { ...shutterChannel }, thingnotes: { notes: [] } },
+      ]),
+    'debug',
+  );
+
+  assert.equal(await lines.result, 0);
+  assert.deepEqual(gladys.published, []);
+  assert.equal(lines.of('INFO').length, 0);
+  assert.equal(lines.of('DEBUG').length, 1);
+  assert.match(lines.of('DEBUG')[0], /only partially decoded/);
+});
+
 test('a frame dropped before that is still traceable on the debug channel', async () => {
   const { gladys, config } = setup();
   const lines = captureLogs(

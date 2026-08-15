@@ -10,14 +10,8 @@
   "docker_image": "ghcr.io/prohand/gladys-devmel:1.0.4",
   "gladys_version": ">=4.86.0",
   "cover_image": "https://raw.githubusercontent.com/prohand/gladys-devmel/main/cover.png",
-  "categories": [
-    "protocols",
-    "lighting",
-    "environment"
-  ],
-  "transports": [
-    "local"
-  ],
+  "categories": ["protocols", "lighting"],
+  "transports": ["local"],
   "webhooks": [
     {
       "key": "events",
@@ -130,8 +124,8 @@
         "fr": "Canal d'écoute"
       },
       "description": {
-        "en": "Leave empty: the box then listens to the radio protocol of the devices you declared, which is what pushes what it hears (wall remotes, sensors) to Gladys. Fill it only to listen to another protocol: 1 is generic 433 MHz listening. 0 disables listening.",
-        "fr": "Laissez vide : le boîtier écoute alors le protocole radio des appareils que vous avez déclarés, ce qui remonte vers Gladys ce qu'il entend (télécommandes murales, capteurs). Ne le renseignez que pour écouter un autre protocole : 1 correspond à l'écoute générique 433 MHz. 0 désactive l'écoute."
+        "en": "Leave empty: the box then listens to the radio protocol of the devices you declared, which is what pushes what it hears (wall remotes, sensors) to Gladys. Fill it only to listen to another protocol, by its pid: 1 is generic 433 MHz listening, and no 868 MHz remote (Profalux, Somfy io) is heard on it. 0 disables listening.",
+        "fr": "Laissez vide : le boîtier écoute alors le protocole radio des appareils que vous avez déclarés, ce qui remonte vers Gladys ce qu'il entend (télécommandes murales, capteurs). Ne le renseignez que pour écouter un autre protocole, par son pid : 1 correspond à l'écoute générique 433 MHz, sur laquelle aucune télécommande 868 MHz (Profalux, Somfy io) n'est entendue. 0 désactive l'écoute."
       },
       "required": false,
       "min": 0,

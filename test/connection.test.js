@@ -128,6 +128,29 @@ test('test_connection says which devices a forced protocol leaves out', async ()
   assert.match(report.en, /No declared device speaks this protocol: Baie vitree/);
 });
 
+test('test_connection warns that generic 433 MHz listening is only a default', async () => {
+  // Nothing declared: the box listens to channel 1 because there is nothing
+  // better to listen to, and an 868 MHz remote is not heard on it at all.
+  const config = normalizeConfig({ spurl: SPURL });
+
+  const report = await testConnection(fakeClient(), config, RUNNING, {
+    url: 'http://127.0.0.1:33864/',
+    error: null,
+  });
+
+  assert.match(report.en, /No radio device declared.*deaf to 868 MHz protocols/s);
+  assert.match(report.fr, /Aucun appareil radio déclaré.*sourde aux protocoles 868 MHz/s);
+
+  // A declared device makes it a deduction again, and the warning goes away.
+  const declared = await testConnection(
+    fakeClient(),
+    normalizeConfig({ spurl: SPURL, devices: DEVICES }),
+    RUNNING,
+    { url: 'http://127.0.0.1:33864/', error: null },
+  );
+  assert.doesNotMatch(declared.en, /No radio device declared/);
+});
+
 test('test_connection reports a subscription the box refused', async () => {
   const config = normalizeConfig({ spurl: SPURL });
 
