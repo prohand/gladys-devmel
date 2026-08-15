@@ -167,20 +167,39 @@ export async function applyEvents(gladys, config, events) {
   }
   let applied = 0;
   for (const event of events) {
-    if (!isUsableEvent(event)) {
+    const unusable = whyUnusable(event);
+    if (unusable) {
+      // Never an info line — the air is full of half-decoded frames, and one
+      // per press of a neighbour's gate remote is noise. But someone hunting
+      // for a remote that never shows up needs to see that something WAS
+      // heard, and where it stopped: hence the channel, and the reason.
+      logger.debug(`Ignored a radio frame (${unusable}): ${describeChannel(event?.channel)}`);
       continue;
     }
+
+    // Who the frame belongs to comes BEFORE what it says. An emitter nobody
+    // declared is the one thing the user has to be told about, and telling
+    // them must not depend on the notes decoding into something we know —
+    // an unknown remote is precisely where an unknown note type turns up.
+    const listeners = config.devmelDevices.filter((device) => hearsChannel(device, event.channel));
+    if (listeners.length === 0) {
+      // Worth saying out loud: this is what the wall remote of an equipment
+      // already in the list looks like — same protocol, its own address — and
+      // the pair below is exactly what `remotes` takes to attach it.
+      logger.info(
+        `Heard a frame on a channel no device declares: ${describeChannel(event.channel)}` +
+          '. Add it to the "remotes" of the device it drives to follow it.',
+      );
+      continue;
+    }
+
     const readings = decodeNotes(event.thingnotes?.notes);
     if (readings.length === 0) {
+      logger.debug(`Nothing to publish from the frame of ${describeChannel(event.channel)}`);
       continue;
     }
     const createdAt = toDate(event.timestamp);
-    let matched = 0;
-    for (const device of config.devmelDevices) {
-      if (!hearsChannel(device, event.channel)) {
-        continue;
-      }
-      matched += 1;
+    for (const device of listeners) {
       const blueprint = findBlueprintByType(device.rtype);
       if (!blueprint || typeof blueprint.applyReadings !== 'function') {
         continue;
@@ -192,18 +211,14 @@ export async function applyEvents(gladys, config, events) {
         logger.error(`Could not publish the states of "${device.name}"`, err);
       }
     }
-    if (matched === 0) {
-      // Worth saying out loud: this is what the wall remote of an equipment
-      // already in the list looks like — same protocol, its own address — and
-      // the pair below is exactly what `remotes` takes to attach it.
-      logger.info(
-        `Heard a frame on a channel no device declares: pid ${event.channel.id}` +
-          `${event.channel.source === undefined ? '' : `, addr ${event.channel.source}`}` +
-          '. Add it to the "remotes" of the device it drives to follow it.',
-      );
-    }
   }
   return applied;
+}
+
+/** An AirSend channel as the configuration spells it: the `pid`/`addr` pair. */
+function describeChannel(channel) {
+  const pid = `pid ${channel?.id ?? 'unknown'}`;
+  return channel?.source === undefined ? pid : `${pid}, addr ${channel.source}`;
 }
 
 /**
@@ -221,19 +236,29 @@ export function hearsChannel(device, channel) {
 /**
  * Radio is noisy: the box grades every frame it decodes, and only the reliable
  * ones are worth publishing. Error events (type >= 0x100) are dropped too.
+ *
+ * @returns {?string} why the frame goes no further, null when it is usable —
+ *   a reason rather than a boolean, because a frame dropped in silence is
+ *   indistinguishable from a remote nobody pressed.
  */
-function isUsableEvent(event) {
-  if (!event || typeof event !== 'object' || !event.channel || !event.thingnotes) {
-    return false;
+function whyUnusable(event) {
+  if (!event || typeof event !== 'object' || !event.channel) {
+    return 'no channel';
+  }
+  if (!event.thingnotes) {
+    return 'no note';
   }
   if (Number(event.type ?? 0) >= 0x100) {
-    return false;
+    return `error event, type ${event.type}`;
   }
   if (event.reliability === undefined) {
-    return true;
+    return null;
   }
   const reliability = Number(event.reliability);
-  return reliability > 0x6 && reliability < 0x47;
+  if (!(reliability > 0x6 && reliability < 0x47)) {
+    return `unreliable, graded ${event.reliability}`;
+  }
+  return null;
 }
 
 function toDate(timestampMs) {
