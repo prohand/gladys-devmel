@@ -142,6 +142,7 @@ sous `channel` plutôt que le couple `pid` / `addr` à plat. Cela reste du JSON 
 | `channel`           | Canal radio (`id`, `source`, `mac`, `seed`), **obligatoire**                   |
 | `pid`               | Le `channel.id` de l'export JSON (utilisez l'un ou l'autre)                    |
 | `addr`              | Le `channel.source` de l'export JSON                                           |
+| `remotes`           | Autres émetteurs qui pilotent l'appareil (voir « La télécommande murale »)     |
 | `spurl`             | Chaîne de connexion propre à cet appareil, si différente de la globale         |
 | `wait`              | Attendre la confirmation radio avant de répondre (`false` par défaut)          |
 | `invert`            | Inverser ouverture et fermeture, pour les volets posés à l'envers              |
@@ -229,23 +230,59 @@ pour que Gladys suive ce qui se passe dans la maison, et pas seulement ce
 qu'il a lui-même commandé. C'est ce qui fait bouger la position d'un volet
 quand on l'ouvre depuis sa télécommande.
 
-C'est **actif par défaut** : l'intégration abonne le boîtier au **canal
-d'écoute** (`1` par défaut, `0` désactive l'écoute) et reçoit les trames chez
-elle. Rien à installer, rien à lier.
+C'est **actif par défaut**, et il n'y a rien à régler : l'intégration abonne le
+boîtier au protocole radio de vos appareils et reçoit les trames chez elle.
+Rien à installer, rien à lier.
 
-### Choisir le canal d'écoute
+### Le canal d'écoute
 
-Le canal `1` est l'**écoute générique 433 MHz** : elle couvre la plupart des
-équipements, et c'est le bon choix pour commencer. Si votre télécommande n'est
-pas entendue, c'est que son protocole n'entre pas dans cette écoute générique :
-saisissez alors le **`pid` de l'appareil** (celui de votre liste d'appareils)
-comme canal d'écoute. Le boîtier n'écoute qu'un canal à la fois.
+Ce que le boîtier écoute est un **protocole**, pas un appareil : il n'a qu'une
+radio, et l'abonner le fait basculer en réception permanente **d'un seul
+protocole** à la fois. Le canal `1` est l'écoute générique 433 MHz, qui couvre
+les protocoles conçus pour y entrer — mais pas les autres, et un volet Somfy
+écouté sur le canal `1` reste silencieux exactement comme une télécommande sur
+laquelle personne n'appuie.
 
-Pour vérifier, cliquez sur **Tester la connexion** : la ligne _Écoute_ dit vers
-où les trames sont poussées, ou pourquoi elles ne le sont pas. Les trames
-entendues sur un canal qu'aucun appareil ne déclare sont notées dans les logs
-de l'intégration, avec leur `pid` et leur `addr` — de quoi compléter votre
-liste d'appareils.
+L'intégration n'a donc pas à le deviner : elle demande au service AirSend quel
+canal décode quel protocole, et abonne le boîtier à celui de vos appareils.
+Laissez le champ **Canal d'écoute** vide.
+
+Renseignez-le seulement pour écouter autre chose : le `pid` d'un protocole que
+vous n'avez pas encore déclaré, `1` pour l'écoute générique, ou `0` pour couper
+l'écoute.
+
+Pour vérifier, cliquez sur **Tester la connexion** : la ligne _Écoute_ dit quel
+protocole est écouté, quels appareils il couvre, et vers où les trames sont
+poussées — ou pourquoi elles ne le sont pas.
+
+### La télécommande murale
+
+Un même volet est piloté par plusieurs émetteurs : le boîtier AirSend, et la
+télécommande vissée au mur. Ils parlent le même protocole depuis des **adresses
+différentes**, donc le boîtier les entend sur des canaux différents, et une
+trame venue du mur n'appartient à aucun appareil déclaré. Elle est notée dans
+les logs de l'intégration, avec son `pid` et son `addr`.
+
+Rattachez cette adresse à l'appareil qu'elle pilote, et appuyer sur la
+télécommande murale met à jour le volet dans Gladys comme le ferait Gladys :
+
+```json
+{
+  "devices": {
+    "Baie vitrée": {
+      "type": 4098,
+      "travel_up": 30,
+      "travel_down": 26,
+      "channel": { "id": 25455, "source": 8295 },
+      "remotes": [94311]
+    }
+  }
+}
+```
+
+Une adresse seule est lue sur le protocole de l'appareil lui-même ; une
+télécommande sur un autre protocole s'écrit en entier :
+`"remotes": [{ "pid": 1368, "addr": 542 }]`.
 
 ### Si vous faites tourner le service AirSend ailleurs
 

@@ -29,6 +29,7 @@ import {
 import { boxDevices, describeConnection, testConnection } from './src/devmel/connection.js';
 import { AirSendService } from './src/devmel/service.js';
 import { CallbackServer } from './src/devmel/callback.js';
+import { indexChannels, planListening } from './src/devmel/listening.js';
 
 const gladys = new GladysIntegration();
 const client = new AirSendClient();
@@ -58,9 +59,13 @@ let localCallbackUrl = null;
 let listenTimer = null;
 const LISTEN_REFRESH_MS = 10 * 60 * 1000;
 
+// The protocol table of the AirSend Web Service, read once per configuration:
+// it says which channel decodes which protocol, hence what to bind.
+let channelTable = new Map();
+
 // What the last binding attempt did, so the "Test the connection" action can
 // say whether the box is actually forwarding anything.
-const listenState = { url: null, error: null };
+const listenState = { url: null, error: null, plan: null };
 
 // --- Discovery: Gladys asks for the list of devices --------------------------
 gladys.onScanRequest(async () => {
@@ -81,7 +86,7 @@ gladys.onSetValue(async (device, feature, value) => {
     feature,
     value,
     client,
-    callbackUrl: eventsWebhookUrl,
+    callbackUrl: radioCallbackUrl(),
     config,
   });
   await publishDeviceTransports();
@@ -97,7 +102,7 @@ gladys.onPoll(async (device) => {
   await found.blueprint.onPoll(gladys, {
     device: found.device,
     client,
-    callbackUrl: eventsWebhookUrl,
+    callbackUrl: radioCallbackUrl(),
     config,
   });
   await publishDeviceTransports();
@@ -146,7 +151,7 @@ gladys.onAction('identify', async (fields) => {
   return identifyDevice(gladys, fields.device, {
     config,
     client,
-    callbackUrl: eventsWebhookUrl,
+    callbackUrl: radioCallbackUrl(),
   });
 });
 
@@ -184,6 +189,8 @@ gladys.on('disconnected', () => {
  */
 async function initialize(rawConfig) {
   config = normalizeConfig(rawConfig);
+  // The protocol table belongs to the service the configuration points at.
+  channelTable = new Map();
 
   // Before anything talks to the box: bring the local channel up. `apply()`
   // starts the bundled service, stops it when the user switched to their own,
@@ -228,7 +235,9 @@ async function initialize(rawConfig) {
 }
 
 /**
- * Where the AirSend Web Service must post the frames it hears.
+ * Where the AirSend Web Service must post what it hears — the frames of a
+ * subscription, and the answer to a fire-and-forget transfer, which is the same
+ * kind of event arriving by the same route.
  *
  * It calls back from the machine it runs on, and speaks plain HTTP. So when it
  * is the one bundled here, the answer is our own loopback server: no relay, no
@@ -244,22 +253,29 @@ function radioCallbackUrl() {
 }
 
 /**
- * Ask every configured box to forward the frames it hears on the listening
- * channel. Renewed periodically: a box that reboots forgets its subscriptions.
+ * Ask every configured box to forward the frames it hears. Renewed
+ * periodically: a box that reboots forgets its subscriptions.
+ *
+ * What is bound is a PROTOCOL, deduced from the declared devices unless the
+ * user forced one (see src/devmel/listening.js) — a box listening to the wrong
+ * protocol is silent, and silence is what "listening does not work" looks like.
  */
 async function startListening() {
   stopListening();
   const callbackUrl = radioCallbackUrl();
   listenState.url = null;
   listenState.error = null;
-  if (!callbackUrl || config.listen_channel <= 0) {
-    logger.info(
-      config.listen_channel <= 0
-        ? 'Listening disabled (listening channel set to 0)'
-        : 'No route for the radio frames -> sensors are refreshed by polling only',
-    );
+  listenState.plan = planListening(config, await knownChannels());
+
+  if (!listenState.plan.enabled) {
+    logger.info('Listening disabled (listening channel set to 0)');
     return;
   }
+  if (!callbackUrl) {
+    logger.info('No route for the radio frames -> sensors are refreshed by polling only');
+    return;
+  }
+
   await bindBoxes(callbackUrl);
   listenTimer = setInterval(() => {
     bindBoxes(radioCallbackUrl()).catch((err) =>
@@ -270,18 +286,35 @@ async function startListening() {
   listenTimer.unref?.();
 }
 
+/**
+ * The protocol table of the service, or an empty one when it cannot be read: a
+ * protocol whose decoder is unknown is then listened to on its own channel,
+ * which is what the table says for most of them anyway.
+ */
+async function knownChannels() {
+  if (channelTable.size > 0 || !config.effectiveServiceUrl) {
+    return channelTable;
+  }
+  try {
+    channelTable = indexChannels(await client.listChannels());
+    logger.debug(`${channelTable.size} radio protocol(s) known by the AirSend Web Service`);
+  } catch (err) {
+    logger.warn(`Could not read the radio protocols of the AirSend Web Service: ${err.message}`);
+  }
+  return channelTable;
+}
+
 async function bindBoxes(callbackUrl) {
-  if (!callbackUrl) {
+  const channel = listenState.plan?.channel;
+  if (!callbackUrl || !(channel > 0)) {
     return;
   }
   for (const box of boxDevices(config)) {
     try {
-      await client.bind(config.listen_channel, callbackUrl, box);
+      await client.bind(channel, callbackUrl, box);
       listenState.url = callbackUrl;
       listenState.error = null;
-      logger.info(
-        `Listening on channel ${config.listen_channel} through "${box.name}" -> ${callbackUrl}`,
-      );
+      logger.info(`Listening on channel ${channel} through "${box.name}" -> ${callbackUrl}`);
     } catch (err) {
       if (!listenState.url) {
         listenState.error = err.message;

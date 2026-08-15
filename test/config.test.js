@@ -198,3 +198,46 @@ test('parseDevices reads the travel times a shutter position is computed from', 
   assert.equal(untimed.travelUp, null);
   assert.equal(untimed.favoritePosition, null);
 });
+
+test('an emptied number field falls back to its default, it does not read as zero', () => {
+  // What a form sends for a field the user cleared. Read as a number, '' is 0:
+  // a refresh interval of nothing, and a radio listener switched off by a field
+  // nobody ever touched.
+  const config = normalizeConfig({ poll_frequency: '', listen_channel: '' });
+
+  assert.equal(config.poll_frequency, DEFAULT_CONFIG.poll_frequency);
+  assert.equal(config.listen_channel, null);
+});
+
+test('the listening channel says which of the three things the user meant', () => {
+  // Deduce it from the devices: empty, or the 1 the field used to default to.
+  assert.equal(normalizeConfig({ listen_channel: 1 }).listen_channel, null);
+  assert.equal(normalizeConfig({ listen_channel: 'nonsense' }).listen_channel, null);
+  // Off.
+  assert.equal(normalizeConfig({ listen_channel: 0 }).listen_channel, 0);
+  assert.equal(normalizeConfig({ listen_channel: -3 }).listen_channel, 0);
+  // That protocol, whatever the devices say.
+  assert.equal(normalizeConfig({ listen_channel: '25455' }).listen_channel, 25455);
+});
+
+test('parseDevices reads the other remotes that drive an equipment', () => {
+  const [shutter, gate] = parseDevices(
+    `{"devices":{
+      "Shutter": { "type": 4098, "channel": { "id": 25455, "source": 8295 },
+                   "remotes": [94311, { "pid": 1368, "addr": 542 }] },
+      "Gate": { "type": 4097, "pid": 200, "addr": 2, "remotes": [{ "addr": "7" }] }
+    }}`,
+  );
+
+  // A bare address is read on the protocol of the device itself; the long form
+  // carries its own.
+  assert.deepEqual(shutter.remotes, [
+    { id: 25455, source: 94311 },
+    { id: 1368, source: 542 },
+  ]);
+  assert.deepEqual(gate.remotes, [{ id: 200, source: 7 }]);
+
+  // A device without remotes has an empty list, never undefined.
+  const [plain] = parseDevices('[{"name":"Plain","type":4097,"channel":{"id":9}}]');
+  assert.deepEqual(plain.remotes, []);
+});

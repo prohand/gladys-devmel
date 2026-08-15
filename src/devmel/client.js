@@ -131,10 +131,45 @@ export class AirSendClient {
   }
 
   /**
+   * The radio protocols the AirSend Web Service knows.
+   *
+   * `GET /channels/` answers the table Devmel's own plugins read to fill their
+   * "permanent listening" menu: one entry per protocol, with its name and — the
+   * part that matters here — the channel that DECODES it (`getDecoder`). A box
+   * listens to a decoder, not to a device, so this table is what turns "my
+   * shutter speaks protocol 25455" into "the box must listen to channel N".
+   *
+   * It describes the software, not a box: Devmel's plugins read it without any
+   * connection string, and so do we.
+   *
+   * @returns {Promise<Array<{id: number, name?: string, getDecoder?: number}>>}
+   */
+  async listChannels() {
+    const url = this.serviceUrl;
+    if (!url) {
+      throw new AirSendError('No AirSend Web Service URL configured');
+    }
+    const response = await fetch(`${url}channels/`, {
+      method: 'GET',
+      headers: { 'User-Agent': USER_AGENT },
+      signal: AbortSignal.timeout(LOCAL_TIMEOUT_MS),
+    });
+    if (response.status !== 200) {
+      // Not a radio error: nothing was asked of a box, so the shared messages
+      // (a refused connection string, an unknown channel) would all be wrong.
+      throw new AirSendError(`AirSend Web Service answered HTTP ${response.status}`, {
+        status: response.status,
+        transport: DEVICE_TRANSPORTS.LOCAL,
+      });
+    }
+    const payload = await readJson(response);
+    return Array.isArray(payload) ? payload : [];
+  }
+
+  /**
    * Ask the box to forward every radio frame it hears on a channel to
-   * `callbackUrl` (the Gladys Plus webhook URL). `duration: 0` means "until
-   * further notice"; the subscription is renewed periodically because the box
-   * forgets it when it restarts.
+   * `callbackUrl`. `duration: 0` means "until further notice"; the subscription
+   * is renewed periodically because the box forgets it when it restarts.
    */
   async bind(channelId, callbackUrl, device = {}) {
     if (!this.canUseLocal(device)) {

@@ -6,9 +6,15 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { boxDevices, describeConnection, testConnection } from '../src/devmel/connection.js';
+import { indexChannels, planListening } from '../src/devmel/listening.js';
 import { normalizeConfig } from '../src/config.js';
 
 const SPURL = 'sp://pass@[fe80::1]?gw=0&rhost=192.168.1.50';
+
+// The airsend.cloud export of a single shutter, as it is pasted in.
+const DEVICES =
+  '{"devices":[{"name":"Baie vitree","localip":"fe80::dcf6:e5ff:fe8f:89cd",' +
+  '"travel_up":30,"travel_down":26,"type":4098,"pid":25455,"addr":8295}]}';
 
 /** A client whose local ping answers, or fails with a given message. */
 function fakeClient(error = null) {
@@ -90,6 +96,36 @@ test('test_connection says where the heard frames are pushed', async () => {
 
   assert.match(report.en, /Listening: channel 1, frames pushed to http:\/\/127\.0\.0\.1:33864\//);
   assert.match(report.fr, /Écoute : canal 1, trames poussées vers/);
+});
+
+test('test_connection names the protocol it listens to, and the devices it covers', async () => {
+  const config = normalizeConfig({ spurl: SPURL, devices: DEVICES });
+  const listen = {
+    url: 'http://127.0.0.1:33864/',
+    error: null,
+    plan: planListening(config, indexChannels([{ id: 25455, name: 'Somfy RTS' }])),
+  };
+
+  const report = await testConnection(fakeClient(), config, RUNNING, listen);
+
+  assert.match(report.en, /channel 25455 "Somfy RTS" \(deduced from your devices\)/);
+  assert.match(report.en, /Devices heard: Baie vitree\./);
+  assert.match(report.fr, /Appareils entendus : Baie vitree\./);
+});
+
+test('test_connection says which devices a forced protocol leaves out', async () => {
+  // Generic 433 MHz listening, while the only declared device speaks another
+  // protocol: the box hears nothing, and nothing else in Gladys would say so.
+  const config = normalizeConfig({ spurl: SPURL, devices: DEVICES, listen_channel: 4321 });
+
+  const report = await testConnection(fakeClient(), config, RUNNING, {
+    url: 'http://127.0.0.1:33864/',
+    error: null,
+  });
+
+  assert.match(report.en, /channel 4321/);
+  assert.doesNotMatch(report.en, /deduced/);
+  assert.match(report.en, /No declared device speaks this protocol: Baie vitree/);
 });
 
 test('test_connection reports a subscription the box refused', async () => {
