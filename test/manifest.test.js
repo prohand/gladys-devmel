@@ -150,6 +150,40 @@ test('dynamic selects declare a source and no static options', () => {
   }
 });
 
+// The vocabulary the store accepts. An unknown one is not an error the
+// indexer raises: it is dropped, and the integration quietly stops appearing
+// under the category it meant to be in.
+const CATEGORIES = [
+  'climate',
+  'lighting',
+  'energy',
+  'security',
+  'multimedia',
+  'appliances',
+  'environment',
+  'protocols',
+  'network',
+  'notifications',
+  'assistants',
+  'services',
+];
+
+test('the categories stay inside the vocabulary the store indexes', () => {
+  const { categories } = manifest;
+  assert.ok(Array.isArray(categories), 'categories must be a list');
+  assert.ok(
+    categories.length >= 1 && categories.length <= 3,
+    `1 to 3 categories, got ${categories.length}`,
+  );
+  assert.equal(new Set(categories).size, categories.length, 'categories must be unique');
+  for (const category of categories) {
+    assert.ok(CATEGORIES.includes(category), `unknown category "${category}"`);
+  }
+  // Older cores reject a manifest field they do not know: declaring
+  // `categories` is what makes 4.86 the floor.
+  assert.match(manifest.gladys_version, /^>=4\.(8[6-9]|9\d|\d{3,})/);
+});
+
 test('the manifest declares the local transport and a label in both languages', () => {
   assert.deepEqual(manifest.transports, ['local']);
   for (const field of [...manifest.config_schema, ...(manifest.actions ?? [])]) {
