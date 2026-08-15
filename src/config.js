@@ -27,6 +27,7 @@ export const DEFAULT_CONFIG = {
   devices: '', // JSON exported from airsend.cloud
   listen_channel: null, // radio protocol to listen to; null = deduced, 0 = disabled
   poll_frequency: 300, // seconds between two sensor reads
+  debug_logs: false, // raise the log level to debug, from the Configuration screen
 };
 
 /**
@@ -63,6 +64,7 @@ export function normalizeConfig(raw = {}) {
     // silently turned off by a field nobody touched.
     poll_frequency: toPositiveNumber(raw.poll_frequency, DEFAULT_CONFIG.poll_frequency),
     use_embedded_service: raw.use_embedded_service !== false,
+    debug_logs: toBoolean(raw.debug_logs, DEFAULT_CONFIG.debug_logs),
   };
 
   // Who serves the local channel. A URL typed by the user wins: someone who

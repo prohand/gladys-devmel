@@ -151,6 +151,20 @@
       "default": 300,
       "min": 30,
       "max": 3600
+    },
+    {
+      "key": "debug_logs",
+      "type": "boolean",
+      "label": {
+        "en": "Detailed logs (debug)",
+        "fr": "Journaux détaillés (debug)"
+      },
+      "description": {
+        "en": "Log every radio frame the box hears, including the ones dropped as unreliable or left undecoded. Turn it on to find out why a remote does not show up, and off again once you know: it is verbose. Your connection string is never logged.",
+        "fr": "Journalise chaque trame radio entendue par le boîtier, y compris celles écartées comme peu fiables ou non décodées. Activez-le pour comprendre pourquoi une télécommande ne remonte pas, puis désactivez-le : c'est verbeux. Votre chaîne de connexion n'est jamais journalisée."
+      },
+      "required": false,
+      "default": false
     }
   ],
   "actions": [

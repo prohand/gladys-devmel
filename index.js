@@ -16,6 +16,7 @@
 
 import { GladysIntegration, logger } from '@gladysassistant/integration-sdk';
 import { normalizeConfig } from './src/config.js';
+import { applyLogLevel } from './src/logging.js';
 import { AirSendClient } from './src/devmel/client.js';
 import {
   applyEvents,
@@ -189,6 +190,9 @@ gladys.on('disconnected', () => {
  */
 async function initialize(rawConfig) {
   config = normalizeConfig(rawConfig);
+  // First, so that everything this initialization logs already obeys the level
+  // the user just asked for — the frames of a freshly armed listener included.
+  applyLogLevel(config);
   // The protocol table belongs to the service the configuration points at.
   channelTable = new Map();
 

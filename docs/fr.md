@@ -324,9 +324,28 @@ arrivée, et il n'y a que trois raisons possibles :
   pilote ; si la vôtre est d'une autre marque, mettez son `pid` dans le champ
   **Canal d'écoute** le temps de la repérer ;
 - **la trame a été entendue, mais jugée trop douteuse pour être publiée.** La
-  radio est bruyante, et le boîtier note chaque trame qu'il décode. Passez
-  l'intégration en `LOG_LEVEL=debug` : ces trames-là y sont tracées, avec leur
+  radio est bruyante, et le boîtier note chaque trame qu'il décode. Activez
+  **Journaux détaillés (debug)** : ces trames-là y sont tracées, avec leur
   `pid`, leur `addr` et la raison de leur abandon.
+
+### Les journaux détaillés
+
+La radio est la seule partie de l'intégration que personne ne peut observer :
+une télécommande qui ne remonte pas est soit inaudible, soit écartée comme peu
+fiable, soit entendue mais indécodable — et seuls les journaux de niveau debug
+distinguent ces trois cas.
+
+Le champ **Journaux détaillés (debug)** de l'écran de configuration les active.
+Il prend effet immédiatement, sans redémarrer l'intégration : cochez, appuyez
+sur la télécommande, lisez les logs, décochez. C'est verbeux, ce n'est pas fait
+pour rester allumé.
+
+Votre chaîne de connexion `sp://` n'est jamais journalisée, quel que soit le
+niveau.
+
+Si vous préférez la variable d'environnement du conteneur, `LOG_LEVEL` marche
+toujours et reste prioritaire : l'interrupteur monte le niveau à debug tant
+qu'il est activé, puis rend la main à votre `LOG_LEVEL` quand vous le coupez.
 
 ### Si vous faites tourner le service AirSend ailleurs
 
@@ -377,5 +396,6 @@ votre clé Open API dans le bloc **Webhooks** de l'écran de configuration.
 | Aucune trame d'une télécommande 868    | **Tester la connexion** : le canal `1` est du 433 MHz. Déclarez l'appareil, ou son `pid`   |
 
 L'intégration journalise tout ce qu'elle fait : consultez les logs de
-l'intégration depuis l'interface de Gladys (ou `docker logs` sur l'hôte), avec
-`LOG_LEVEL=debug` pour le détail complet.
+l'intégration depuis l'interface de Gladys (ou `docker logs` sur l'hôte), et
+cochez **Journaux détaillés (debug)** dans sa configuration pour le détail
+complet.
