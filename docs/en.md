@@ -309,9 +309,25 @@ still nothing, the frame never arrived, and there are only three reasons why:
   another make, put its `pid` in the **Listening channel** field long enough to
   spot it;
 - **the frame was heard, but graded too doubtful to be published.** Radio is
-  noisy, and the box grades every frame it decodes. Switch the integration to
-  `LOG_LEVEL=debug`: those frames are traced there too, with their `pid`, their
-  `addr` and the reason they went no further.
+  noisy, and the box grades every frame it decodes. Turn on **Detailed logs
+  (debug)**: those frames are traced there too, with their `pid`, their `addr`
+  and the reason they went no further.
+
+### Detailed logs
+
+Radio is the one part of this integration nobody can watch: a remote that never
+shows up is either unheard, dropped as unreliable, or heard and undecodable —
+and only the debug logs tell those three apart.
+
+The **Detailed logs (debug)** field of the Configuration screen turns them on.
+It takes effect at once, with no restart: tick it, press the remote, read the
+logs, untick it. It is verbose, and not meant to stay on.
+
+Your `sp://` connection string is never logged, at any level.
+
+If you would rather use the container environment variable, `LOG_LEVEL` still
+works and still wins: the switch raises the level to debug while it is on, then
+hands your `LOG_LEVEL` back when you turn it off.
 
 ### If you run the AirSend service elsewhere
 
@@ -360,5 +376,5 @@ provides: link your Gladys Plus account and paste your Open API key in the
 | No frame from an 868 MHz remote   | **Test the connection**: channel `1` is 433 MHz. Declare the device, or its `pid`      |
 
 The integration logs everything it does: read the integration logs from the
-Gladys UI (or `docker logs` on the host), with `LOG_LEVEL=debug` for the full
-detail.
+Gladys UI (or `docker logs` on the host), and tick **Detailed logs (debug)** in
+its configuration for the full detail.

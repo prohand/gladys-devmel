@@ -78,6 +78,7 @@ them.
 ├─ index.js                          # SDK bootstrap + event wiring (no radio logic)
 ├─ src/
 │  ├─ config.js                      # config defaults + the airsend.cloud device list parser
+│  ├─ logging.js                     # the log level, switchable from the Configuration screen
 │  ├─ devmel/                        # the AirSend driver
 │  │  ├─ client.js                   #   the local transport and the transport badge
 │  │  ├─ service.js                  #   the bundled AirSend Web Service (start, watch, stop)
