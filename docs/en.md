@@ -296,6 +296,39 @@ updates the shutter in Gladys just like Gladys itself would:
 A bare address is read on the protocol of the device itself; a remote on
 another protocol is written in full: `"remotes": [{ "pid": 1368, "addr": 542 }]`.
 
+#### Let the integration write that line
+
+Copying a `pid`/`addr` pair out of a log into one-line JSON, in the right
+spelling, is exactly the kind of thing one gets wrong every other time. The
+**Attach a remote** action does it for you:
+
+1. press the wall remote (the integration remembers the emitters it hears,
+   including the ones nobody declares);
+2. in the Configuration screen, run **Attach a remote** and pick the device it
+   drives;
+3. the action answers with your device list, unchanged, the remote attached as
+   `{"pid": …, "addr": …}`: paste it into the **Devices** field and save.
+
+It attaches the **last** emitter heard that no device claims, and names the
+others without touching them. It also says what its frames decoded to, and
+warns when the remote speaks another protocol than the device: the box listens
+to one at a time.
+
+#### The remote is attached, and nothing moves
+
+Once the emitter is declared the frame does reach the device — what remains is
+whether it **carries an order**. These two cases look alike and are unrelated:
+
+- `Heard pid …, addr … for "Living room shutter", but it says nothing this
+device can follow: data …` — the frame arrived, the device has no use for it.
+  That is the fate of rolling-code 868 MHz protocols: the service only decodes
+  them partially, so the frame proves the radio works but carries no order to
+  replay. Attaching the remote cannot change that;
+- nothing at all in the logs — the frame no longer arrives. Check with **Test
+  the connection**: when the remote was declared on another protocol than its
+  device, the _Listening_ line names it as unheard, and putting its `pid` in the
+  **Listening channel** field listens to its side instead.
+
 **Nothing in the logs after a press?** The line is written when a frame comes
 in: press the remote, then read the logs of the integration again. If there is
 still nothing, the frame never arrived, and there are only three reasons why:
@@ -343,6 +376,8 @@ provides: link your Gladys Plus account and paste your Open API key in the
 - **Test the connection** — checks the local channel and reports the devices it
   parsed. The fastest way to spot a mistyped connection string or a device
   list that did not parse.
+- **Attach a remote** — press the remote, pick the device it drives: the action
+  writes the device list to paste back, remote included (see "The wall remote").
 - **Identify a device** — pick a device and it is sent a PING. Not every piece
   of 433 MHz equipment reacts to it.
 

@@ -64,6 +64,12 @@ the user runs elsewhere cannot reach it, and its frames go through the `events`
 webhook relayed by Gladys Plus instead. Both routes hand the same payload to
 the same handler.
 
+Every frame is also remembered (`src/devmel/heard.js`), emitter by emitter,
+including the ones no device declares — that is a wall remote, and
+`src/devmel/remotes.js` turns it into the device list to paste back
+("Attach a remote"), instead of leaving the user to copy a `pid`/`addr` pair
+out of a log line into one-line JSON.
+
 What is bound is a _protocol_, not a device: the box has one radio, and
 subscribing switches it to permanent reception of a single protocol.
 `src/devmel/listening.js` reads the protocol table of the service
@@ -86,6 +92,8 @@ them.
 │  │  ├─ travel.js                   #   shutter position, computed from the travel times
 │  │  ├─ callback.js                 #   where the service posts the frames it hears
 │  │  ├─ listening.js                #   which radio protocol the box is asked to listen to
+│  │  ├─ heard.js                    #   the emitters heard on the air, remembered
+│  │  ├─ remotes.js                  #   the "Attach a remote" action: writes the device list
 │  │  └─ connection.js               #   connection status + the "Test the connection" action
 │  └─ devices/                       # one file per device type
 │     ├─ index.js                    #   registry: config -> Gladys devices, event routing

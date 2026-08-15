@@ -200,6 +200,27 @@ function decodeStateNote(raw) {
 }
 
 /**
+ * Spell out what a frame said, for a human reading a log line or the answer of
+ * a manifest action: `level 100 (up), state stop`.
+ *
+ * Worth a function of its own because it is shown exactly where the user is
+ * stuck — a remote heard but understood by nobody. What it decoded to is the
+ * difference between "the wrong device is declared" and "this protocol carries
+ * no order Gladys can replay".
+ */
+export function describeReadings(readings) {
+  if (!Array.isArray(readings) || readings.length === 0) {
+    return '';
+  }
+  return readings
+    .map((reading) => {
+      const value = `${reading.kind} ${reading.value}`;
+      return reading.command ? `${value} (${reading.command})` : value;
+    })
+    .join(', ');
+}
+
+/**
  * Two AirSend channels designate the same physical remote when their id AND
  * source match — the other fields (mac, seed, counter) vary from frame to
  * frame. Used to route an incoming radio event to the right Gladys device.

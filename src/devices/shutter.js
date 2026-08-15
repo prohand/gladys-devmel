@@ -149,9 +149,14 @@ export const shutter = {
    * Publish what a radio frame said. Orders (a wall remote pressed by hand, the
    * echo of our own command) start the position tracking; only a reading with
    * no `command` is a position the hardware actually reported.
+   *
+   * @returns {Promise<number>} how many readings this shutter acted on — zero
+   *   means the frame was heard and understood by nobody, which is the one
+   *   thing the user must be told (see `applyEvents`).
    */
   async applyReadings(gladys, { device, readings, createdAt }) {
     const ids = idsFor(gladys, KEY, device);
+    let handled = 0;
     for (const reading of readings) {
       if (reading.command === COMMANDS.STOP) {
         await freeze(gladys, device, ids, createdAt);
@@ -168,8 +173,12 @@ export const shutter = {
         const position = device.invert ? 100 - reading.value : reading.value;
         shutter.travel.set(device, position);
         await publishPosition(gladys, device, ids, position, createdAt);
+      } else {
+        continue;
       }
+      handled += 1;
     }
+    return handled;
   },
 
   async identify(_gladys, { device, client, callbackUrl }) {

@@ -95,9 +95,11 @@ export const sensor = {
     };
   },
 
+  /** @returns {Promise<number>} how many readings this sensor published. */
   async applyReadings(gladys, { device, readings, createdAt }) {
     const ids = idsFor(gladys, KEY, device);
     const declared = new Set(device.features);
+    let handled = 0;
     for (const reading of readings) {
       const feature = FEATURE_BY_READING[reading.kind];
       if (!feature || !declared.has(feature)) {
@@ -105,7 +107,9 @@ export const sensor = {
       }
       const value = feature === FEATURE.CLICK ? CLICK_TOGGLE : reading.value;
       await publishState(gladys, ids.feature(feature), value, createdAt);
+      handled += 1;
     }
+    return handled;
   },
 };
 

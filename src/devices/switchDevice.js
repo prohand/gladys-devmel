@@ -55,8 +55,10 @@ export const switchDevice = {
     await publishState(gladys, feature.external_id, on ? 1 : 0);
   },
 
+  /** @returns {Promise<number>} how many readings this switch acted on. */
   async applyReadings(gladys, { device, readings, createdAt }) {
     const ids = idsFor(gladys, KEY, device);
+    let handled = 0;
     for (const reading of readings) {
       if (reading.kind === READINGS.LEVEL) {
         await publishState(
@@ -65,8 +67,10 @@ export const switchDevice = {
           reading.value > 0 ? 1 : 0,
           createdAt,
         );
+        handled += 1;
       }
     }
+    return handled;
   },
 
   async identify(_gladys, { device, client, callbackUrl }) {

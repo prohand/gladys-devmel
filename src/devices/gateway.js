@@ -96,16 +96,25 @@ export const gateway = {
     await gateway.applyReadings(gladys, { device, readings });
   },
 
-  /** Publish the readings of a poll answer or of a pushed radio event. */
+  /**
+   * Publish the readings of a poll answer or of a pushed radio event.
+   *
+   * @returns {Promise<number>} how many readings the box published.
+   */
   async applyReadings(gladys, { device, readings, createdAt }) {
     const ids = idsFor(gladys, KEY, device);
+    let handled = 0;
     for (const reading of readings) {
       if (reading.kind === READINGS.TEMPERATURE) {
         await publishState(gladys, ids.feature(FEATURE.TEMPERATURE), reading.value, createdAt);
       } else if (reading.kind === READINGS.ILLUMINANCE) {
         await publishState(gladys, ids.feature(FEATURE.ILLUMINANCE), reading.value, createdAt);
+      } else {
+        continue;
       }
+      handled += 1;
     }
+    return handled;
   },
 
   /** The box answers a PING, which makes its status LED blink. */

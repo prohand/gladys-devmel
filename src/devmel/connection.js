@@ -222,7 +222,9 @@ function describeCoverage(plan, language) {
   }
   const heard = names(plan.covered);
   if (plan.uncovered.length === 0) {
-    return language === 'fr' ? ` Appareils entendus : ${heard}.` : ` Devices heard: ${heard}.`;
+    return language === 'fr'
+      ? ` Appareils entendus : ${heard}.${describeUnheardRemotes(plan, language)}`
+      : ` Devices heard: ${heard}.${describeUnheardRemotes(plan, language)}`;
   }
   const deaf = names(plan.uncovered);
   if (plan.covered.length === 0) {
@@ -234,9 +236,31 @@ function describeCoverage(plan, language) {
   }
   return language === 'fr'
     ? ` Appareils entendus : ${heard}. Le boîtier n'écoute qu'un protocole à la ` +
-        `fois : ${deaf} ne seront pas entendus.`
+        `fois : ${deaf} ne seront pas entendus.${describeUnheardRemotes(plan, language)}`
     : ` Devices heard: ${heard}. The box listens to one protocol at a time: ` +
-        `${deaf} will not be heard.`;
+        `${deaf} will not be heard.${describeUnheardRemotes(plan, language)}`;
+}
+
+/**
+ * Remotes declared on another protocol than the one being listened to. Their
+ * device is heard, so nothing above mentions them — and pressing them does
+ * nothing, which is exactly what the user came to this screen to understand.
+ */
+function describeUnheardRemotes(plan, language) {
+  const unheard = plan.unheardRemotes ?? [];
+  if (unheard.length === 0) {
+    return '';
+  }
+  const listed = unheard
+    .slice(0, 5)
+    .map(({ device, remote }) => `${device.name} (pid ${remote.id}, addr ${remote.source})`)
+    .join(', ');
+  const more = unheard.length > 5 ? ` (+${unheard.length - 5})` : '';
+  return language === 'fr'
+    ? ` Télécommandes déclarées sur un autre protocole, donc jamais entendues : ${listed}${more}. ` +
+        "Renseignez leur pid dans le canal d'écoute pour écouter le leur à la place."
+    : ` Remotes declared on another protocol, so never heard: ${listed}${more}. Fill in their ` +
+        'pid as the listening channel to listen to theirs instead.';
 }
 
 function names(devices) {

@@ -92,15 +92,11 @@ export function normalizeConfig(raw = {}) {
  * @returns {Array<object>} normalized devices, invalid entries dropped
  */
 export function parseDevices(source, config = DEFAULT_CONFIG) {
-  const parsed = parseDeviceSource(source);
+  const parsed = parseDeviceEntries(source);
   if (!parsed) {
     return [];
   }
-
-  const entries = parsed.devices ?? parsed;
-  const list = Array.isArray(entries)
-    ? entries.map((entry) => [entry?.name, entry])
-    : Object.entries(entries);
+  const list = parsed.entries;
 
   const devices = [];
   const seen = new Set();
@@ -117,6 +113,38 @@ export function parseDevices(source, config = DEFAULT_CONFIG) {
     devices.push(device);
   }
   return devices;
+}
+
+/**
+ * The device list as the user wrote it, whichever of the four shapes it takes
+ * (see {@link parseDevices}): the parsed root, and its entries paired with the
+ * name they are known by.
+ *
+ * `root` is the object the entries live in, so an edit made to an entry — the
+ * `remotes` the "attach a remote" action adds — is an edit to the very list the
+ * user pasted, unknown fields and shape included. Rebuilding that list from the
+ * normalized devices would quietly drop everything this module does not model.
+ *
+ * @returns {{root: object, entries: Array<[string, object]>}|null}
+ */
+export function parseDeviceEntries(source) {
+  const root = parseDeviceSource(source);
+  if (!root) {
+    return null;
+  }
+  const container = root.devices ?? root;
+  const entries = Array.isArray(container)
+    ? container.map((entry) => [entry?.name, entry])
+    : Object.entries(container);
+  return { root, entries };
+}
+
+/**
+ * The radio channel of a raw entry of that list, read from the flat `pid`/`addr`
+ * of the airsend.cloud export as well as from a nested `channel`.
+ */
+export function channelOfEntry(entry) {
+  return entry && typeof entry === 'object' ? normalizeChannel(entry, Number(entry.type)) : null;
 }
 
 function parseDeviceSource(source) {
