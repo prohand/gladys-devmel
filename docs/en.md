@@ -271,6 +271,23 @@ updates the shutter in Gladys just like Gladys itself would:
 A bare address is read on the protocol of the device itself; a remote on
 another protocol is written in full: `"remotes": [{ "pid": 1368, "addr": 542 }]`.
 
+**Nothing in the logs after a press?** The line is written when a frame comes
+in: press the remote, then read the logs of the integration again. If there is
+still nothing, the frame never arrived, and there are only three reasons why:
+
+- **listening is not in place.** Click **Test the connection**: the _Listening_
+  line says which protocol is listened to and where the frames are pushed — or
+  why they are not;
+- **the remote speaks another protocol.** The box listens to a single one at a
+  time, the one of your declared devices (see "The listening channel"). A wall
+  remote normally uses the protocol of the shutter it drives; if yours is of
+  another make, put its `pid` in the **Listening channel** field long enough to
+  spot it;
+- **the frame was heard, but graded too doubtful to be published.** Radio is
+  noisy, and the box grades every frame it decodes. Switch the integration to
+  `LOG_LEVEL=debug`: those frames are traced there too, with their `pid`, their
+  `addr` and the reason they went no further.
+
 ### If you run the AirSend service elsewhere
 
 The AirSend Web Service pushes the frames from the machine it runs on. When the

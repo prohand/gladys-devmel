@@ -284,6 +284,24 @@ Une adresse seule est lue sur le protocole de l'appareil lui-même ; une
 télécommande sur un autre protocole s'écrit en entier :
 `"remotes": [{ "pid": 1368, "addr": 542 }]`.
 
+**Rien dans les logs après un appui ?** La ligne n'est écrite qu'à la réception
+d'une trame : appuyez sur la télécommande, puis relisez les logs de
+l'intégration. S'il n'y a toujours rien, c'est que la trame n'est jamais
+arrivée, et il n'y a que trois raisons possibles :
+
+- **l'écoute n'est pas en place.** Cliquez sur **Tester la connexion** : la
+  ligne _Écoute_ dit quel protocole est écouté et vers où les trames sont
+  poussées — ou pourquoi elles ne le sont pas ;
+- **la télécommande parle un autre protocole.** Le boîtier n'en écoute qu'un
+  seul à la fois, celui de vos appareils déclarés (voir « Le canal d'écoute »).
+  Une télécommande murale utilise normalement le protocole du volet qu'elle
+  pilote ; si la vôtre est d'une autre marque, mettez son `pid` dans le champ
+  **Canal d'écoute** le temps de la repérer ;
+- **la trame a été entendue, mais jugée trop douteuse pour être publiée.** La
+  radio est bruyante, et le boîtier note chaque trame qu'il décode. Passez
+  l'intégration en `LOG_LEVEL=debug` : ces trames-là y sont tracées, avec leur
+  `pid`, leur `addr` et la raison de leur abandon.
+
 ### Si vous faites tourner le service AirSend ailleurs
 
 Le service web AirSend pousse les trames depuis la machine où il tourne. Quand

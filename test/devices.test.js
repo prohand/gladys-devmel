@@ -53,6 +53,32 @@ function deviceExternalId(config, name) {
   return `${findBlueprintByType(device.rtype).key}:${device.platformId}`;
 }
 
+/**
+ * Run something with the console captured, so a test can assert on what the
+ * user will actually read in the logs of the integration.
+ */
+function captureLogs(run, level = 'info') {
+  const written = [];
+  const original = { log: console.log, error: console.error, level: process.env.LOG_LEVEL };
+  console.log = (...args) => written.push(args.join(' '));
+  console.error = (...args) => written.push(args.join(' '));
+  process.env.LOG_LEVEL = level;
+  const restore = () => {
+    console.log = original.log;
+    console.error = original.error;
+    if (original.level === undefined) {
+      delete process.env.LOG_LEVEL;
+    } else {
+      process.env.LOG_LEVEL = original.level;
+    }
+  };
+  const result = run().finally(restore);
+  return {
+    result,
+    of: (kind) => written.filter((line) => line.includes(`[${kind}]`)),
+  };
+}
+
 function featureOf(gladys, config, name, key) {
   return { external_id: `${deviceExternalId(config, name)}:${key}` };
 }
@@ -268,6 +294,50 @@ test('noisy and unknown radio frames are dropped', async () => {
 
   assert.equal(applied, 0);
   assert.deepEqual(gladys.published, []);
+});
+
+test('an undeclared emitter is named in the logs, whatever its notes say', async () => {
+  // The point of that line is discovery: it tells the user the pid/addr pair
+  // to paste into `remotes`. A frame carrying a note the integration cannot
+  // decode is exactly what an unknown remote sends, so it must be logged too.
+  const { gladys, config } = setup();
+  const lines = captureLogs(async () =>
+    applyEvents(gladys, config, [
+      {
+        type: 3,
+        reliability: 0x20,
+        channel: { id: 300, source: 94311, counter: 7 },
+        thingnotes: { notes: [{ type: 4242, value: 'unknown to us' }] },
+      },
+    ]),
+  );
+
+  assert.equal(await lines.result, 0);
+  assert.equal(lines.of('INFO').length, 1);
+  assert.match(lines.of('INFO')[0], /pid 300, addr 94311/);
+  assert.match(lines.of('INFO')[0], /remotes/);
+});
+
+test('a frame dropped before that is still traceable on the debug channel', async () => {
+  const { gladys, config } = setup();
+  const lines = captureLogs(
+    async () =>
+      applyEvents(gladys, config, [
+        // Graded too low by the box: never published, but heard.
+        {
+          type: 3,
+          reliability: 0x2,
+          channel: { id: 300, source: 94311 },
+          thingnotes: { notes: [{ type: NOTE_TYPES.STATE, value: STATE_VALUES.UP }] },
+        },
+      ]),
+    'debug',
+  );
+
+  assert.equal(await lines.result, 0);
+  assert.equal(lines.of('INFO').length, 0);
+  assert.equal(lines.of('DEBUG').length, 1);
+  assert.match(lines.of('DEBUG')[0], /unreliable, graded 2.*pid 300, addr 94311/);
 });
 
 test('transports report the channel each device would use', () => {
