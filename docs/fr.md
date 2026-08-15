@@ -310,6 +310,40 @@ Une adresse seule est lue sur le protocole de l'appareil lui-même ; une
 télécommande sur un autre protocole s'écrit en entier :
 `"remotes": [{ "pid": 1368, "addr": 542 }]`.
 
+#### Laissez l'intégration écrire la ligne
+
+Recopier un couple `pid`/`addr` depuis un log dans du JSON sur une seule ligne,
+en choisissant la bonne écriture, est exactement le genre de chose qu'on rate
+une fois sur deux. L'action **Rattacher une télécommande** le fait pour vous :
+
+1. appuyez sur la télécommande murale (l'intégration retient les émetteurs
+   qu'elle entend, même ceux que personne ne déclare) ;
+2. dans l'écran de configuration, lancez **Rattacher une télécommande** et
+   choisissez l'appareil qu'elle pilote ;
+3. l'action répond avec votre liste d'appareils, inchangée, télécommande
+   rattachée en `{"pid": …, "addr": …}` : collez-la dans le champ **Appareils**
+   et enregistrez.
+
+Elle rattache le **dernier** émetteur entendu qu'aucun appareil ne déclare, et
+cite les autres sans y toucher. Elle dit aussi ce que ses trames ont donné au
+décodage, et prévient quand la télécommande parle un autre protocole que
+l'appareil : le boîtier n'en écoute qu'un à la fois.
+
+#### La télécommande est rattachée, et rien ne bouge
+
+Une fois l'émetteur déclaré, la trame arrive bien à l'appareil — reste à savoir
+si elle **porte un ordre**. Ces deux cas se ressemblent et n'ont rien à voir :
+
+- `Heard pid …, addr … for « Baie vitrée », but it says nothing this device can
+follow: data …` — la trame est arrivée, l'appareil ne sait qu'en faire. C'est
+  le lot des protocoles 868 MHz à code tournant : le service ne les décode que
+  partiellement, la trame prouve que la radio marche mais ne porte aucun ordre
+  rejouable. Le rattachement ne peut rien y changer ;
+- rien du tout dans les logs — la trame n'arrive plus. Vérifiez avec **Tester la
+  connexion** : si la télécommande a été déclarée sur un autre protocole que
+  l'appareil, la ligne _Écoute_ la nomme comme non entendue, et son `pid` mis
+  dans le **Canal d'écoute** rétablit l'écoute de son côté.
+
 **Rien dans les logs après un appui ?** La ligne n'est écrite qu'à la réception
 d'une trame : appuyez sur la télécommande, puis relisez les logs de
 l'intégration. S'il n'y a toujours rien, c'est que la trame n'est jamais
@@ -361,6 +395,9 @@ votre clé Open API dans le bloc **Webhooks** de l'écran de configuration.
 - **Tester la connexion** — vérifie le canal local et indique les appareils
   lus. Le moyen le plus rapide de repérer une chaîne de connexion mal saisie
   ou une liste d'appareils qui n'a pas été comprise.
+- **Rattacher une télécommande** — appuyez sur la télécommande, choisissez
+  l'appareil qu'elle pilote : l'action écrit la liste d'appareils à recoller,
+  télécommande comprise (voir « La télécommande murale »).
 - **Identifier un appareil** — choisissez un appareil, un PING lui est envoyé.
   Tous les équipements 433 MHz n'y réagissent pas.
 

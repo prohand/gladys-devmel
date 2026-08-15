@@ -106,6 +106,31 @@ test('a wall remote declared on a device is heard like the device itself', () =>
   );
 });
 
+test('a remote on another protocol than the one listened to is named', () => {
+  // Two shutters carry the protocol vote, so the wall remote of the first one
+  // loses it: declared, correct, and never heard. The device itself is heard,
+  // so nothing in `covered`/`uncovered` shows it — hence this list.
+  const config = configWith([
+    { ...SHUTTER, remotes: [{ pid: 14177, addr: 3359265281 }] },
+    OTHER_SHUTTER,
+  ]);
+
+  const plan = planListening(config, TABLE);
+
+  assert.equal(plan.channel, 25455);
+  assert.deepEqual(plan.uncovered, []);
+  assert.deepEqual(
+    plan.unheardRemotes.map(({ device, remote }) => `${device.name}:${remote.id}`),
+    ['Baie vitree:14177'],
+  );
+});
+
+test('a remote sharing the protocol of its device is heard with it', () => {
+  const config = configWith([{ ...SHUTTER, remotes: [94311] }]);
+
+  assert.deepEqual(planListening(config, TABLE).unheardRemotes, []);
+});
+
 test('a channel typed by the user wins over the deduction', () => {
   const plan = planListening(configWith([SHUTTER], { listen_channel: 4321 }), TABLE);
 

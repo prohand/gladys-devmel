@@ -71,7 +71,8 @@ export function channelName(channelId, table) {
  *   devices themselves
  * @returns {{
  *   enabled: boolean, channel: ?number, name: ?string, deduced: boolean,
- *   fallback: boolean, covered: Array<object>, uncovered: Array<object>
+ *   fallback: boolean, covered: Array<object>, uncovered: Array<object>,
+ *   unheardRemotes: Array<{device: object, remote: object}>
  * }}
  */
 export function planListening(config, table = new Map()) {
@@ -86,6 +87,7 @@ export function planListening(config, table = new Map()) {
       fallback: false,
       covered: [],
       uncovered: [],
+      unheardRemotes: [],
     };
   }
 
@@ -111,7 +113,25 @@ export function planListening(config, table = new Map()) {
     fallback: deduced && devices.length === 0,
     covered,
     uncovered,
+    // A device counts as covered as soon as ONE of its channels is heard, so a
+    // shutter heard on its own protocol hides a wall remote that speaks
+    // another one — declared, correct, and never heard. That is the second
+    // silent way `remotes` fails, and the only warning of it is here.
+    unheardRemotes: unheardRemotes(devices, channel, table),
   };
+}
+
+/** Remotes declared on a protocol other than the one being listened to. */
+function unheardRemotes(devices, channel, table) {
+  const unheard = [];
+  for (const device of devices) {
+    for (const remote of device.remotes ?? []) {
+      if (Number(remote?.id) > 0 && decoderOf(remote.id, table) !== Number(channel)) {
+        unheard.push({ device, remote });
+      }
+    }
+  }
+  return unheard;
 }
 
 /** Devices whose frames listening could bring back: everything on the air. */

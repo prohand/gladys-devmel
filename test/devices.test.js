@@ -12,6 +12,7 @@ import {
 } from '../src/devices/index.js';
 import { shutter } from '../src/devices/shutter.js';
 import { NOTE_TYPES, STATE_VALUES } from '../src/devmel/notes.js';
+import { HeardChannels } from '../src/devmel/heard.js';
 import { ShutterTravel } from '../src/devmel/travel.js';
 import { createFakeGladys } from './helpers/fakeGladys.js';
 import { createFakeClient } from './helpers/fakeAirSend.js';
@@ -352,6 +353,72 @@ test('a declared device whose frame decodes to nothing says so on the debug chan
   assert.equal(lines.of('INFO').length, 0);
   assert.equal(lines.of('DEBUG').length, 1);
   assert.match(lines.of('DEBUG')[0], /only partially decoded/);
+});
+
+test('a frame its own device cannot follow is not swallowed in silence', async () => {
+  // The trap this line exists for: the user has just declared the wall remote,
+  // the frame now reaches the shutter, and the shutter has nothing to do with
+  // what it carries (a rolling-code protocol hands over a raw DATA note, never
+  // an order). Publishing nothing AND saying nothing looks exactly like a
+  // remote that was never attached.
+  const { gladys, config } = setup();
+  const shutterChannel = deviceNamed(config, 'Living room shutter').channel;
+  const heard = new HeardChannels();
+  const lines = captureLogs(async () =>
+    applyEvents(
+      gladys,
+      config,
+      [
+        {
+          type: 3,
+          reliability: 0x20,
+          channel: { ...shutterChannel },
+          thingnotes: { notes: [{ type: NOTE_TYPES.DATA, value: 'a1b2c3' }] },
+        },
+      ],
+      heard,
+    ),
+  );
+
+  assert.equal(await lines.result, 0);
+  assert.deepEqual(gladys.published, []);
+  assert.equal(lines.of('INFO').length, 1);
+  assert.match(lines.of('INFO')[0], /pid 300, addr 3.*"Living room shutter"/);
+  assert.match(lines.of('INFO')[0], /data a1b2c3/);
+  // Heard, claimed, understood by nobody: what the registry has to remember.
+  assert.deepEqual(
+    heard.list().map(({ id, source, claimed, understood }) => ({
+      id,
+      source,
+      claimed,
+      understood,
+    })),
+    [{ id: 300, source: 3, claimed: true, understood: false }],
+  );
+});
+
+test('an emitter nobody declares is remembered, for the action to attach it', async () => {
+  const { gladys, config } = setup();
+  const heard = new HeardChannels();
+
+  await applyEvents(
+    gladys,
+    config,
+    [
+      {
+        type: 3,
+        reliability: 0x20,
+        channel: { id: 14177, source: 3359265281 },
+        thingnotes: { notes: [{ type: NOTE_TYPES.STATE, value: STATE_VALUES.UP }] },
+      },
+    ],
+    heard,
+  );
+
+  const [emitter] = heard.list();
+  assert.equal(emitter.id, 14177);
+  assert.equal(emitter.source, 3359265281);
+  assert.equal(emitter.claimed, false);
 });
 
 test('a frame dropped before that is still traceable on the debug channel', async () => {

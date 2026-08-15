@@ -172,6 +172,38 @@
       "timeout_seconds": 30
     },
     {
+      "key": "attach_remote",
+      "label": {
+        "en": "Attach a remote",
+        "fr": "Rattacher une télécommande"
+      },
+      "timeout_seconds": 30,
+      "fields": [
+        {
+          "key": "attach_remote_intro",
+          "type": "section",
+          "label": {
+            "en": "Attach a remote heard on the air",
+            "fr": "Rattacher une télécommande entendue"
+          },
+          "description": {
+            "en": "Press the wall remote, then pick the device it drives: the answer is your device list with that remote attached, ready to paste back into the Devices field.",
+            "fr": "Appuyez sur la télécommande murale, puis choisissez l'appareil qu'elle pilote : la réponse est votre liste d'appareils, télécommande rattachée, prête à recoller dans le champ Appareils."
+          }
+        },
+        {
+          "key": "device",
+          "type": "select",
+          "source": "devices",
+          "label": {
+            "en": "Device it drives",
+            "fr": "Appareil piloté"
+          },
+          "required": true
+        }
+      ]
+    },
+    {
       "key": "identify",
       "label": {
         "en": "Identify a device",

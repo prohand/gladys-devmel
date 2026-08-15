@@ -95,18 +95,22 @@ export const light = {
     await publishState(gladys, ids.feature(FEATURE.BRIGHTNESS), on ? level : 0);
   },
 
+  /** @returns {Promise<number>} how many readings this light acted on. */
   async applyReadings(gladys, { device, readings, createdAt }) {
     const ids = idsFor(gladys, KEY, device);
+    let handled = 0;
     for (const reading of readings) {
       if (reading.kind !== READINGS.LEVEL) {
         continue;
       }
+      handled += 1;
       if (reading.value > 0) {
         lastBrightness.set(device.platformId, reading.value);
       }
       await publishState(gladys, ids.feature(FEATURE.BRIGHTNESS), reading.value, createdAt);
       await publishState(gladys, ids.feature(FEATURE.ON_OFF), reading.value > 0 ? 1 : 0, createdAt);
     }
+    return handled;
   },
 
   async identify(_gladys, { device, client, callbackUrl }) {

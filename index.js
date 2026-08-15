@@ -31,6 +31,8 @@ import { boxDevices, describeConnection, testConnection } from './src/devmel/con
 import { AirSendService } from './src/devmel/service.js';
 import { CallbackServer } from './src/devmel/callback.js';
 import { indexChannels, planListening } from './src/devmel/listening.js';
+import { heardChannels } from './src/devmel/heard.js';
+import { attachHeardRemote } from './src/devmel/remotes.js';
 
 const gladys = new GladysIntegration();
 const client = new AirSendClient();
@@ -142,6 +144,18 @@ gladys.onWebhookUpdated(async (info) => {
 gladys.onAction('test_connection', async () => {
   logger.info('Action test_connection');
   return testConnection(client, config, service, listenState);
+});
+
+// Turn the last emitter heard that nobody declares into a device list the user
+// only has to paste back: the pid/addr pair is in the logs, and copying it into
+// JSON by hand is where attaching a wall remote usually goes wrong.
+gladys.onAction('attach_remote', async (fields) => {
+  logger.info(`Action attach_remote <- ${fields.device}`);
+  return attachHeardRemote({
+    config,
+    device: findDeviceByExternalId(gladys, config, fields.device)?.device,
+    heard: heardChannels,
+  });
 });
 
 // The `identify` action targets ONE device chosen by the user: its manifest

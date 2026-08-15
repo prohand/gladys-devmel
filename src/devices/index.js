@@ -24,7 +24,8 @@ import { button } from './button.js';
 import { switchDevice } from './switchDevice.js';
 import { shutter } from './shutter.js';
 import { light } from './light.js';
-import { decodeNotes, isSameChannel } from '../devmel/notes.js';
+import { decodeNotes, describeReadings, isSameChannel } from '../devmel/notes.js';
+import { heardChannels } from '../devmel/heard.js';
 import { idsFor } from './helpers.js';
 
 const logger = createLogger({ name: 'devices' });
@@ -160,8 +161,16 @@ export async function identifyDevice(gladys, externalId, context) {
  * An event is routed by its channel: every device sharing that channel gets the
  * readings, which is what makes a Gladys device follow the physical remote used
  * on the wall.
+ *
+ * Every usable frame is also remembered (see src/devmel/heard.js), whether a
+ * device claimed it or not: that registry is what the "attach a remote" action
+ * turns into a configuration line.
+ *
+ * @param {object} [registry] where the frames are remembered, injectable so the
+ *   tests do not share the registry of the running integration
+ * @returns {Promise<number>} how many devices acted on a frame
  */
-export async function applyEvents(gladys, config, events) {
+export async function applyEvents(gladys, config, events, registry = heardChannels) {
   if (!Array.isArray(events)) {
     return 0;
   }
@@ -186,6 +195,11 @@ export async function applyEvents(gladys, config, events) {
     // a rolling-code protocol the service only partially decodes carries no
     // usable note at all.
     const listeners = config.devmelDevices.filter((device) => hearsChannel(device, event.channel));
+    const heard = registry.record(event.channel, {
+      readings,
+      claimed: listeners.length > 0,
+      timestamp: event.timestamp,
+    });
     if (listeners.length === 0) {
       // Worth saying out loud: this is what the wall remote of an equipment
       // already in the list looks like — same protocol, its own address — and
@@ -193,7 +207,8 @@ export async function applyEvents(gladys, config, events) {
       logger.info(
         `Heard a frame on a channel no device declares: ${describeChannel(event.channel)}` +
           `${readings.length === 0 ? ' (no note the service could decode)' : ''}` +
-          '. Add it to the "remotes" of the device it drives to follow it.',
+          '. Add it to the "remotes" of the device it drives to follow it, or run the ' +
+          '"Attach a remote" action, which writes that line for you.',
       );
       continue;
     }
@@ -213,11 +228,34 @@ export async function applyEvents(gladys, config, events) {
     for (const device of listeners) {
       const blueprint = findBlueprintByType(device.rtype);
       if (!blueprint || typeof blueprint.applyReadings !== 'function') {
+        // A push-only device type (a plain BUTTON) has nothing to publish when
+        // it hears itself: normal, and not worth an info line.
+        logger.debug(
+          `Heard ${describeChannel(event.channel)} for "${device.name}", a device type that ` +
+            'publishes nothing on radio frames',
+        );
         continue;
       }
       try {
-        await blueprint.applyReadings(gladys, { device, readings, createdAt });
-        applied += 1;
+        const handled = await blueprint.applyReadings(gladys, { device, readings, createdAt });
+        if (Number(handled) > 0) {
+          if (heard) {
+            heard.understood = true;
+          }
+          applied += 1;
+          continue;
+        }
+        // The frame reached its device and moved nothing. Silence here is the
+        // worst answer of all: it looks exactly like a remote that was never
+        // attached, and the user has just attached it. So say what the frame
+        // decoded to — that is what tells "wrong device declared" apart from
+        // "this protocol carries no order Gladys can replay".
+        logger.info(
+          `Heard ${describeChannel(event.channel)} for "${device.name}", but it says nothing ` +
+            `this device can follow: ${describeReadings(readings)}. A rolling-code 868 MHz ` +
+            'remote (Profalux, Somfy io) is only partially decoded: its frames prove the radio ' +
+            'works, they carry no order to replay.',
+        );
       } catch (err) {
         logger.error(`Could not publish the states of "${device.name}"`, err);
       }
