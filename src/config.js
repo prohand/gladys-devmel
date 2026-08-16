@@ -26,6 +26,7 @@ export const DEFAULT_CONFIG = {
   spurl: '', // sp://password@[fe80::…]?gw=0&rhost=192.168.1.50
   devices: '', // JSON exported from airsend.cloud
   listen_channel: null, // radio protocol to listen to; null = deduced, 0 = disabled
+  command_repeat: 1, // extra emissions of an order, the way a remote repeats it
   poll_frequency: 300, // seconds between two sensor reads
   debug_logs: false, // raise the log level to debug, from the Configuration screen
 };
@@ -35,6 +36,13 @@ export const DEFAULT_CONFIG = {
  * one the box falls back to when no protocol-specific decoder is known.
  */
 export const GENERIC_433_CHANNEL = 1;
+
+/**
+ * Ceiling of the repeat settings. Past this the integration is flooding the
+ * band rather than making an order more likely to arrive — and the band is
+ * shared with every other remote in the house.
+ */
+export const MAX_COMMAND_REPEAT = 5;
 
 /** AirSend device types, as numbered by airsend.cloud. */
 export const DEVICE_TYPES = {
@@ -59,6 +67,7 @@ export function normalizeConfig(raw = {}) {
     service_url: String(raw.service_url ?? DEFAULT_CONFIG.service_url).trim(),
     spurl: String(raw.spurl ?? DEFAULT_CONFIG.spurl).trim(),
     listen_channel: toListenChannel(raw.listen_channel),
+    command_repeat: toRepeat(raw.command_repeat, DEFAULT_CONFIG.command_repeat),
     // An emptied number field arrives as '', which `Number()` reads as 0: a
     // refresh interval of zero, and (before `toListenChannel`) a radio listener
     // silently turned off by a field nobody touched.
@@ -214,6 +223,9 @@ function normalizeDevice(name, entry, config) {
     // Wait for the radio confirmation before answering. Off by default: most
     // 433 MHz devices are write-only and never acknowledge.
     wait: toBoolean(entry.wait, false),
+    // How many extra times an order is sent to THIS device, when the global
+    // setting is not what its receiver needs. `null` = follow the global one.
+    repeat: toRepeat(firstDefined(entry.repeat, entry.repeats), null),
     // Some covers are wired the other way round (sun sails, screens).
     invert: toBoolean(entry.invert, false),
     // How long a full travel takes, in seconds. This is what makes the position
@@ -417,6 +429,26 @@ function toListenChannel(value) {
     return null;
   }
   return number > 0 ? Math.trunc(number) : 0;
+}
+
+/**
+ * How many EXTRA times an order is sent on the air.
+ *
+ * Nothing acknowledges a 433 MHz order, so the only defence against a frame
+ * lost in the noise is to send it again — which is what a real remote does for
+ * as long as the button is held. `0` sends it once and accepts the loss.
+ *
+ * @returns {number|null} the count, or `fallback` when the field is left empty
+ */
+function toRepeat(value, fallback) {
+  if (value === undefined || value === null || String(value).trim() === '') {
+    return fallback;
+  }
+  const number = Number(value);
+  if (!Number.isFinite(number)) {
+    return fallback;
+  }
+  return Math.max(0, Math.min(MAX_COMMAND_REPEAT, Math.trunc(number)));
 }
 
 function toPositiveNumber(value, fallback) {

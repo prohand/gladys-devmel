@@ -54,6 +54,15 @@ Each device reports the channel that actually carried its last order
 (`publishTransports`): `local` when the box answered, `unreachable` when
 nothing did.
 
+Nothing acknowledges a radio order, so the driver does not send one and hope:
+orders queue up (one radio, one transmission at a time), a transmission the box
+could not carry is tried again, and an order that means the same thing twice is
+repeated the way a real remote repeats it. And because everything transmitted
+comes back — the answer to the transfer, and the box hearing itself —
+`src/devmel/orders.js` remembers what was just sent so the echo is not replayed
+as a fresh order: that is what used to send a shutter being positioned at 40 %
+all the way to the top.
+
 The box is bound to a listening channel, and every radio frame it hears — a
 wall remote pressed by hand, a weather sensor waking up — comes back to the
 integration. It is the _service_ that calls back, from the machine it runs on
@@ -89,6 +98,7 @@ them.
 │  │  ├─ client.js                   #   the local transport and the transport badge
 │  │  ├─ service.js                  #   the bundled AirSend Web Service (start, watch, stop)
 │  │  ├─ notes.js                    #   the radio "notes" protocol (build & decode)
+│  │  ├─ orders.js                   #   the orders just sent, so their echo is not replayed
 │  │  ├─ travel.js                   #   shutter position, computed from the travel times
 │  │  ├─ callback.js                 #   where the service posts the frames it hears
 │  │  ├─ listening.js                #   which radio protocol the box is asked to listen to

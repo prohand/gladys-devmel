@@ -132,6 +132,22 @@
       "max": 65535
     },
     {
+      "key": "command_repeat",
+      "type": "number",
+      "label": {
+        "en": "Command repeats",
+        "fr": "Répétitions des commandes"
+      },
+      "description": {
+        "en": "How many extra times an order is sent on the air, the way a real remote repeats it while the button is held. Nothing acknowledges a radio order, so a frame lost in the noise is a click that did nothing: raise this to 2 or 3 if a device sometimes ignores Gladys. 0 sends each order once. A device can override it with its own repeat value.",
+        "fr": "Nombre d'émissions supplémentaires d'un ordre radio, comme une vraie télécommande le répète tant qu'on appuie. Rien n'accuse réception d'un ordre radio : une trame perdue dans le bruit, c'est un clic sans effet. Montez à 2 ou 3 si un appareil ignore parfois Gladys. 0 n'envoie chaque ordre qu'une fois. Un appareil peut la surcharger avec sa propre valeur repeat."
+      },
+      "required": false,
+      "default": 1,
+      "min": 0,
+      "max": 5
+    },
+    {
       "key": "poll_frequency",
       "type": "number",
       "label": {

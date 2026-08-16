@@ -138,6 +138,7 @@ under `channel` instead of the flat `pid` / `addr` pair. It stays JSON:
 | `remotes`           | Other emitters driving the device (see "The wall remote")                  |
 | `spurl`             | Connection string of this device, if it differs from the global one        |
 | `wait`              | Wait for the radio confirmation before answering (`false` by default)      |
+| `repeat`            | Extra emissions of the orders sent to this device (see below)              |
 | `invert`            | Swap open and close, for shutters installed the other way round            |
 | `travel_up`         | On a shutter: seconds for a full opening (see below)                       |
 | `travel_down`       | On a shutter: seconds for a full closing                                   |
@@ -149,6 +150,57 @@ under `channel` instead of the flat `pid` / `addr` pair. It stays JSON:
 
 A box declared without `sensors: true` creates no device in Gladys — it is
 only there to carry the connection string.
+
+## Getting an order through
+
+Nothing acknowledges a radio order. A 433 MHz shutter has no way back: the box
+transmits, and nobody will ever say whether the motor heard it. A frame lost in
+the noise — a microwave, the neighbour's remote, a garage door — is therefore
+not an error shown anywhere, it is a click that did nothing. That is exactly
+what "I have to press Open two or three times" is made of.
+
+Three things answer it, with nothing to set:
+
+- **orders go out one at a time.** A box has one radio: while it transmits it
+  hears nothing, and a second order fired straight after reaches a box that is
+  still busy. Orders therefore queue up, a quarter of a second apart, in the
+  order you gave them;
+- **an order the box could not carry is sent again.** A refusal is not: a
+  rejected connection string and an unknown channel answer exactly the same way
+  the second time;
+- **an order is repeated on the air**, the way a real remote repeats it for as
+  long as the button is held. By default every order goes out twice.
+
+The **Command repeats** field sets that number of extra emissions: raise it to
+`2` or `3` if a device still ignores Gladys now and then, `0` sends each order
+once. A stubborn device can have its own, without changing anything for the
+others:
+
+```json
+{ "devices": { "Patio door": { "type": 4098, "pid": 25455, "addr": 8295, "repeat": 3 } } }
+```
+
+Only orders that mean the same thing twice are repeated — Open, Stop, Close, a
+position. A push button TOGGLE goes out once: heard twice, it is back where it
+started.
+
+### Gladys does not mistake itself for the remote
+
+Everything the integration transmits comes back to it: the box answers the
+order, and since it listens permanently, it hears itself transmitting. That echo
+carries the order just sent — and reading it as a fresh order undoes what the
+order was doing. A timed shutter sent to 40 % is the example: the echo of its
+"Open" retargeted it at 100 % and cancelled the Stop due half way, so the
+shutter ran to the top. The integration now recognizes its own orders and does
+not replay them.
+
+Two visible consequences:
+
+- a wall remote emits from **another address**: it is never taken for that echo,
+  and goes on driving the shutter in Gladys;
+- when the box answers that it **could not transmit**, the integration writes it
+  in its logs, naming the device. It is the only trace of an order that went
+  nowhere, and it is worth a look if you often click twice.
 
 ## The position of a shutter
 
@@ -223,6 +275,11 @@ shutter move when it is opened from its own remote.
 It is **on by default**, and there is nothing to set: the integration
 subscribes the box to the radio protocol of your devices and receives the
 frames itself. Nothing to install, nothing to link.
+
+The subscription is **re-armed after every order**, and renewed every ten
+minutes. Transmitting takes the box out of reception, and a subscription that
+did not survive a command is a wall remote Gladys silently stops following —
+until the next renewal.
 
 ### The listening channel
 
@@ -442,6 +499,7 @@ provides: link your Gladys Plus account and paste your Open API key in the
 | The box is unreachable            | The `?gw=0&rhost=<IPv4>` part of the connection string                                 |
 | `Built-in service unavailable`    | The integration logs: the service logs its own startup there                           |
 | The box answers by hand, not here | The `rhost=` IPv4 must be reachable **from the container**, not just from your desktop |
+| You have to click several times   | Raise **Command repeats** to `2` or `3`, or the device's own `repeat`                  |
 | A shutter shows no position       | Time it: `travel_up` / `travel_down`, then open or close it fully once                 |
 | The position drifts over time     | Re-time the travel, and open the shutter fully once a day to resynchronize it          |
 | No frame from an 868 MHz remote   | **Test the connection**: channel `1` is 433 MHz. Declare the device, or its `pid`      |

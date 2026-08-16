@@ -12,7 +12,9 @@ import {
 } from '../src/devices/index.js';
 import { shutter } from '../src/devices/shutter.js';
 import { NOTE_TYPES, STATE_VALUES } from '../src/devmel/notes.js';
+import { toThingUid } from '../src/devmel/client.js';
 import { HeardChannels } from '../src/devmel/heard.js';
+import { SentOrders } from '../src/devmel/orders.js';
 import { ShutterTravel } from '../src/devmel/travel.js';
 import { createFakeGladys } from './helpers/fakeGladys.js';
 import { createFakeClient } from './helpers/fakeAirSend.js';
@@ -490,6 +492,8 @@ const TIMED_DEVICES = JSON.stringify({
       travel_up: 20,
       travel_down: 10,
       channel: { id: 700, source: 7 },
+      // The wall remote next to it: same protocol, its own address.
+      remotes: [42],
     },
     // Installed upside down, symmetrical, with a programmed "my" position.
     'Sun sail': {
@@ -722,4 +726,150 @@ test('a shutter with no reference yet is sent to the nearest end stop', async (t
   assert.equal(client.noteAt(0).value, STATE_VALUES.DOWN);
   assert.deepEqual(positionsOf('Timed shutter'), [0]);
   assert.equal(client.sent.length, 1);
+});
+
+// --- The integration hearing itself ------------------------------------------
+// Everything Gladys transmits comes back to Gladys: the answer to the transfer,
+// and the box hearing its own emission. Read as a fresh order, that echo undoes
+// what the order was doing (see src/devmel/orders.js).
+
+/** The frame the box pushes back after an order we sent ourselves. */
+function ownEcho(config, name, value, { uid, type = 3 } = {}) {
+  return {
+    type,
+    channel: { ...deviceNamed(config, name).channel },
+    thingnotes: {
+      uid,
+      notes: value === undefined ? [] : [{ type: NOTE_TYPES.STATE, value }],
+    },
+  };
+}
+
+test('the echo of our own order does not take a positioned shutter to the top', async (t) => {
+  const { gladys, config, client, clock, send, positionsOf } = setupTimed(t);
+  const orders = new SentOrders();
+  const device = deviceNamed(config, 'Timed shutter');
+
+  // Establish the position first: a timed shutter knows where it is only once
+  // it has been to an end stop.
+  await send('Timed shutter', 'state', -1);
+  await clock.advance(10000);
+
+  // 40 % of a 20 s travel: the stopwatch drives it there and stops it.
+  await send('Timed shutter', 'position', 40);
+  assert.equal(client.noteAt(1).value, STATE_VALUES.UP);
+  orders.remember(toThingUid('shutter:700-7:position'), device);
+
+  // The box answers the transfer with the very order it carried.
+  await applyEvents(
+    gladys,
+    config,
+    [
+      ownEcho(config, 'Timed shutter', STATE_VALUES.UP, {
+        uid: toThingUid('shutter:700-7:position'),
+      }),
+    ],
+    new HeardChannels(),
+    orders,
+  );
+  await clock.advance(8000);
+
+  // Stopped at 40 %, not run to the top: the echo carried no new order.
+  assert.equal(positionsOf('Timed shutter').at(-1), 40);
+  assert.equal(client.sent.at(-1).notes[0].value, STATE_VALUES.STOP);
+
+  await clock.advance(20000);
+  assert.equal(positionsOf('Timed shutter').at(-1), 40);
+});
+
+test('the box hearing its own emission is the same echo, with no uid to go by', async (t) => {
+  const { gladys, config, clock, send, positionsOf } = setupTimed(t);
+  const orders = new SentOrders();
+  const device = deviceNamed(config, 'Timed shutter');
+
+  await send('Timed shutter', 'state', -1);
+  await clock.advance(10000);
+  await send('Timed shutter', 'position', 40);
+  orders.remember(toThingUid('shutter:700-7:position'), device);
+
+  // Same frame, relayed by the listening subscription this time: no uid at all,
+  // just the channel the integration was talking on a moment ago.
+  await applyEvents(
+    gladys,
+    config,
+    [ownEcho(config, 'Timed shutter', STATE_VALUES.UP)],
+    new HeardChannels(),
+    orders,
+  );
+  await clock.advance(8000);
+
+  assert.equal(positionsOf('Timed shutter').at(-1), 40);
+});
+
+test('a wall remote pressed during that time is still a fresh order', async (t) => {
+  const { gladys, config, clock, send, positionsOf } = setupTimed(t);
+  const orders = new SentOrders();
+  orders.remember(toThingUid('shutter:700-7:position'), deviceNamed(config, 'Timed shutter'));
+
+  await send('Timed shutter', 'state', -1);
+  await clock.advance(10000);
+
+  // Another address on the same protocol: somebody's finger, not our echo.
+  const remote = {
+    type: 3,
+    channel: { id: 700, source: 42 },
+    thingnotes: { notes: [{ type: NOTE_TYPES.STATE, value: STATE_VALUES.UP }] },
+  };
+  await applyEvents(gladys, config, [remote], new HeardChannels(), orders);
+  await clock.advance(2000);
+
+  assert.deepEqual(positionsOf('Timed shutter'), [0, 5, 10]);
+});
+
+test('an order the box could not transmit is said out loud, not swallowed', async (t) => {
+  // The shape of "I have to click Open three times": the order never made it to
+  // the air, and until this line nothing said so above debug level.
+  const { gladys, config } = setupTimed(t);
+  const orders = new SentOrders();
+  orders.remember('0xdead', deviceNamed(config, 'Timed shutter'));
+
+  const lines = captureLogs(async () =>
+    applyEvents(
+      gladys,
+      config,
+      [ownEcho(config, 'Timed shutter', undefined, { uid: '0xdead', type: 0x101 })],
+      new HeardChannels(),
+      orders,
+    ),
+  );
+
+  assert.equal(await lines.result, 0);
+  assert.equal(lines.of('INFO').length, 1);
+  assert.match(lines.of('INFO')[0], /could not transmit the order sent to "Timed shutter"/);
+});
+
+test('a device reporting where it actually is, is believed even in an echo', async (t) => {
+  // The answer to our own transfer is the route a positionable motor uses to
+  // say where it ended up: the order it carries is old news, that reading is not.
+  const { gladys, config, clock, positionsOf } = setupTimed(t);
+  const orders = new SentOrders();
+  orders.remember('0xbeef', deviceNamed(config, 'Sun sail'));
+
+  await applyEvents(
+    gladys,
+    config,
+    [
+      {
+        type: 3,
+        channel: { ...deviceNamed(config, 'Sun sail').channel },
+        thingnotes: { uid: '0xbeef', notes: [{ type: NOTE_TYPES.LEVEL, value: 70 }] },
+      },
+    ],
+    new HeardChannels(),
+    orders,
+  );
+  await clock.advance(1000);
+
+  // Inverted shutter: 70 % on the radio is 30 % open in Gladys.
+  assert.deepEqual(positionsOf('Sun sail'), [30]);
 });

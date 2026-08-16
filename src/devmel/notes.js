@@ -103,6 +103,55 @@ export function levelNote(level) {
   return { method: NOTE_METHODS.SET, type: NOTE_TYPES.LEVEL, value: clampLevel(level) };
 }
 
+/**
+ * States that mean the same thing however often they are heard.
+ *
+ * This is the whole difference between an order that may be repeated on the air
+ * and one that may not. "Go up" heard twice is still "go up"; TOGGLE heard
+ * twice is back where it started, and PROG heard twice is a pairing undone. A
+ * lossy one-way radio is a good reason to say things twice, never a good enough
+ * one to say them wrong.
+ */
+const REPEATABLE_STATES = new Set([
+  STATE_VALUES.STOP,
+  STATE_VALUES.OFF,
+  STATE_VALUES.ON,
+  STATE_VALUES.CLOSE,
+  STATE_VALUES.OPEN,
+  STATE_VALUES.MIDDLE,
+  STATE_VALUES.DOWN,
+  STATE_VALUES.UP,
+  STATE_VALUES.LEFT,
+  STATE_VALUES.RIGHT,
+  STATE_VALUES.USERPOSITION,
+]);
+
+/** Can this whole order be sent again without meaning something else? */
+export function isRepeatable(notes) {
+  if (!Array.isArray(notes) || notes.length === 0) {
+    return false;
+  }
+  return notes.every(isRepeatableNote);
+}
+
+function isRepeatableNote(note) {
+  if (!note || typeof note !== 'object' || note.method !== NOTE_METHODS.SET) {
+    return false;
+  }
+  const type = typeof note.type === 'string' ? NOTE_TYPES[note.type.toUpperCase()] : note.type;
+  if (type === NOTE_TYPES.LEVEL) {
+    // A percentage is where to go, not how far to move: saying it again is
+    // saying the same thing.
+    return true;
+  }
+  if (type !== NOTE_TYPES.STATE) {
+    return false;
+  }
+  const value =
+    typeof note.value === 'string' ? STATE_VALUES[note.value.toUpperCase()] : Number(note.value);
+  return REPEATABLE_STATES.has(value);
+}
+
 /** Build a `{ method: QUERY, type }` note. */
 export function queryNote(type) {
   return { method: NOTE_METHODS.QUERY, type };

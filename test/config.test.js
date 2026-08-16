@@ -241,3 +241,32 @@ test('parseDevices reads the other remotes that drive an equipment', () => {
   const [plain] = parseDevices('[{"name":"Plain","type":4097,"channel":{"id":9}}]');
   assert.deepEqual(plain.remotes, []);
 });
+
+test('the repeat settings are read as counts, and clamped', () => {
+  assert.equal(normalizeConfig({}).command_repeat, DEFAULT_CONFIG.command_repeat);
+  assert.equal(normalizeConfig({ command_repeat: '3' }).command_repeat, 3);
+  assert.equal(normalizeConfig({ command_repeat: 0 }).command_repeat, 0);
+  // An emptied field is not a zero: it means "leave it as it was".
+  assert.equal(
+    normalizeConfig({ command_repeat: '' }).command_repeat,
+    DEFAULT_CONFIG.command_repeat,
+  );
+  // Past the ceiling the band is being flooded, not helped.
+  assert.equal(normalizeConfig({ command_repeat: 42 }).command_repeat, 5);
+  assert.equal(normalizeConfig({ command_repeat: -1 }).command_repeat, 0);
+});
+
+test('a device can carry its own repeat count, or follow the global one', () => {
+  const config = normalizeConfig({
+    devices: JSON.stringify({
+      devices: {
+        Stubborn: { type: 4098, pid: 300, addr: 3, repeat: 4 },
+        Ordinary: { type: 4098, pid: 301, addr: 4 },
+      },
+    }),
+  });
+
+  assert.equal(config.devmelDevices[0].repeat, 4);
+  // null, not 0: nothing was said, so the global setting decides.
+  assert.equal(config.devmelDevices[1].repeat, null);
+});
