@@ -64,11 +64,17 @@ test('the registry stays bounded, dropping the emitters heard longest ago', () =
   );
 });
 
-test('a frame without a usable channel is not remembered', () => {
+test('a frame without a protocol is not remembered; one without an address is', () => {
   const heard = new HeardChannels();
   assert.equal(heard.record(null), null);
-  assert.equal(heard.record({ id: 300 }), null);
   assert.equal(heard.list().length, 0);
+
+  // The box picked a protocol up without decoding who emitted on it. There is
+  // no address to attach, and that IS the thing to tell the user.
+  const partial = heard.record({ id: 300 });
+  assert.equal(partial.id, 300);
+  assert.equal(partial.source, null);
+  assert.equal(heard.list().length, 1);
 });
 
 test('the remote is added to the pasted list, which is otherwise left alone', () => {

@@ -84,11 +84,16 @@ export class HeardChannels {
    */
   record(channel, { readings, claimed, understood = false, timestamp, dropped = null } = {}) {
     const id = Number(channel?.id);
-    const source = Number(channel?.source);
-    if (!Number.isFinite(id) || !Number.isFinite(source)) {
+    if (!Number.isFinite(id)) {
       return null;
     }
-    const key = `${id}-${source}`;
+    // An emitter whose ADDRESS was not decoded is still an emitter heard, and
+    // it is the shape of a protocol the box picked up without decoding it: the
+    // one thing the user must be told, since no `remotes` line can name it and
+    // the registry used to drop it on the floor.
+    const raw = Number(channel?.source);
+    const source = Number.isFinite(raw) ? raw : null;
+    const key = `${id}-${source ?? ''}`;
     const known = this.entries.get(key);
     const entry = known ?? {
       id,
@@ -166,7 +171,19 @@ export function describeEmitter(entry, now = Date.now(), language = 'en') {
     : language === 'fr'
       ? ', aucune note décodée'
       : ', no decoded note';
-  return `pid ${entry.id}, addr ${entry.source} (${frames}, ${age}${said})`;
+  return `pid ${entry.id}, ${describeAddress(entry, language)} (${frames}, ${age}${said})`;
+}
+
+/**
+ * The address of an emitter, or the fact that the box did not decode one —
+ * which is not a detail: an address is what a `remotes` line names, so a frame
+ * without one cannot be attached to anything until the protocol is decoded.
+ */
+export function describeAddress(entry, language = 'en') {
+  if (entry.source === null || entry.source === undefined) {
+    return language === 'fr' ? 'adresse non décodée' : 'address not decoded';
+  }
+  return `addr ${entry.source}`;
 }
 
 /**

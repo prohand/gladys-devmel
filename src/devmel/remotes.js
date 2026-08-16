@@ -53,7 +53,12 @@ export function attachRemote(source, device, remote) {
     // Always the explicit `{pid, addr}` pair, never the bare address: it says
     // what it means whatever protocol the remote speaks, and a bare address
     // read on the wrong protocol is the mistake this action exists to avoid.
-    entry.remotes = [...declared, { pid: remote.id, addr: remote.source }];
+    // An emitter the box never gave an address for has only its protocol to be
+    // named by — and that is exactly what the line then says.
+    entry.remotes = [
+      ...declared,
+      hasAddress(remote) ? { pid: remote.id, addr: remote.source } : { pid: remote.id },
+    ];
   }
   return JSON.stringify(parsed.root);
 }
@@ -65,10 +70,18 @@ export function attachRemote(source, device, remote) {
  */
 function asChannel(declared, device) {
   const flat = declared !== null && typeof declared === 'object' ? declared : { addr: declared };
+  const address = flat.addr ?? flat.source ?? flat.address;
   return {
     id: Number(flat.pid ?? flat.id ?? flat.channelId ?? flat.channel_id ?? device.channel?.id),
-    source: Number(flat.addr ?? flat.source ?? flat.address),
+    // Left undefined rather than turned into NaN: a remote declared by its
+    // protocol alone must compare equal to the address-less emitter it names.
+    source: address === undefined || address === null ? undefined : Number(address),
   };
+}
+
+/** Did the box decode an address for this emitter, or only its protocol? */
+function hasAddress(remote) {
+  return remote?.source !== null && remote?.source !== undefined;
 }
 
 /**
@@ -145,6 +158,26 @@ export function attachHeardRemote({ config, device, heard, now = Date.now() }) {
       `Elle émet sur un autre protocole (pid ${remote.id}) que « ${device.name} » ` +
         `(pid ${device.channel?.id}), et le boîtier n'écoute qu'un protocole à la fois. Lancez ` +
         '« Tester la connexion » ensuite : la ligne Écoute dit lequel est entendu.',
+    );
+  }
+
+  // The box heard the protocol and nothing else. The line above is still worth
+  // pasting — it is the only way those frames reach a device — but what it
+  // attaches is a protocol, not one remote, and that has to be said before it
+  // surprises anyone.
+  if (!hasAddress(remote)) {
+    en.push(
+      `The box decoded no address for it, only protocol ${remote.id}: that line makes ` +
+        `"${device.name}" follow EVERY frame of that protocol the box cannot attribute, a ` +
+        "neighbour's remote included. It is the last resort — first set the listening channel " +
+        `to ${remote.id}, which is how the box is told to decode that protocol properly.`,
+    );
+    fr.push(
+      `Le boîtier n'en a décodé aucune adresse, seulement le protocole ${remote.id} : cette ligne ` +
+        `fait suivre à « ${device.name} » TOUTES les trames de ce protocole que le boîtier ` +
+        "n'attribue à personne, celles d'un voisin comprises. C'est le dernier recours : " +
+        `renseignez d'abord ${remote.id} comme canal d'écoute, c'est ainsi qu'on demande au ` +
+        'boîtier de décoder ce protocole correctement.',
     );
   }
 

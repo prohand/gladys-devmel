@@ -164,6 +164,20 @@
       "max": 3600
     },
     {
+      "key": "accept_unreliable",
+      "type": "boolean",
+      "label": {
+        "en": "Accept unreliable frames",
+        "fr": "Accepter les trames peu fiables"
+      },
+      "description": {
+        "en": "The box grades every frame it decodes, and the badly graded ones are normally ignored — as the official Jeedom plugin does. Turn this on when a remote is heard but never followed: its frames are then used anyway, at the risk of the occasional false trigger. It changes nothing for a protocol the box picks up without decoding it (no address in the logs): that one needs the listening channel set to its pid.",
+        "fr": "Le boîtier note chaque trame qu'il décode, et celles qu'il note mal sont ignorées — comme le fait le plugin Jeedom officiel. Activez ceci si une télécommande est entendue sans jamais être suivie : ses trames seront alors utilisées quand même, au risque d'une fausse détection de temps en temps. Sans effet sur un protocole que le boîtier capte sans le décoder (aucune adresse dans les journaux) : celui-là demande son pid dans le canal d'écoute."
+      },
+      "required": false,
+      "default": false
+    },
+    {
       "key": "debug_logs",
       "type": "boolean",
       "label": {

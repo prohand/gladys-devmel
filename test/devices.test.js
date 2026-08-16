@@ -934,3 +934,104 @@ test('the echo of our own order proves the route works, without posing as an emi
   // Not an emitter of the house: it is us, and "Attach a remote" must not offer it.
   assert.deepEqual(heard.list(), []);
 });
+
+test('a frame the box graded badly says what it carried, and what to do about it', async () => {
+  // The user's own case: the box picks up a protocol without decoding it — no
+  // address, no grade it trusts. Silence here (or a bare debug line) leaves
+  // them with "the remote does nothing" and nowhere to go.
+  const { gladys, config } = setup();
+  const heard = new HeardChannels();
+  const frame = () => ({
+    type: 3,
+    reliability: 0,
+    channel: { id: 14177 },
+    thingnotes: { notes: [] },
+  });
+
+  const first = captureLogs(
+    async () => applyEvents(gladys, config, [frame()], heard, new SentOrders()),
+    'debug',
+  );
+
+  assert.equal(await first.result, 0);
+  assert.equal(first.of('INFO').length, 1);
+  assert.match(first.of('INFO')[0], /unreliable, graded 0.*pid 14177/);
+  assert.match(first.of('INFO')[0], /carrying no note the service could decode/);
+  assert.match(first.of('INFO')[0], /Set the listening channel to that pid/);
+
+  // Once is a diagnosis; every press is noise.
+  const again = captureLogs(
+    async () => applyEvents(gladys, config, [frame()], heard, new SentOrders()),
+    'debug',
+  );
+  await again.result;
+  assert.equal(again.of('INFO').length, 0);
+  assert.equal(again.of('DEBUG').length, 1);
+});
+
+test('accepting unreliable frames lets a badly graded remote through', async () => {
+  const gladys = createFakeGladys();
+  const devices = JSON.stringify({
+    devices: {
+      'Living room shutter': { type: 4098, channel: { id: 300, source: 3 }, remotes: [42] },
+    },
+  });
+  const frame = {
+    type: 3,
+    reliability: 0x2,
+    channel: { id: 300, source: 42 },
+    thingnotes: { notes: [{ type: NOTE_TYPES.STATE, value: STATE_VALUES.UP }] },
+  };
+
+  // Graded too low: refused, exactly as the reference implementation does.
+  const strict = normalizeConfig({ devices });
+  assert.equal(
+    await applyEvents(gladys, strict, [frame], new HeardChannels(), new SentOrders()),
+    0,
+  );
+  assert.deepEqual(gladys.published, []);
+
+  // Unless the user decided a doubtful frame beats no frame at all.
+  const lenient = normalizeConfig({ devices, accept_unreliable: true });
+  assert.equal(
+    await applyEvents(gladys, lenient, [frame], new HeardChannels(), new SentOrders()),
+    1,
+  );
+  assert.deepEqual(gladys.statesOf('shutter:300-3:state'), [1]);
+});
+
+test('a remote declared by its protocol alone follows the frames nobody can attribute', async () => {
+  // Last resort for a protocol the box picks up without decoding an address:
+  // there is no pid/addr pair to declare, only the pid.
+  const gladys = createFakeGladys();
+  const config = normalizeConfig({
+    accept_unreliable: true,
+    devices: JSON.stringify({
+      devices: {
+        'Living room shutter': {
+          type: 4098,
+          channel: { id: 300, source: 3 },
+          remotes: [{ pid: 14177 }],
+        },
+      },
+    }),
+  });
+
+  const applied = await applyEvents(
+    gladys,
+    config,
+    [
+      {
+        type: 3,
+        reliability: 0,
+        channel: { id: 14177 },
+        thingnotes: { notes: [{ type: NOTE_TYPES.STATE, value: STATE_VALUES.DOWN }] },
+      },
+    ],
+    new HeardChannels(),
+    new SentOrders(),
+  );
+
+  assert.equal(applied, 1);
+  assert.deepEqual(gladys.statesOf('shutter:300-3:state'), [-1]);
+});

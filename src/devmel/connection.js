@@ -381,6 +381,16 @@ function describeSilence(tally, language) {
         'remote (see the Listening line above).';
 }
 
+/** Why its last frame went nowhere, when something did throw it away. */
+function dropped(entry, language) {
+  if (!entry.dropped) {
+    return '';
+  }
+  return language === 'fr'
+    ? `, trame écartée : ${entry.dropped}`
+    : `, frame dropped: ${entry.dropped}`;
+}
+
 /** One emitter of the registry, and what the devices made of its frames. */
 function describeHeardEmitter(config, entry, now, language) {
   return `${describeEmitter(entry, now, language)} — ${describeFate(config, entry, language)}`;
@@ -393,13 +403,26 @@ function describeHeardEmitter(config, entry, now, language) {
  * nothing, and it looks exactly like a remote that was never attached.
  */
 function describeFate(config, entry, language) {
+  // No address at all: the box picked the protocol up without decoding it, so
+  // there is nothing to attach and nothing to publish. The fix is upstream —
+  // listen to that protocol's own decoder — and it is the only advice that
+  // works here, so it comes before everything else.
+  if (entry.source === null || entry.source === undefined) {
+    return language === 'fr'
+      ? `le boîtier n'a pas décodé ce protocole (aucune adresse)${dropped(entry, language)} : ` +
+          `renseignez ${entry.id} comme canal d'écoute pour qu'il l'écoute sur son propre décodeur`
+      : `the box did not decode this protocol (no address)${dropped(entry, language)}: set the ` +
+          `listening channel to ${entry.id} so it listens on that protocol's own decoder`;
+  }
   // Dropped on the way in: no device ever saw it, so nothing below applies.
   // Worth naming — an emitter the box hears loud and clear and grades badly is
   // a radio problem (distance, interference), not a configuration one.
   if (entry.dropped) {
     return language === 'fr'
-      ? `sa dernière trame a été écartée avant tout appareil (${entry.dropped})`
-      : `its last frame was dropped before any device (${entry.dropped})`;
+      ? `sa dernière trame a été écartée avant tout appareil (${entry.dropped}) : « Accepter ` +
+          'les trames peu fiables » les laisse passer'
+      : `its last frame was dropped before any device (${entry.dropped}): "Accept unreliable ` +
+          'frames" lets them through';
   }
   const claimants = config.devmelDevices.filter((device) => hearsChannel(device, entry));
   if (claimants.length === 0) {
