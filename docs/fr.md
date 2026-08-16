@@ -332,17 +332,23 @@ l'appareil : le boîtier n'en écoute qu'un à la fois.
 #### La télécommande est rattachée, et rien ne bouge
 
 Une fois l'émetteur déclaré, la trame arrive bien à l'appareil — reste à savoir
-si elle **porte un ordre**. Ces deux cas se ressemblent et n'ont rien à voir :
+si elle **porte un ordre**. Commencez par **Tester la connexion** : la ligne
+_Entendu_ répond sans passer par les logs (voir « Ce que le boîtier a entendu »).
+Elle distingue trois cas qui se ressemblent et n'ont rien à voir :
 
-- `Heard pid …, addr … for « Baie vitrée », but it says nothing this device can
-follow: data …` — la trame est arrivée, l'appareil ne sait qu'en faire. C'est
-  le lot des protocoles 868 MHz à code tournant : le service ne les décode que
-  partiellement, la trame prouve que la radio marche mais ne porte aucun ordre
-  rejouable. Le rattachement ne peut rien y changer ;
-- rien du tout dans les logs — la trame n'arrive plus. Vérifiez avec **Tester la
-  connexion** : si la télécommande a été déclarée sur un autre protocole que
-  l'appareil, la ligne _Écoute_ la nomme comme non entendue, et son `pid` mis
-  dans le **Canal d'écoute** rétablit l'écoute de son côté.
+- `déclaré sur « Baie vitrée », mais ses trames ne portent aucun ordre
+rejouable` — la trame est arrivée, l'appareil ne sait qu'en faire. C'est le lot
+  des protocoles 868 MHz à code tournant : le service ne les décode que
+  partiellement, la trame prouve que la radio marche mais ne porte aucun ordre à
+  rejouer. **La position ne peut pas suivre**, et le rattachement n'y changera
+  rien : à la première trame de cet émetteur, l'intégration le dit aussi dans ses
+  logs, au niveau info (`no note the service could decode`) ;
+- `aucun appareil ne le déclare` — l'émetteur est bien entendu, il n'est
+  simplement rattaché à rien : relancez **Rattacher une télécommande** ;
+- l'émetteur n'apparaît pas du tout — la trame n'arrive plus. Si la télécommande
+  a été déclarée sur un autre protocole que l'appareil, la ligne _Écoute_ la
+  nomme comme non entendue, et son `pid` mis dans le **Canal d'écoute** rétablit
+  l'écoute de son côté.
 
 **Rien dans les logs après un appui ?** La ligne n'est écrite qu'à la réception
 d'une trame : appuyez sur la télécommande, puis relisez les logs de
@@ -361,6 +367,36 @@ arrivée, et il n'y a que trois raisons possibles :
   radio est bruyante, et le boîtier note chaque trame qu'il décode. Activez
   **Journaux détaillés (debug)** : ces trames-là y sont tracées, avec leur
   `pid`, leur `addr` et la raison de leur abandon.
+
+### Ce que le boîtier a entendu
+
+Toutes les vérifications ci-dessus répondent à « les trames peuvent-elles
+entrer ? ». La ligne _Entendu_ de **Tester la connexion** répond à la question
+suivante, la seule qui compte une fois la télécommande rattachée : **sont-elles
+entrées, et est-ce que quelque chose a bougé ?**
+
+L'intégration retient les émetteurs qu'elle entend, du plus récent au plus
+ancien, avec le nombre de trames, leur ancienneté, ce qu'elles ont donné au
+décodage et ce que les appareils en ont fait :
+
+```text
+Entendu : 1 émetteur entendu : pid 14177, addr 3359265281 (3 trames, dernière
+il y a 4 s, aucune note décodée) — déclaré sur Baie vitrée, mais ses trames ne
+portent aucun ordre rejouable (protocole seulement partiellement décodé) : la
+position ne peut pas suivre.
+```
+
+Trois verdicts possibles pour un émetteur :
+
+| Verdict                            | Ce que ça veut dire                                                           |
+| ---------------------------------- | ----------------------------------------------------------------------------- |
+| `suivi par <appareil>`             | tout marche : ses trames pilotent bien l'appareil                             |
+| `aucun appareil ne le déclare`     | l'émetteur est entendu, mais rattaché à rien — **Rattacher une télécommande** |
+| `ne portent aucun ordre rejouable` | la trame arrive à l'appareil et ne porte rien à rejouer (code tournant)       |
+
+Le registre est vidé au démarrage de l'intégration : « aucune trame radio depuis
+le démarrage » veut dire « rien depuis », pas « jamais ». Appuyez sur la
+télécommande, puis relancez l'action.
 
 ### Les journaux détaillés
 
@@ -392,9 +428,11 @@ votre clé Open API dans le bloc **Webhooks** de l'écran de configuration.
 
 ## Actions
 
-- **Tester la connexion** — vérifie le canal local et indique les appareils
-  lus. Le moyen le plus rapide de repérer une chaîne de connexion mal saisie
-  ou une liste d'appareils qui n'a pas été comprise.
+- **Tester la connexion** — vérifie le canal local, dit quel protocole est
+  écouté, **ce que le boîtier a entendu** et quels appareils ont été lus. Le
+  moyen le plus rapide de repérer une chaîne de connexion mal saisie, une liste
+  d'appareils qui n'a pas été comprise, ou une télécommande rattachée dont les
+  trames ne portent aucun ordre.
 - **Rattacher une télécommande** — appuyez sur la télécommande, choisissez
   l'appareil qu'elle pilote : l'action écrit la liste d'appareils à recoller,
   télécommande comprise (voir « La télécommande murale »).
@@ -431,6 +469,7 @@ votre clé Open API dans le bloc **Webhooks** de l'écran de configuration.
 | Un volet n'affiche pas de position     | Chronométrez-le : `travel_up` / `travel_down`, puis ouvrez-le ou fermez-le à fond une fois |
 | La position dérive avec le temps       | Rechronométrez la course, et ouvrez le volet à fond une fois par jour pour le recaler      |
 | Aucune trame d'une télécommande 868    | **Tester la connexion** : le canal `1` est du 433 MHz. Déclarez l'appareil, ou son `pid`   |
+| Télécommande rattachée, rien ne bouge  | **Tester la connexion**, ligne _Entendu_ : elle dit si les trames portent un ordre         |
 
 L'intégration journalise tout ce qu'elle fait : consultez les logs de
 l'intégration depuis l'interface de Gladys (ou `docker logs` sur l'hôte), et

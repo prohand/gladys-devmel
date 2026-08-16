@@ -8,6 +8,7 @@ import assert from 'node:assert/strict';
 import { boxDevices, describeConnection, testConnection } from '../src/devmel/connection.js';
 import { indexChannels, planListening } from '../src/devmel/listening.js';
 import { normalizeConfig } from '../src/config.js';
+import { HeardChannels } from '../src/devmel/heard.js';
 
 const SPURL = 'sp://pass@[fe80::1]?gw=0&rhost=192.168.1.50';
 
@@ -171,6 +172,81 @@ test('test_connection reports listening switched off, and a listener with no rou
   const config = normalizeConfig({ spurl: SPURL, service_url: 'http://192.168.1.50:33863' });
   const orphan = await testConnection(fakeClient(), config, null, { url: null, error: null });
   assert.match(orphan.en, /no route for the frames.*Gladys Plus/s);
+});
+
+// --- What the box actually heard ---------------------------------------------
+// Every line above answers "can the frames get in?". This one answers "did
+// they, and did anything move?" — the question behind an attached wall remote
+// that leaves the shutter where it was.
+
+/** The wall remote of the shutter above, on its own 868 MHz protocol. */
+const WALL_REMOTE = { id: 14177, source: 3359265281 };
+
+const DEVICES_WITH_REMOTE =
+  '{"devices":[{"name":"Baie vitree","travel_up":30,"travel_down":26,"type":4098,' +
+  '"pid":25455,"addr":8295,"remotes":[{"pid":14177,"addr":3359265281}]}]}';
+
+test('test_connection says nothing was heard, rather than nothing at all', async () => {
+  const config = normalizeConfig({ spurl: SPURL, devices: DEVICES });
+
+  const report = await testConnection(fakeClient(), config, RUNNING, null, new HeardChannels());
+
+  assert.match(report.en, /Heard: no radio frame since the integration started/);
+  assert.match(report.fr, /Entendu : aucune trame radio depuis le démarrage/);
+});
+
+test('test_connection names an emitter no device declares', async () => {
+  const config = normalizeConfig({ spurl: SPURL, devices: DEVICES });
+  const heard = new HeardChannels();
+  heard.record(WALL_REMOTE, { readings: [], claimed: false });
+
+  const report = await testConnection(fakeClient(), config, RUNNING, null, heard);
+
+  assert.match(report.en, /1 emitter heard: pid 14177, addr 3359265281 \(1 frame, /);
+  assert.match(report.en, /no decoded note.*no device declares it: "Attach a remote"/);
+  assert.match(report.fr, /aucun appareil ne le déclare/);
+});
+
+test('test_connection tells an attached remote that moves nothing from one that works', async () => {
+  // Both remotes are declared, both are heard, and only one of them moves the
+  // shutter. Before this line the two were the same silence.
+  const config = normalizeConfig({ spurl: SPURL, devices: DEVICES_WITH_REMOTE });
+
+  const mute = new HeardChannels();
+  mute.record(WALL_REMOTE, { readings: [], claimed: true });
+  const muteReport = await testConnection(fakeClient(), config, RUNNING, null, mute);
+
+  assert.match(
+    muteReport.en,
+    /declared on Baie vitree, but its frames carry no order to replay.*the position cannot follow/,
+  );
+  assert.match(muteReport.fr, /ne portent aucun ordre rejouable.*la position ne peut pas suivre/);
+
+  const working = new HeardChannels();
+  working.record(WALL_REMOTE, {
+    readings: [{ kind: 'level', value: 100, command: 'up' }],
+    claimed: true,
+    understood: true,
+  });
+  const workingReport = await testConnection(fakeClient(), config, RUNNING, null, working);
+
+  assert.match(workingReport.en, /note: level 100 \(up\).*followed by Baie vitree/);
+  assert.match(workingReport.fr, /suivi par Baie vitree/);
+});
+
+test('test_connection counts the emitters it does not spell out', async () => {
+  const config = normalizeConfig({ spurl: SPURL, devices: DEVICES });
+  const heard = new HeardChannels();
+  for (let index = 0; index < 7; index += 1) {
+    heard.record({ id: 1, source: index });
+  }
+
+  const report = await testConnection(fakeClient(), config, RUNNING, null, heard);
+
+  assert.match(report.en, /7 emitters heard: /);
+  assert.match(report.en, /\(\+2\)\./);
+  // Most recent first: the emitter just pressed is the one being looked for.
+  assert.match(report.en, /Heard: 7 emitters heard: pid 1, addr 6/);
 });
 
 test('the implicit box follows the service that actually serves the local channel', () => {

@@ -143,7 +143,7 @@ gladys.onWebhookUpdated(async (info) => {
 // --- Manifest actions: buttons in the Configuration screen -------------------
 gladys.onAction('test_connection', async () => {
   logger.info('Action test_connection');
-  return testConnection(client, config, service, listenState);
+  return testConnection(client, config, service, listenState, heardChannels);
 });
 
 // Turn the last emitter heard that nobody declares into a device list the user

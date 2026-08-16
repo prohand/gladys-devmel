@@ -14,7 +14,8 @@
 // -----------------------------------------------------------------------------
 
 import { channelOfEntry, parseDeviceEntries } from '../config.js';
-import { describeReadings, isSameChannel } from './notes.js';
+import { isSameChannel } from './notes.js';
+import { describeEmitter } from './heard.js';
 import { hearsChannel } from '../devices/index.js';
 
 /**
@@ -172,30 +173,6 @@ export function attachHeardRemote({ config, device, heard, now = Date.now() }) {
   }
 
   return { en: en.join('\n'), fr: fr.join('\n') };
-}
-
-/** One emitter, as a human reads it: who, how often, when, and what it said. */
-function describeEmitter(entry, now, language) {
-  const notes = describeReadings(entry.readings);
-  const frames =
-    language === 'fr'
-      ? `${entry.frames} trame${entry.frames > 1 ? 's' : ''}`
-      : `${entry.frames} frame${entry.frames > 1 ? 's' : ''}`;
-  const age = describeAge(now - entry.lastSeen, language);
-  const said = notes
-    ? language === 'fr'
-      ? `, note : ${notes}`
-      : `, note: ${notes}`
-    : language === 'fr'
-      ? ', aucune note décodée'
-      : ', no decoded note';
-  return `pid ${entry.id}, addr ${entry.source} (${frames}, ${age}${said})`;
-}
-
-function describeAge(milliseconds, language) {
-  const seconds = Math.max(0, Math.round(Number(milliseconds) / 1000));
-  const value = seconds < 120 ? `${seconds} s` : `${Math.round(seconds / 60)} min`;
-  return language === 'fr' ? `dernière il y a ${value}` : `last one ${value} ago`;
 }
 
 function nothingHeard() {
