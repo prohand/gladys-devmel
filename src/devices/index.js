@@ -194,17 +194,27 @@ export async function applyEvents(
     // silence — and it is the one frame that explains a command doing nothing.
     const echo = orders?.match(event);
     if (echo) {
+      // Counted, and counted apart: an echo of ours proves the frames have a
+      // route back into the integration, which is half of "my remote does not
+      // show up" answered before anyone touches a configuration screen.
+      registry.received({ own: true });
       applied += await applyOwnEcho(gladys, config, event, echo);
       continue;
     }
 
     const unusable = whyUnusable(event);
+    registry.received({ dropped: unusable });
     if (unusable) {
       // Never an info line — the air is full of half-decoded frames, and one
       // per press of a neighbour's gate remote is noise. But someone hunting
       // for a remote that never shows up needs to see that something WAS
       // heard, and where it stopped: hence the channel, and the reason.
       logger.debug(`Ignored a radio frame (${unusable}): ${describeChannel(event?.channel)}`);
+      // Remembered all the same when the box named the emitter: a frame graded
+      // too low is an emitter heard, and leaving it out of the registry is what
+      // made a box drowning in frames report exactly the same "nothing heard"
+      // as a box listening to the wrong protocol.
+      registry.record(event?.channel, { dropped: unusable, timestamp: event?.timestamp });
       continue;
     }
 

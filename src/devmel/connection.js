@@ -142,8 +142,9 @@ export async function testConnection(client, config, service = null, listen = nu
   // running integration always passes one, and a report line about a missing
   // internal is a line that helps nobody.
   if (typeof heard?.list === 'function') {
-    en.push(`Heard: ${describeHeard(config, heard.list(), 'en')}`);
-    fr.push(`Entendu : ${describeHeard(config, heard.list(), 'fr')}`);
+    const now = Date.now();
+    en.push(`Heard: ${describeHeard(config, heard.list(), 'en', now, heard)}`);
+    fr.push(`Entendu : ${describeHeard(config, heard.list(), 'fr', now, heard)}`);
   }
 
   en.push(`Devices: ${summarize(config, 'en')}`);
@@ -300,14 +301,16 @@ const HEARD_SHOWN = 5;
  * The registry is emptied by a restart, so a count of zero right after one
  * means "nothing since then", not "never" — hence the invitation to press the
  * remote and run the action again.
+ *
+ * @param {object} [tally] what reached the integration at all: `{ seen, own,
+ *   dropped, lastDrop }` (see src/devmel/heard.js). Without it, an empty
+ *   registry has only one thing to say, and it is the wrong thing half the
+ *   time: "nothing heard" also covers the box that hears everything and has
+ *   every frame thrown away on the way in.
  */
-function describeHeard(config, entries, language, now = Date.now()) {
+function describeHeard(config, entries, language, now = Date.now(), tally = null) {
   if (entries.length === 0) {
-    return language === 'fr'
-      ? 'aucune trame radio depuis le démarrage de l’intégration. Appuyez sur la télécommande, ' +
-          'puis relancez cette action.'
-      : 'no radio frame since the integration started. Press the remote, then run this action ' +
-          'again.';
+    return describeSilence(tally, language);
   }
 
   const listed = entries
@@ -319,6 +322,63 @@ function describeHeard(config, entries, language, now = Date.now()) {
   return language === 'fr'
     ? `${entries.length} émetteur${plural} entendu${plural} : ${listed}${more}.`
     : `${entries.length} emitter${plural} heard: ${listed}${more}.`;
+}
+
+/**
+ * An empty registry, and what it is worth knowing about it.
+ *
+ * "Nothing heard" is three different problems wearing the same face, and the
+ * difference is upstream of the emitters: did anything arrive at all?
+ *
+ *   nothing arrived, not even our own echoes  no frame gets in — the box
+ *                                             listens to the wrong protocol,
+ *                                             or the subscription never took
+ *   only our own echoes arrived               the route back works. The box
+ *                                             simply hears nothing else on the
+ *                                             protocol it is listening to
+ *   frames arrived and were all dropped       the radio is alive and something
+ *                                             threw the frames away (graded
+ *                                             unreliable, error events)
+ */
+function describeSilence(tally, language) {
+  const seen = Number(tally?.seen) || 0;
+  const own = Number(tally?.own) || 0;
+  const dropped = Number(tally?.dropped) || 0;
+
+  if (dropped > 0) {
+    const plural = dropped > 1 ? 's' : '';
+    return language === 'fr'
+      ? `${dropped} trame${plural} reçue${plural} et écartée${plural} avant tout appareil ` +
+          `(dernier motif : ${tally.lastDrop}). La radio fonctionne : ce sont les trames ` +
+          "elles-mêmes qui n'étaient pas exploitables."
+      : `${dropped} frame${plural} arrived and ${dropped > 1 ? 'were' : 'was'} dropped before ` +
+          `any device (last reason: ${tally.lastDrop}). The radio works: it is the frames ` +
+          'themselves that were not usable.';
+  }
+  if (own > 0) {
+    return language === 'fr'
+      ? `aucune trame d'un autre émetteur, mais ${own} écho${own > 1 ? 's' : ''} de vos propres ` +
+          'ordres est bien revenu : la route des trames fonctionne, et le boîtier n’entend rien ' +
+          "d'autre sur le protocole écouté. Vérifiez la ligne Écoute ci-dessus : c'est le " +
+          'protocole de votre télécommande qu’il doit écouter.'
+      : `no frame from any other emitter, but ${own} echo${own > 1 ? 'es' : ''} of our own ` +
+          'orders did come back: the route works, and the box hears nothing else on the protocol ' +
+          'it listens to. Check the Listening line above: it must be the protocol of your remote.';
+  }
+  if (seen > 0) {
+    return language === 'fr'
+      ? `${seen} trame(s) reçue(s), aucune exploitable.`
+      : `${seen} frame(s) arrived, none of them usable.`;
+  }
+  return language === 'fr'
+    ? 'aucune trame radio depuis le démarrage de l’intégration. Appuyez sur la télécommande, ' +
+        'puis relancez cette action. Si rien n’apparaît, actionnez un appareil depuis Gladys : ' +
+        "l'écho de cet ordre doit, lui, revenir — s'il ne revient pas non plus, c'est la route " +
+        'des trames qui est en cause, pas la télécommande (voir la ligne Écoute ci-dessus).'
+    : 'no radio frame since the integration started. Press the remote, then run this action ' +
+        'again. If nothing shows up, drive a device from Gladys: the echo of that order should ' +
+        'come back — if it does not either, the problem is the route the frames take, not the ' +
+        'remote (see the Listening line above).';
 }
 
 /** One emitter of the registry, and what the devices made of its frames. */
@@ -333,6 +393,14 @@ function describeHeardEmitter(config, entry, now, language) {
  * nothing, and it looks exactly like a remote that was never attached.
  */
 function describeFate(config, entry, language) {
+  // Dropped on the way in: no device ever saw it, so nothing below applies.
+  // Worth naming — an emitter the box hears loud and clear and grades badly is
+  // a radio problem (distance, interference), not a configuration one.
+  if (entry.dropped) {
+    return language === 'fr'
+      ? `sa dernière trame a été écartée avant tout appareil (${entry.dropped})`
+      : `its last frame was dropped before any device (${entry.dropped})`;
+  }
   const claimants = config.devmelDevices.filter((device) => hearsChannel(device, entry));
   if (claimants.length === 0) {
     return language === 'fr'
