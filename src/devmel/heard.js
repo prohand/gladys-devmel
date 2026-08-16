@@ -17,6 +17,8 @@
 // otherwise grow this list for as long as the integration runs.
 // -----------------------------------------------------------------------------
 
+import { describeReadings } from './notes.js';
+
 /** How many distinct emitters are remembered, oldest evicted first. */
 export const DEFAULT_LIMIT = 32;
 
@@ -78,6 +80,46 @@ export class HeardChannels {
   clear() {
     this.entries.clear();
   }
+}
+
+/**
+ * One emitter of the registry, as a human reads it: who, how often, when, and
+ * what its frames decoded to — `pid 14177, addr 3359265281 (3 frames, last one
+ * 4 s ago, no decoded note)`.
+ *
+ * Shared by the two screens that show the registry, the "attach a remote"
+ * action and the connection report, so an emitter is spelled the same way
+ * wherever the user meets it: they are comparing the two, pid in hand.
+ *
+ * @param {object} entry an entry of {@link HeardChannels.list}
+ * @param {number} [now] clock, so a report can be dated in a test
+ * @param {string} [language] 'fr', or English
+ */
+export function describeEmitter(entry, now = Date.now(), language = 'en') {
+  const notes = describeReadings(entry.readings);
+  const frames =
+    language === 'fr'
+      ? `${entry.frames} trame${entry.frames > 1 ? 's' : ''}`
+      : `${entry.frames} frame${entry.frames > 1 ? 's' : ''}`;
+  const age = describeAge(now - entry.lastSeen, language);
+  const said = notes
+    ? language === 'fr'
+      ? `, note : ${notes}`
+      : `, note: ${notes}`
+    : language === 'fr'
+      ? ', aucune note décodée'
+      : ', no decoded note';
+  return `pid ${entry.id}, addr ${entry.source} (${frames}, ${age}${said})`;
+}
+
+/**
+ * How long ago a frame was heard, as a human reads it: "3 s ago" and "12 min
+ * ago" answer two different questions about the same emitter.
+ */
+export function describeAge(milliseconds, language) {
+  const seconds = Math.max(0, Math.round(Number(milliseconds) / 1000));
+  const value = seconds < 120 ? `${seconds} s` : `${Math.round(seconds / 60)} min`;
+  return language === 'fr' ? `dernière il y a ${value}` : `last one ${value} ago`;
 }
 
 /**

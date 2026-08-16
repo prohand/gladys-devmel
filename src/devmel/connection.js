@@ -10,6 +10,8 @@
 
 import { DEVICE_TYPES } from '../config.js';
 import { planListening } from './listening.js';
+import { describeEmitter } from './heard.js';
+import { hearsChannel } from '../devices/index.js';
 
 /**
  * The AirSend boxes to talk to when listening for radio frames.
@@ -98,8 +100,9 @@ export async function describeConnection(client, config, service = null) {
  * @param {object} [listen] state of the last binding attempt, as index.js keeps
  *   it: `{ url, error, plan }` — where the frames are pushed, or why they are
  *   not, and which protocol was subscribed to (see src/devmel/listening.js).
+ * @param {object} [heard] the registry of emitters heard (see src/devmel/heard.js)
  */
-export async function testConnection(client, config, service = null, listen = null) {
+export async function testConnection(client, config, service = null, listen = null, heard = null) {
   const en = [];
   const fr = [];
 
@@ -134,6 +137,14 @@ export async function testConnection(client, config, service = null, listen = nu
 
   en.push(`Listening: ${describeListening(config, listen, 'en')}`);
   fr.push(`Écoute : ${describeListening(config, listen, 'fr')}`);
+
+  // Omitted rather than apologized for when no registry was handed over: the
+  // running integration always passes one, and a report line about a missing
+  // internal is a line that helps nobody.
+  if (typeof heard?.list === 'function') {
+    en.push(`Heard: ${describeHeard(config, heard.list(), 'en')}`);
+    fr.push(`Entendu : ${describeHeard(config, heard.list(), 'fr')}`);
+  }
 
   en.push(`Devices: ${summarize(config, 'en')}`);
   fr.push(`Appareils : ${summarize(config, 'fr')}`);
@@ -269,6 +280,74 @@ function names(devices) {
     .map((device) => device.name)
     .join(', ');
   return devices.length > 5 ? `${listed} (+${devices.length - 5})` : listed;
+}
+
+/** How many emitters the report spells out before it counts the rest. */
+const HEARD_SHOWN = 5;
+
+/**
+ * What the box has actually heard on the air, and what became of it.
+ *
+ * Everything above answers "can the frames get in?"; this answers "did they,
+ * and did anything move?" — which is the question a user asks after attaching a
+ * wall remote and watching nothing happen. Three answers, three different
+ * problems, and until this line they were told apart by reading debug logs:
+ *
+ *   nothing heard          the box hears nothing on the protocol it listens to
+ *   heard, undeclared      the emitter is real, it just belongs to no device
+ *   heard, declared, mute  it reaches its device and carries no order to replay
+ *
+ * The registry is emptied by a restart, so a count of zero right after one
+ * means "nothing since then", not "never" — hence the invitation to press the
+ * remote and run the action again.
+ */
+function describeHeard(config, entries, language, now = Date.now()) {
+  if (entries.length === 0) {
+    return language === 'fr'
+      ? 'aucune trame radio depuis le démarrage de l’intégration. Appuyez sur la télécommande, ' +
+          'puis relancez cette action.'
+      : 'no radio frame since the integration started. Press the remote, then run this action ' +
+          'again.';
+  }
+
+  const listed = entries
+    .slice(0, HEARD_SHOWN)
+    .map((entry) => describeHeardEmitter(config, entry, now, language))
+    .join(language === 'fr' ? ' ; ' : '; ');
+  const more = entries.length > HEARD_SHOWN ? ` (+${entries.length - HEARD_SHOWN})` : '';
+  const plural = entries.length > 1 ? 's' : '';
+  return language === 'fr'
+    ? `${entries.length} émetteur${plural} entendu${plural} : ${listed}${more}.`
+    : `${entries.length} emitter${plural} heard: ${listed}${more}.`;
+}
+
+/** One emitter of the registry, and what the devices made of its frames. */
+function describeHeardEmitter(config, entry, now, language) {
+  return `${describeEmitter(entry, now, language)} — ${describeFate(config, entry, language)}`;
+}
+
+/**
+ * What happened to that emitter's frames: nobody claims them, a device follows
+ * them, or a device claims them and can do nothing with them. The last case is
+ * the one worth a whole line of its own — it is an attached remote that moves
+ * nothing, and it looks exactly like a remote that was never attached.
+ */
+function describeFate(config, entry, language) {
+  const claimants = config.devmelDevices.filter((device) => hearsChannel(device, entry));
+  if (claimants.length === 0) {
+    return language === 'fr'
+      ? 'aucun appareil ne le déclare : « Rattacher une télécommande » écrit la ligne'
+      : 'no device declares it: "Attach a remote" writes the line for you';
+  }
+  const claimed = names(claimants);
+  if (entry.understood) {
+    return language === 'fr' ? `suivi par ${claimed}` : `followed by ${claimed}`;
+  }
+  return language === 'fr'
+    ? `déclaré sur ${claimed}, mais ses trames ne portent aucun ordre rejouable (protocole ` +
+        'seulement partiellement décodé) : la position ne peut pas suivre'
+    : `declared on ${claimed}, but its frames carry no order to replay (a protocol the service ` +
+        'only partially decodes): the position cannot follow';
 }
 
 /**

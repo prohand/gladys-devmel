@@ -337,22 +337,37 @@ test('a frame carrying no decodable note still names its emitter', async () => {
   assert.match(lines.of('INFO')[0], /no note the service could decode/);
 });
 
-test('a declared device whose frame decodes to nothing says so on the debug channel', async () => {
+test('a declared emitter whose frames decode to nothing says so, once', async () => {
+  // The shape of "I attached my wall remote and nothing moves": the frame
+  // reaches its device, the device publishes nothing, and a line at debug level
+  // is a line nobody reads. Said at info the first time that emitter is heard —
+  // and only the first time, because a partially decoded protocol sends this
+  // very frame again on every single press.
   const { gladys, config } = setup();
   const shutterChannel = deviceNamed(config, 'Living room shutter').channel;
-  const lines = captureLogs(
-    async () =>
-      applyEvents(gladys, config, [
-        { type: 3, reliability: 0x20, channel: { ...shutterChannel }, thingnotes: { notes: [] } },
-      ]),
-    'debug',
-  );
+  const heard = new HeardChannels();
+  const mute = () => ({
+    type: 3,
+    reliability: 0x20,
+    channel: { ...shutterChannel },
+    thingnotes: { notes: [] },
+  });
 
-  assert.equal(await lines.result, 0);
+  const first = captureLogs(async () => applyEvents(gladys, config, [mute()], heard), 'debug');
+
+  assert.equal(await first.result, 0);
   assert.deepEqual(gladys.published, []);
-  assert.equal(lines.of('INFO').length, 0);
-  assert.equal(lines.of('DEBUG').length, 1);
-  assert.match(lines.of('DEBUG')[0], /only partially decoded/);
+  assert.equal(first.of('INFO').length, 1);
+  assert.match(first.of('INFO')[0], /pid 300, addr 3.*"Living room shutter"/);
+  assert.match(first.of('INFO')[0], /only partially decoded/);
+  assert.equal(first.of('DEBUG').length, 0);
+
+  const again = captureLogs(async () => applyEvents(gladys, config, [mute()], heard), 'debug');
+
+  assert.equal(await again.result, 0);
+  assert.equal(again.of('INFO').length, 0);
+  assert.equal(again.of('DEBUG').length, 1);
+  assert.match(again.of('DEBUG')[0], /only partially decoded/);
 });
 
 test('a frame its own device cannot follow is not swallowed in silence', async () => {

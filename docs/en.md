@@ -317,17 +317,23 @@ to one at a time.
 #### The remote is attached, and nothing moves
 
 Once the emitter is declared the frame does reach the device — what remains is
-whether it **carries an order**. These two cases look alike and are unrelated:
+whether it **carries an order**. Start with **Test the connection**: its _Heard_
+line answers without going through the logs (see "What the box actually heard").
+It tells apart three cases that look alike and are unrelated:
 
-- `Heard pid …, addr … for "Living room shutter", but it says nothing this
-device can follow: data …` — the frame arrived, the device has no use for it.
-  That is the fate of rolling-code 868 MHz protocols: the service only decodes
-  them partially, so the frame proves the radio works but carries no order to
-  replay. Attaching the remote cannot change that;
-- nothing at all in the logs — the frame no longer arrives. Check with **Test
-  the connection**: when the remote was declared on another protocol than its
-  device, the _Listening_ line names it as unheard, and putting its `pid` in the
-  **Listening channel** field listens to its side instead.
+- `declared on Living room shutter, but its frames carry no order to replay` —
+  the frame arrived, the device has no use for it. That is the fate of
+  rolling-code 868 MHz protocols: the service only decodes them partially, so the
+  frame proves the radio works but carries nothing to replay. **The position
+  cannot follow**, and attaching the remote cannot change that; on the first
+  frame from that emitter the integration says so in the logs too, at info level
+  (`no note the service could decode`);
+- `no device declares it` — the emitter is heard, it is simply attached to
+  nothing: run **Attach a remote** again;
+- the emitter is not listed at all — the frame no longer arrives. When the remote
+  was declared on another protocol than its device, the _Listening_ line names it
+  as unheard, and putting its `pid` in the **Listening channel** field listens to
+  its side instead.
 
 **Nothing in the logs after a press?** The line is written when a frame comes
 in: press the remote, then read the logs of the integration again. If there is
@@ -345,6 +351,35 @@ still nothing, the frame never arrived, and there are only three reasons why:
   noisy, and the box grades every frame it decodes. Turn on **Detailed logs
   (debug)**: those frames are traced there too, with their `pid`, their `addr`
   and the reason they went no further.
+
+### What the box actually heard
+
+Every check above answers "can the frames get in?". The _Heard_ line of **Test
+the connection** answers the next question, the only one that matters once a
+remote is attached: **did they, and did anything move?**
+
+The integration remembers the emitters it hears, most recent first, with how
+many frames each sent, how long ago, what they decoded to, and what the devices
+made of them:
+
+```text
+Heard: 1 emitter heard: pid 14177, addr 3359265281 (3 frames, last one 4 s ago,
+no decoded note) — declared on Living room shutter, but its frames carry no
+order to replay (a protocol the service only partially decodes): the position
+cannot follow.
+```
+
+Three possible verdicts per emitter:
+
+| Verdict                    | What it means                                                             |
+| -------------------------- | ------------------------------------------------------------------------- |
+| `followed by <device>`     | it works: those frames do drive the device                                |
+| `no device declares it`    | the emitter is heard but attached to nothing — **Attach a remote**        |
+| `carry no order to replay` | the frame reaches its device and carries nothing to replay (rolling code) |
+
+The registry is emptied when the integration restarts: "no radio frame since the
+integration started" means "nothing since then", not "never". Press the remote,
+then run the action again.
 
 ### Detailed logs
 
@@ -373,9 +408,10 @@ provides: link your Gladys Plus account and paste your Open API key in the
 
 ## Actions
 
-- **Test the connection** — checks the local channel and reports the devices it
-  parsed. The fastest way to spot a mistyped connection string or a device
-  list that did not parse.
+- **Test the connection** — checks the local channel, says which protocol is
+  listened to, **what the box actually heard**, and which devices were parsed.
+  The fastest way to spot a mistyped connection string, a device list that did
+  not parse, or an attached remote whose frames carry no order.
 - **Attach a remote** — press the remote, pick the device it drives: the action
   writes the device list to paste back, remote included (see "The wall remote").
 - **Identify a device** — pick a device and it is sent a PING. Not every piece
@@ -409,6 +445,7 @@ provides: link your Gladys Plus account and paste your Open API key in the
 | A shutter shows no position       | Time it: `travel_up` / `travel_down`, then open or close it fully once                 |
 | The position drifts over time     | Re-time the travel, and open the shutter fully once a day to resynchronize it          |
 | No frame from an 868 MHz remote   | **Test the connection**: channel `1` is 433 MHz. Declare the device, or its `pid`      |
+| Remote attached, nothing moves    | **Test the connection**, _Heard_ line: it says whether the frames carry an order       |
 
 The integration logs everything it does: read the integration logs from the
 Gladys UI (or `docker logs` on the host), and tick **Detailed logs (debug)** in

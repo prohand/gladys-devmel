@@ -218,10 +218,23 @@ export async function applyEvents(gladys, config, events, registry = heardChanne
       // into a command. That is what a partially decoded protocol looks like
       // (`getDecoder: 0` in the channel table): the frame proves the radio
       // works, it just says nothing Gladys can publish.
-      logger.debug(
-        `Heard ${describeChannel(event.channel)}, but no note the service could decode: ` +
-          'this protocol is only partially decoded, nothing to publish',
-      );
+      //
+      // Said out loud the FIRST time such an emitter is heard, because this is
+      // the shape of "I attached my wall remote and nothing moves": the frame
+      // reaches its device, the device publishes nothing, and until now nothing
+      // said so above debug level. Every frame after that goes back to debug —
+      // a remote pressed twice a day must not fill the logs with a fact the
+      // user has already been told.
+      const line =
+        `Heard ${describeChannel(event.channel)} for ${names(listeners)}, but no note the ` +
+        'service could decode: this protocol is only partially decoded (a rolling-code 868 MHz ' +
+        'remote, typically), so its frames prove the radio works and carry no order to replay. ' +
+        'Nothing to publish.';
+      if (isFirstFrame(heard)) {
+        logger.info(line);
+      } else {
+        logger.debug(line);
+      }
       continue;
     }
     const createdAt = toDate(event.timestamp);
@@ -262,6 +275,20 @@ export async function applyEvents(gladys, config, events, registry = heardChanne
     }
   }
   return applied;
+}
+
+/**
+ * Is this the first frame the registry ever saw from that emitter? What is
+ * worth an info line once is noise on every repeat. An unremembered frame (no
+ * registry entry) counts as a first one: silence is the worse mistake.
+ */
+function isFirstFrame(heard) {
+  return !heard || Number(heard.frames) <= 1;
+}
+
+/** The devices a frame was routed to, quoted as the user named them. */
+function names(devices) {
+  return devices.map((device) => `"${device.name}"`).join(', ');
 }
 
 /** An AirSend channel as the configuration spells it: the `pid`/`addr` pair. */
