@@ -202,19 +202,34 @@ export async function applyEvents(
       continue;
     }
 
-    const unusable = whyUnusable(event);
+    const unusable = whyUnusable(event, config);
     registry.received({ dropped: unusable });
     if (unusable) {
-      // Never an info line — the air is full of half-decoded frames, and one
-      // per press of a neighbour's gate remote is noise. But someone hunting
-      // for a remote that never shows up needs to see that something WAS
-      // heard, and where it stopped: hence the channel, and the reason.
-      logger.debug(`Ignored a radio frame (${unusable}): ${describeChannel(event?.channel)}`);
       // Remembered all the same when the box named the emitter: a frame graded
       // too low is an emitter heard, and leaving it out of the registry is what
       // made a box drowning in frames report exactly the same "nothing heard"
       // as a box listening to the wrong protocol.
-      registry.record(event?.channel, { dropped: unusable, timestamp: event?.timestamp });
+      const dropped = registry.record(event?.channel, {
+        dropped: unusable,
+        timestamp: event?.timestamp,
+      });
+      // What it carried, spelled out: it is the whole difference between a
+      // frame worth rescuing (it decodes to an order, and "Accept unreliable
+      // frames" will let it through) and one that carries nothing to rescue.
+      const carried = describeReadings(decodeNotes(event?.thingnotes?.notes));
+      const line =
+        `Ignored a radio frame (${unusable}): ${describeChannel(event?.channel)}, ` +
+        `${carried ? `carrying ${carried}` : 'carrying no note the service could decode'}.`;
+      // Said out loud the FIRST time such an emitter turns up, then dropped
+      // back to debug: the air is full of half-decoded frames, and one info
+      // line per press of a neighbour's gate remote is noise — but a user
+      // hunting a remote that never shows up must not have to enable debug
+      // logs to learn that something WAS heard.
+      if (isFirstFrame(dropped)) {
+        logger.info(`${line} ${adviseOnDropped(event, unusable)}`);
+      } else {
+        logger.debug(line);
+      }
       continue;
     }
 
@@ -364,6 +379,33 @@ async function applyOwnEcho(gladys, config, event, echo) {
 }
 
 /**
+ * What to do about a frame that was dropped on the way in — the part of the
+ * line that is worth reading twice.
+ *
+ * A frame the box graded badly and could not attribute (no address) is not
+ * noise from the neighbourhood: it is the box picking up a protocol it is not
+ * decoding, which is what listening to the wrong decoder looks like from the
+ * inside. The fix is upstream, in the listening channel, and saying so here is
+ * cheaper than a debug session.
+ */
+function adviseOnDropped(event, reason) {
+  if (!String(reason).startsWith('unreliable')) {
+    return '';
+  }
+  if (event?.channel?.source === undefined) {
+    return (
+      `The box picked up protocol ${event?.channel?.id} without decoding it (no address, no ` +
+      'grade it trusts). Set the listening channel to that pid so the box listens to its own ' +
+      'decoder, and run "Test the connection" to see what it says about it.'
+    );
+  }
+  return (
+    'The box is not confident in what it decoded (a remote at the edge of its range, a noisy ' +
+    'band). Turn on "Accept unreliable frames" to use it anyway.'
+  );
+}
+
+/**
  * Is this the first frame the registry ever saw from that emitter? What is
  * worth an info line once is noise on every repeat. An unremembered frame (no
  * registry entry) counts as a first one: silence is the worse mistake.
@@ -405,15 +447,24 @@ export function hearsChannel(device, channel) {
  * typically) ever gives away. Dropping it here made such a remote look exactly
  * like a box that hears nothing — see `applyEvents`.
  *
+ * The grading window is the one the official Jeedom plugin applies, so a frame
+ * Gladys refuses is a frame the reference implementation refuses too. It can be
+ * waived, deliberately, with `accept_unreliable`: a remote at the edge of its
+ * range is graded badly and still carries the right order, and the user is
+ * better placed than we are to decide whether a false trigger now and then
+ * costs more than a shutter that ignores half the presses.
+ *
  * @returns {?string} why the frame goes no further, null when it is usable —
  *   a reason rather than a boolean, because a frame dropped in silence is
  *   indistinguishable from a remote nobody pressed.
  */
-function whyUnusable(event) {
+function whyUnusable(event, config = null) {
   if (!event || typeof event !== 'object' || !event.channel) {
     return 'no channel';
   }
   if (Number(event.type ?? 0) >= 0x100) {
+    // Never waived: this is not a frame the box heard badly, it is the box
+    // reporting that an exchange failed. There is nothing in it to publish.
     return `error event, type ${event.type}`;
   }
   if (event.reliability === undefined) {
@@ -421,7 +472,7 @@ function whyUnusable(event) {
   }
   const reliability = Number(event.reliability);
   if (!(reliability > 0x6 && reliability < 0x47)) {
-    return `unreliable, graded ${event.reliability}`;
+    return config?.accept_unreliable ? null : `unreliable, graded ${event.reliability}`;
   }
   return null;
 }

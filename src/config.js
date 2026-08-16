@@ -27,6 +27,7 @@ export const DEFAULT_CONFIG = {
   devices: '', // JSON exported from airsend.cloud
   listen_channel: null, // radio protocol to listen to; null = deduced, 0 = disabled
   command_repeat: 1, // extra emissions of an order, the way a remote repeats it
+  accept_unreliable: false, // use the frames the box itself grades as doubtful
   poll_frequency: 300, // seconds between two sensor reads
   debug_logs: false, // raise the log level to debug, from the Configuration screen
 };
@@ -73,6 +74,7 @@ export function normalizeConfig(raw = {}) {
     // silently turned off by a field nobody touched.
     poll_frequency: toPositiveNumber(raw.poll_frequency, DEFAULT_CONFIG.poll_frequency),
     use_embedded_service: raw.use_embedded_service !== false,
+    accept_unreliable: toBoolean(raw.accept_unreliable, DEFAULT_CONFIG.accept_unreliable),
     debug_logs: toBoolean(raw.debug_logs, DEFAULT_CONFIG.debug_logs),
   };
 
@@ -300,7 +302,14 @@ function normalizeChannel(entry, rtype) {
  * which is what the log of an unclaimed frame prints. A remote on another
  * protocol spells both out: `"remotes": [{ "pid": 1368, "addr": 542 }]`.
  *
- * @returns {Array<{id: number, source: number}>}
+ * A protocol on its own — `"remotes": [{ "pid": 14177 }]` — is the last resort,
+ * for the frames the box picks up WITHOUT decoding an address (they show up in
+ * the logs as a pid and nothing else). It follows exactly those: every
+ * unattributed frame of that protocol drives this device, whoever pressed it.
+ * Deliberately explicit, because it is the one spelling that can be surprised
+ * by a neighbour.
+ *
+ * @returns {Array<{id: number, source: ?number}>}
  */
 function normalizeRemotes(source, channel) {
   if (source === undefined || source === null || source === '') {
@@ -312,8 +321,22 @@ function normalizeRemotes(source, channel) {
     const flat = typeof entry === 'object' && entry !== null ? entry : { addr: entry };
     const id = firstNumber(flat.pid, flat.id, flat.channelId, flat.channel_id, channel?.id);
     const address = firstNumber(flat.addr, flat.source, flat.address);
-    if (id === null || address === null) {
-      logger.warn(`Ignoring a remote without an address: ${JSON.stringify(entry)}`);
+    if (id === null) {
+      logger.warn(`Ignoring a remote without a protocol: ${JSON.stringify(entry)}`);
+      continue;
+    }
+    if (address === null) {
+      // A bare number is an address on the device's own protocol; only an
+      // object naming a pid and no address asks for the protocol itself.
+      if (typeof entry !== 'object' || entry === null) {
+        logger.warn(`Ignoring a remote without an address: ${JSON.stringify(entry)}`);
+        continue;
+      }
+      logger.info(
+        `Remote declared on protocol ${id} with no address: this device follows every frame of ` +
+          'that protocol the box could not attribute to an emitter.',
+      );
+      remotes.push({ id, source: undefined });
       continue;
     }
     remotes.push({ id, source: address });

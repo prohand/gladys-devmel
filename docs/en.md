@@ -371,6 +371,47 @@ others without touching them. It also says what its frames decoded to, and
 warns when the remote speaks another protocol than the device: the box listens
 to one at a time.
 
+#### A frame dropped, or one with no address
+
+The box grades every frame it decodes, and the integration ignores the ones it
+grades badly — exactly as the official Jeedom plugin does. Two very different
+shapes in the logs:
+
+```text
+Ignored a radio frame (unreliable, graded 0): pid 14177, carrying no note the service could decode.
+Ignored a radio frame (unreliable, graded 2): pid 25455, addr 94311, carrying level 100 (up).
+```
+
+**A frame with an address, graded too low** (second line): the box decoded both
+the emitter and the order, it is simply not confident — a remote at the edge of
+its range, a crowded band. Turn on **Accept unreliable frames**: they are then
+used anyway, at the price of the occasional false trigger.
+
+**A frame with no address** (first line, a `pid` and nothing else): the box
+picked the protocol up **without decoding it**. There is no emitter to name and
+no order to replay, and no setting makes usable what was never decoded. It is
+the signature of a box listening to the **wrong decoder**: put that `pid` in the
+**Listening channel** field so the box listens to that protocol on its own
+decoder, then run **Test the connection** again. If the frames come back with an
+address, attach it as usual.
+
+If the protocol stays address-less even on its own channel, the AirSend service
+only decodes it partially (868 MHz rolling code) and no software setting will
+change that. As a last resort, a device can follow **every** unattributed frame
+of a protocol:
+
+```json
+{
+  "devices": {
+    "Patio door": { "type": 4098, "pid": 25455, "addr": 8295, "remotes": [{ "pid": 14177 }] }
+  }
+}
+```
+
+A `remotes` entry reduced to a `pid` no longer names a remote but a whole
+protocol: a neighbour's remote on that protocol will drive your shutter. Use it
+knowingly.
+
 #### The remote is attached, and nothing moves
 
 Once the emitter is declared the frame does reach the device — what remains is
@@ -513,21 +554,23 @@ provides: link your Gladys Plus account and paste your Open API key in the
 
 ## Troubleshooting
 
-| Symptom                           | What to check                                                                          |
-| --------------------------------- | -------------------------------------------------------------------------------------- |
-| `Invalid connection string`       | The `sp://` URL, and that its password matches the box                                 |
-| `Invalid input`                   | The `channel` of the device (`id`/`pid` and `source`/`addr`)                           |
-| `no radio channel` in the logs    | The entry carries no channel: it needs `channel.id`, or the `pid`/`addr` pair          |
-| `no radio confirmation`           | Normal on equipment without feedback: set `wait: false`                                |
-| No device in the Discovery tab    | **Test the connection**: the device list probably did not parse                        |
-| The box is unreachable            | The `?gw=0&rhost=<IPv4>` part of the connection string                                 |
-| `Built-in service unavailable`    | The integration logs: the service logs its own startup there                           |
-| The box answers by hand, not here | The `rhost=` IPv4 must be reachable **from the container**, not just from your desktop |
-| You have to click several times   | Raise **Command repeats** to `2` or `3`, or the device's own `repeat`                  |
-| A shutter shows no position       | Time it: `travel_up` / `travel_down`, then open or close it fully once                 |
-| The position drifts over time     | Re-time the travel, and open the shutter fully once a day to resynchronize it          |
-| No frame from an 868 MHz remote   | **Test the connection**: channel `1` is 433 MHz. Declare the device, or its `pid`      |
-| Remote attached, nothing moves    | **Test the connection**, _Heard_ line: it says whether the frames carry an order       |
+| Symptom                            | What to check                                                                          |
+| ---------------------------------- | -------------------------------------------------------------------------------------- |
+| `Invalid connection string`        | The `sp://` URL, and that its password matches the box                                 |
+| `Invalid input`                    | The `channel` of the device (`id`/`pid` and `source`/`addr`)                           |
+| `no radio channel` in the logs     | The entry carries no channel: it needs `channel.id`, or the `pid`/`addr` pair          |
+| `no radio confirmation`            | Normal on equipment without feedback: set `wait: false`                                |
+| No device in the Discovery tab     | **Test the connection**: the device list probably did not parse                        |
+| The box is unreachable             | The `?gw=0&rhost=<IPv4>` part of the connection string                                 |
+| `Built-in service unavailable`     | The integration logs: the service logs its own startup there                           |
+| The box answers by hand, not here  | The `rhost=` IPv4 must be reachable **from the container**, not just from your desktop |
+| You have to click several times    | Raise **Command repeats** to `2` or `3`, or the device's own `repeat`                  |
+| A shutter shows no position        | Time it: `travel_up` / `travel_down`, then open or close it fully once                 |
+| The position drifts over time      | Re-time the travel, and open the shutter fully once a day to resynchronize it          |
+| No frame from an 868 MHz remote    | **Test the connection**: channel `1` is 433 MHz. Declare the device, or its `pid`      |
+| Remote attached, nothing moves     | **Test the connection**, _Heard_ line: it says whether the frames carry an order       |
+| `unreliable, graded N` in the logs | A frame graded too low: **Accept unreliable frames**, or move the box closer           |
+| A frame with a `pid` and no `addr` | The protocol is not decoded: put that `pid` in **Listening channel**                   |
 
 The integration logs everything it does: read the integration logs from the
 Gladys UI (or `docker logs` on the host), and tick **Detailed logs (debug)** in

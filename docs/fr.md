@@ -387,6 +387,48 @@ cite les autres sans y toucher. Elle dit aussi ce que ses trames ont donné au
 décodage, et prévient quand la télécommande parle un autre protocole que
 l'appareil : le boîtier n'en écoute qu'un à la fois.
 
+#### Une trame écartée, ou sans adresse
+
+Le boîtier note chaque trame qu'il décode, et l'intégration ignore celles qu'il
+note mal — exactement comme le plugin Jeedom officiel. Deux formes très
+différentes dans les journaux :
+
+```text
+Ignored a radio frame (unreliable, graded 0): pid 14177, carrying no note the service could decode.
+Ignored a radio frame (unreliable, graded 2): pid 25455, addr 94311, carrying level 100 (up).
+```
+
+**Une trame avec une adresse, notée trop bas** (deuxième ligne) : le boîtier a
+décodé l'émetteur et l'ordre, il n'est simplement pas sûr de lui — une
+télécommande en limite de portée, une bande encombrée. Activez **Accepter les
+trames peu fiables** : elles sont alors utilisées quand même, au prix d'une
+fausse détection de temps en temps.
+
+**Une trame sans adresse** (première ligne, `pid` seul) : le boîtier a capté le
+protocole **sans le décoder**. Il n'y a ni émetteur à nommer, ni ordre à
+rejouer, et aucun réglage ne rend exploitable ce qui n'a pas été décodé. C'est
+la signature d'un boîtier à l'écoute du **mauvais décodeur** : renseignez ce
+`pid` dans le champ **Canal d'écoute**, pour que le boîtier écoute ce protocole
+sur son propre décodeur, puis relancez **Tester la connexion**. Si les trames
+reviennent alors avec une adresse, rattachez-la comme d'habitude.
+
+Si même sur son propre canal le protocole reste sans adresse, c'est que le
+service AirSend ne le décode que partiellement (code tournant 868 MHz) : rien ne
+le rendra exploitable côté logiciel. En dernier recours, un appareil peut suivre
+**toutes** les trames non attribuées d'un protocole :
+
+```json
+{
+  "devices": {
+    "Baie vitrée": { "type": 4098, "pid": 25455, "addr": 8295, "remotes": [{ "pid": 14177 }] }
+  }
+}
+```
+
+Un `remotes` réduit au seul `pid` ne désigne plus une télécommande mais un
+protocole entier : la télécommande du voisin sur le même protocole pilotera
+votre volet. À n'utiliser qu'en connaissance de cause.
+
 #### La télécommande est rattachée, et rien ne bouge
 
 Une fois l'émetteur déclaré, la trame arrive bien à l'appareil — reste à savoir
@@ -554,6 +596,8 @@ votre clé Open API dans le bloc **Webhooks** de l'écran de configuration.
 | La position dérive avec le temps       | Rechronométrez la course, et ouvrez le volet à fond une fois par jour pour le recaler      |
 | Aucune trame d'une télécommande 868    | **Tester la connexion** : le canal `1` est du 433 MHz. Déclarez l'appareil, ou son `pid`   |
 | Télécommande rattachée, rien ne bouge  | **Tester la connexion**, ligne _Entendu_ : elle dit si les trames portent un ordre         |
+| `unreliable, graded N` (logs)          | Trame notée trop bas : **Accepter les trames peu fiables**, ou rapprochez le boîtier       |
+| Une trame avec un `pid` et sans `addr` | Le protocole n'est pas décodé : mettez ce `pid` dans **Canal d'écoute**                    |
 
 L'intégration journalise tout ce qu'elle fait : consultez les logs de
 l'intégration depuis l'interface de Gladys (ou `docker logs` sur l'hôte), et
