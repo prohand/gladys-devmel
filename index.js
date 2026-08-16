@@ -36,6 +36,9 @@ import { attachHeardRemote } from './src/devmel/remotes.js';
 
 const gladys = new GladysIntegration();
 const client = new AirSendClient();
+// Transmitting takes the box out of reception: every exchange is a reason to
+// make sure it is still listening (see `scheduleRebind`).
+client.afterTransmit = () => scheduleRebind();
 
 // The AirSend Web Service, running in this very container unless the user
 // pointed the configuration at one of their own.
@@ -61,6 +64,13 @@ let localCallbackUrl = null;
 // Re-arms the box listening subscription (it forgets it when it restarts).
 let listenTimer = null;
 const LISTEN_REFRESH_MS = 10 * 60 * 1000;
+
+// And re-arms it shortly after the integration has used the radio itself: a box
+// has one radio, so it is not receiving while it transmits, and a subscription
+// that did not survive an order is a wall remote nobody hears until the renewal
+// above — ten minutes of a Gladys that stopped following the house.
+let rebindTimer = null;
+const REBIND_AFTER_COMMAND_MS = 2000;
 
 // The protocol table of the AirSend Web Service, read once per configuration:
 // it says which channel decodes which protocol, hence what to bind.
@@ -307,7 +317,7 @@ async function startListening() {
 
   await bindBoxes(callbackUrl);
   listenTimer = setInterval(() => {
-    bindBoxes(radioCallbackUrl()).catch((err) =>
+    bindBoxes(radioCallbackUrl(), { renewal: true }).catch((err) =>
       logger.error('Could not renew the radio listener', err),
     );
   }, LISTEN_REFRESH_MS);
@@ -333,7 +343,7 @@ async function knownChannels() {
   return channelTable;
 }
 
-async function bindBoxes(callbackUrl) {
+async function bindBoxes(callbackUrl, { renewal = false } = {}) {
   const channel = listenState.plan?.channel;
   if (!callbackUrl || !(channel > 0)) {
     return;
@@ -343,7 +353,11 @@ async function bindBoxes(callbackUrl) {
       await client.bind(channel, callbackUrl, box);
       listenState.url = callbackUrl;
       listenState.error = null;
-      logger.info(`Listening on channel ${channel} through "${box.name}" -> ${callbackUrl}`);
+      // A renewal says nothing new: it repeats, every ten minutes and after
+      // every order, a line the user already read when listening was armed.
+      logger[renewal ? 'debug' : 'info'](
+        `Listening on channel ${channel} through "${box.name}" -> ${callbackUrl}`,
+      );
     } catch (err) {
       if (!listenState.url) {
         listenState.error = err.message;
@@ -353,10 +367,38 @@ async function bindBoxes(callbackUrl) {
   }
 }
 
+/**
+ * Put the box back into reception after the integration has used the radio.
+ *
+ * Debounced, and deliberately after the fact: a shutter command is often a
+ * short burst (the order, its repeat, the STOP that ends a timed travel), and
+ * what has to be armed again is the state the LAST of them left the box in.
+ */
+function scheduleRebind() {
+  if (rebindTimer || !listenState.plan?.enabled) {
+    return;
+  }
+  const callbackUrl = radioCallbackUrl();
+  if (!callbackUrl) {
+    return;
+  }
+  rebindTimer = setTimeout(() => {
+    rebindTimer = null;
+    bindBoxes(radioCallbackUrl(), { renewal: true }).catch((err) =>
+      logger.debug(`Could not re-arm the radio listener after a command: ${err.message}`),
+    );
+  }, REBIND_AFTER_COMMAND_MS);
+  rebindTimer.unref?.();
+}
+
 function stopListening() {
   if (listenTimer) {
     clearInterval(listenTimer);
     listenTimer = null;
+  }
+  if (rebindTimer) {
+    clearTimeout(rebindTimer);
+    rebindTimer = null;
   }
 }
 

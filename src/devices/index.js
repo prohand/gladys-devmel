@@ -26,6 +26,7 @@ import { shutter } from './shutter.js';
 import { light } from './light.js';
 import { decodeNotes, describeReadings, isSameChannel } from '../devmel/notes.js';
 import { heardChannels } from '../devmel/heard.js';
+import { sentOrders } from '../devmel/orders.js';
 import { idsFor } from './helpers.js';
 
 const logger = createLogger({ name: 'devices' });
@@ -166,16 +167,37 @@ export async function identifyDevice(gladys, externalId, context) {
  * device claimed it or not: that registry is what the "attach a remote" action
  * turns into a configuration line.
  *
+ * An order the integration itself sent comes back the very same way (see
+ * src/devmel/orders.js) and is handled apart: it was already acted on when it
+ * was sent, and reading it again as a fresh order is what sent a shutter being
+ * positioned to the top instead of to 40 %.
+ *
  * @param {object} [registry] where the frames are remembered, injectable so the
  *   tests do not share the registry of the running integration
+ * @param {object} [orders] the orders we sent, same reason
  * @returns {Promise<number>} how many devices acted on a frame
  */
-export async function applyEvents(gladys, config, events, registry = heardChannels) {
+export async function applyEvents(
+  gladys,
+  config,
+  events,
+  registry = heardChannels,
+  orders = sentOrders,
+) {
   if (!Array.isArray(events)) {
     return 0;
   }
   let applied = 0;
   for (const event of events) {
+    // Ours, coming back? Asked before anything else: an order that failed to
+    // go out comes back as an error event, which every test below drops in
+    // silence — and it is the one frame that explains a command doing nothing.
+    const echo = orders?.match(event);
+    if (echo) {
+      applied += await applyOwnEcho(gladys, config, event, echo);
+      continue;
+    }
+
     const unusable = whyUnusable(event);
     if (unusable) {
       // Never an info line — the air is full of half-decoded frames, and one
@@ -272,6 +294,60 @@ export async function applyEvents(gladys, config, events, registry = heardChanne
       } catch (err) {
         logger.error(`Could not publish the states of "${device.name}"`, err);
       }
+    }
+  }
+  return applied;
+}
+
+/**
+ * The echo of an order we sent: what is left of it once the order itself is
+ * taken out.
+ *
+ * The orders it carries are not news — the integration published them, and
+ * started the travel of the shutter, at the moment it sent them. What may be
+ * news is anything else the frame holds: a device that reports where it
+ * actually is answers on this very route, and that reading is worth publishing.
+ *
+ * The one echo worth an info line is the one that says the order never made it
+ * to the air. Nothing moved, and until now nothing said so: a command that
+ * silently fails is exactly the "I have to press Open three times" the user
+ * ends up describing.
+ *
+ * @returns {Promise<number>} how many devices acted on the leftovers
+ */
+async function applyOwnEcho(gladys, config, event, echo) {
+  if (Number(event?.type ?? 0) >= 0x100) {
+    logger.info(
+      `The box could not transmit the order sent to "${echo.name}" (event type ${event.type}): ` +
+        'nothing moved. If it keeps happening, raise "Command repeats" in the configuration, and ' +
+        'check that the box is powered and in range of what it drives.',
+    );
+    return 0;
+  }
+
+  const readings = decodeNotes(event?.thingnotes?.notes).filter((reading) => !reading.command);
+  logger.debug(
+    `Own order echoed back for "${echo.name}": ${describeChannel(event?.channel)}` +
+      `${readings.length === 0 ? '' : `, also reporting ${describeReadings(readings)}`}`,
+  );
+  if (readings.length === 0) {
+    return 0;
+  }
+
+  const createdAt = toDate(event.timestamp);
+  let applied = 0;
+  for (const device of config.devmelDevices.filter((candidate) =>
+    hearsChannel(candidate, event.channel),
+  )) {
+    const blueprint = findBlueprintByType(device.rtype);
+    if (!blueprint || typeof blueprint.applyReadings !== 'function') {
+      continue;
+    }
+    try {
+      const handled = await blueprint.applyReadings(gladys, { device, readings, createdAt });
+      applied += Number(handled) > 0 ? 1 : 0;
+    } catch (err) {
+      logger.error(`Could not publish the states of "${device.name}"`, err);
     }
   }
   return applied;

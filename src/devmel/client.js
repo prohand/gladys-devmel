@@ -16,11 +16,34 @@
 
 import { createHash } from 'node:crypto';
 import { createLogger, DEVICE_TRANSPORTS } from '@gladysassistant/integration-sdk';
+import { MAX_COMMAND_REPEAT } from '../config.js';
+import { isRepeatable } from './notes.js';
+import { sentOrders } from './orders.js';
 
 const logger = createLogger({ name: 'airsend' });
 
 const USER_AGENT = 'gladys-devmel';
 const LOCAL_TIMEOUT_MS = 8000;
+
+/**
+ * How long the box is left alone between two radio operations.
+ *
+ * A box has ONE radio: it transmits, or it listens, never both. Two orders
+ * fired back to back — a Gladys command while the position slider is still
+ * moving, the STOP that ends a timed travel, the renewal of the listening
+ * subscription — reach a box still busy with the previous one, and the second
+ * is the one that vanishes. So they queue, spaced by this gap.
+ */
+const RADIO_GAP_MS = 250;
+
+/** How long to wait before sending an order the box could not carry again. */
+const RETRY_DELAY_MS = 600;
+
+/** Emissions of one order, retries included, before it is called a failure. */
+const ATTEMPTS = 2;
+
+/** Extra emissions of an order when nothing says otherwise. */
+const DEFAULT_REPEAT = 1;
 
 /** Thrown when a request reached the box but was refused. */
 export class AirSendError extends Error {
@@ -33,11 +56,34 @@ export class AirSendError extends Error {
 }
 
 export class AirSendClient {
-  constructor() {
+  /**
+   * @param {object} [options]
+   * @param {(ms: number) => Promise<void>} [options.sleep] injectable so the
+   *   tests do not wait for real radio gaps
+   * @param {() => number} [options.now] clock, same reason
+   * @param {object} [options.orders] registry of the orders sent, so their echo
+   *   is recognized when it comes back (see src/devmel/orders.js)
+   */
+  constructor({ sleep = defaultSleep, now = () => Date.now(), orders = sentOrders } = {}) {
     /** @type {import('../config.js').DevmelConfig | null} */
     this.config = null;
     /** Last known transport per device platform id, for the Gladys badge. */
     this.transports = new Map();
+    this.sleep = sleep;
+    this.now = now;
+    this.orders = orders;
+    /** Tail of the radio queue: one operation at a time, in order. */
+    this.queue = Promise.resolve();
+    /** When the box last had the radio to itself. */
+    this.lastRadioAt = 0;
+    /**
+     * Called after every exchange that used the radio. The box drops out of
+     * reception while it transmits, so the integration re-arms its listening
+     * subscription there (see index.js) — otherwise a wall remote pressed after
+     * a Gladys command is heard by nobody until the next renewal.
+     * @type {(() => void) | null}
+     */
+    this.afterTransmit = null;
   }
 
   /** Apply a new configuration (called on connection and on every config update). */
@@ -69,6 +115,18 @@ export class AirSendClient {
   /**
    * Send notes to a device.
    *
+   * Radio is one-way and lossy: nothing acknowledges an order, and a frame that
+   * arrives while the motor's receiver is busy is simply gone — which is what
+   * "I have to press Open twice" is made of. So an order is not sent once and
+   * hoped for:
+   *
+   *   - it waits its turn, because a box busy transmitting hears nothing;
+   *   - a transmission the box could not carry is tried again;
+   *   - an order that means the same thing twice (UP, STOP, a percentage — see
+   *     `isRepeatable`) is repeated, the way a real remote repeats it for as
+   *     long as the button is held. A TOGGLE, which does NOT mean the same
+   *     thing twice, never is.
+   *
    * @param {object} device normalized Devmel device (see src/config.js)
    * @param {Array<object>} notes notes to transfer
    * @param {object} [options]
@@ -76,6 +134,7 @@ export class AirSendClient {
    * @param {boolean} [options.wait] wait for the radio confirmation (reads do)
    * @param {string} [options.callbackUrl] where the box pushes the answer when
    *   `wait` is false
+   * @param {number} [options.repeat] extra emissions, overriding the setting
    * @returns {Promise<{ transport: string, notes: Array<object>, degraded: boolean }>}
    */
   async transfer(device, notes, options = {}) {
@@ -86,23 +145,118 @@ export class AirSendClient {
       });
     }
 
-    try {
-      const result = await this.transferLocal(device, notes, options);
+    const emissions = 1 + this.repeatsFor(device, notes, options);
+    let answer = null;
+    for (let emission = 0; emission < emissions; emission += 1) {
+      try {
+        const result = await this.emit(device, notes, options);
+        answer = answer ?? result;
+      } catch (err) {
+        if (emission === 0) {
+          logger.warn(`Local transfer failed for "${device.name}": ${err.message}`);
+          this.rememberTransport(device, DEVICE_TRANSPORTS.UNREACHABLE);
+          this.notifyTransmit();
+          throw err;
+        }
+        // A repeat is a second chance, not a promise: the order did go out, and
+        // failing to say it again changes nothing the user can see.
+        logger.debug(`Could not repeat the order sent to "${device.name}": ${err.message}`);
+        break;
+      }
       this.rememberTransport(device, DEVICE_TRANSPORTS.LOCAL);
-      return { transport: DEVICE_TRANSPORTS.LOCAL, degraded: false, notes: result.notes ?? [] };
+    }
+    this.notifyTransmit();
+    return { transport: DEVICE_TRANSPORTS.LOCAL, degraded: false, notes: answer?.notes ?? [] };
+  }
+
+  /**
+   * One emission, tried again when the box could not carry it. A refusal is not
+   * retried: a connection string the box rejects and a channel it does not know
+   * are answered exactly the same way the second time.
+   */
+  async emit(device, notes, options) {
+    let failure = null;
+    for (let attempt = 1; attempt <= ATTEMPTS; attempt += 1) {
+      try {
+        return await this.radio(() => this.transferLocal(device, notes, options));
+      } catch (err) {
+        failure = err;
+        if (attempt >= ATTEMPTS || !isRetryable(err)) {
+          break;
+        }
+        logger.debug(`Sending the order to "${device.name}" again: ${err.message}`);
+        await this.sleep(RETRY_DELAY_MS);
+      }
+    }
+    throw failure;
+  }
+
+  /**
+   * How many extra times this order is sent. Reads are never repeated (the
+   * answer is the point, and it comes back once), and neither is anything whose
+   * meaning depends on how often it is heard.
+   */
+  repeatsFor(device, notes, options = {}) {
+    if (options.wait ?? device.wait) {
+      return 0;
+    }
+    if (!isRepeatable(notes)) {
+      return 0;
+    }
+    const wanted = firstNumber(options.repeat, device.repeat, this.config?.command_repeat);
+    return Math.max(0, Math.min(MAX_COMMAND_REPEAT, Math.trunc(wanted ?? DEFAULT_REPEAT)));
+  }
+
+  /**
+   * Run one radio operation, alone and after the box has had its gap. The queue
+   * is what makes "the second click did nothing" impossible: orders reach the
+   * box one at a time, in the order the user gave them.
+   */
+  radio(operation) {
+    const run = this.queue.then(async () => {
+      const idle = this.lastRadioAt + RADIO_GAP_MS - this.now();
+      if (idle > 0) {
+        await this.sleep(idle);
+      }
+      try {
+        return await operation();
+      } finally {
+        this.lastRadioAt = this.now();
+      }
+    });
+    // The tail must stay resolved: a failed operation cannot be allowed to
+    // reject every order queued behind it.
+    this.queue = run.then(
+      () => {},
+      () => {},
+    );
+    return run;
+  }
+
+  /** Tell the integration the radio was used (see `afterTransmit`). */
+  notifyTransmit() {
+    if (typeof this.afterTransmit !== 'function') {
+      return;
+    }
+    try {
+      this.afterTransmit();
     } catch (err) {
-      logger.warn(`Local transfer failed for "${device.name}": ${err.message}`);
-      this.rememberTransport(device, DEVICE_TRANSPORTS.UNREACHABLE);
-      throw err;
+      logger.debug(`Could not signal the end of a transmission: ${err.message}`);
     }
   }
 
   /** Send notes through the local AirSend Web Service. */
   async transferLocal(device, notes, { uid, wait = false, callbackUrl } = {}) {
+    const thingUid = toThingUid(uid ?? device.platformId);
+    // Remembered BEFORE the request: the answer to a fire-and-forget transfer
+    // can be pushed to the callback before the HTTP call even returns, and an
+    // echo that arrives before it was remembered is an echo replayed as an
+    // order (see src/devmel/orders.js).
+    this.orders?.remember(thingUid, device);
     const body = {
       wait,
       channel: device.channel,
-      thingnotes: { uid: toThingUid(uid ?? device.platformId), notes },
+      thingnotes: { uid: thingUid, notes },
     };
     if (!wait) {
       // Fire-and-forget: the box needs somewhere to drop the answer. When no
@@ -177,10 +331,15 @@ export class AirSendClient {
         transport: DEVICE_TRANSPORTS.LOCAL,
       });
     }
-    const response = await this.localRequest(
-      'airsend/bind',
-      { channel: { id: Number(channelId) }, duration: 0, callback: callbackUrl },
-      device,
+    // Through the radio queue like an order: subscribing switches the box to
+    // permanent reception, and doing that while it is transmitting is how a
+    // subscription silently fails to take.
+    const response = await this.radio(() =>
+      this.localRequest(
+        'airsend/bind',
+        { channel: { id: Number(channelId) }, duration: 0, callback: callbackUrl },
+        device,
+      ),
     );
     if (response.status !== 200) {
       throw new AirSendError(localErrorMessage(response.status), {
@@ -234,6 +393,42 @@ export class AirSendClient {
   transportOf(device) {
     return this.transports.get(device.platformId);
   }
+}
+
+/**
+ * Is this failure worth another go? A box that answered nothing, timed out or
+ * got no radio confirmation may well carry the next one; a box that refused the
+ * connection string or the channel will refuse it exactly the same way.
+ */
+function isRetryable(err) {
+  const status = Number(err?.status);
+  if (!Number.isFinite(status)) {
+    return true;
+  }
+  return status >= 500;
+}
+
+/** First value of the list that is a usable number, or null. */
+function firstNumber(...values) {
+  for (const value of values) {
+    if (value === undefined || value === null || value === '') {
+      continue;
+    }
+    const number = Number(value);
+    if (Number.isFinite(number)) {
+      return number;
+    }
+  }
+  return null;
+}
+
+/**
+ * The gap between two radio operations. Deliberately NOT unref'd: it is held
+ * for a fraction of a second, and an order queued behind a timer the runtime is
+ * free to forget is an order that never goes out.
+ */
+function defaultSleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function localErrorMessage(status) {

@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {
   COMMANDS,
   decodeNotes,
+  isRepeatable,
   isSameChannel,
   levelNote,
   NOTE_METHODS,
@@ -106,4 +107,22 @@ test('a channel is identified by its id and its source', () => {
   assert.ok(isSameChannel({ id: 1, source: 2 }, { id: '1', source: '2', counter: 9 }));
   assert.ok(!isSameChannel({ id: 1, source: 2 }, { id: 1, source: 3 }));
   assert.ok(!isSameChannel(null, { id: 1 }));
+});
+
+test('an order may be said twice only when it means the same thing twice', () => {
+  // The whole basis of repeating orders on a lossy one-way radio.
+  assert.ok(isRepeatable([stateNote(STATE_VALUES.UP)]));
+  assert.ok(isRepeatable([stateNote(STATE_VALUES.STOP)]));
+  assert.ok(isRepeatable([stateNote('ON')]));
+  assert.ok(isRepeatable([levelNote(40)]));
+  assert.ok(isRepeatable([stateNote(STATE_VALUES.DOWN), levelNote(0)]));
+
+  // TOGGLE heard twice is back where it started; a pairing done twice is undone.
+  assert.ok(!isRepeatable([stateNote(STATE_VALUES.TOGGLE)]));
+  assert.ok(!isRepeatable([stateNote(STATE_VALUES.PROG)]));
+  assert.ok(!isRepeatable([stateNote(STATE_VALUES.PING)]));
+  // A read is answered once, and one of these is not repeatable at all.
+  assert.ok(!isRepeatable([queryNote('STATE')]));
+  assert.ok(!isRepeatable([levelNote(40), stateNote(STATE_VALUES.TOGGLE)]));
+  assert.ok(!isRepeatable([]));
 });

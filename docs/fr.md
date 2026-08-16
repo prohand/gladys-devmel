@@ -145,6 +145,7 @@ sous `channel` plutôt que le couple `pid` / `addr` à plat. Cela reste du JSON 
 | `remotes`           | Autres émetteurs qui pilotent l'appareil (voir « La télécommande murale »)     |
 | `spurl`             | Chaîne de connexion propre à cet appareil, si différente de la globale         |
 | `wait`              | Attendre la confirmation radio avant de répondre (`false` par défaut)          |
+| `repeat`            | Émissions supplémentaires des ordres envoyés à cet appareil (voir plus bas)    |
 | `invert`            | Inverser ouverture et fermeture, pour les volets posés à l'envers              |
 | `travel_up`         | Sur un volet : durée d'une ouverture complète, en secondes (voir plus bas)     |
 | `travel_down`       | Sur un volet : durée d'une fermeture complète, en secondes                     |
@@ -156,6 +157,58 @@ sous `channel` plutôt que le couple `pid` / `addr` à plat. Cela reste du JSON 
 
 Un boîtier déclaré sans `sensors: true` ne crée aucun appareil dans Gladys :
 il n'est là que pour porter la chaîne de connexion.
+
+## Faire passer un ordre
+
+Rien n'accuse réception d'un ordre radio. Un volet 433 MHz n'a pas de voie de
+retour : le boîtier émet, et personne ne dira jamais si le moteur a entendu. Une
+trame perdue dans le bruit — un micro-ondes, la télécommande du voisin, une
+porte de garage — n'est donc pas une erreur affichée quelque part, c'est un clic
+sans effet. C'est exactement ce que décrit « il faut cliquer deux ou trois fois
+sur Ouvrir pour que ça parte ».
+
+Trois choses y répondent, sans rien à régler :
+
+- **les ordres passent un par un.** Un boîtier n'a qu'une radio : pendant qu'il
+  émet, il n'entend rien, et un deuxième ordre envoyé dans la foulée arrive sur
+  un boîtier occupé. Les ordres font donc la queue, espacés d'un quart de
+  seconde, dans l'ordre où vous les avez donnés ;
+- **un ordre que le boîtier n'a pas pu porter est renvoyé.** Un refus, lui, ne
+  l'est pas : une chaîne de connexion rejetée et un canal inconnu répondront
+  exactement pareil la seconde fois ;
+- **un ordre est répété sur l'air**, comme une vraie télécommande le répète tant
+  qu'on garde le doigt appuyé. Par défaut, chaque ordre part deux fois.
+
+Le champ **Répétitions des commandes** règle ce nombre d'émissions
+supplémentaires : montez-le à `2` ou `3` si un appareil ignore encore Gladys de
+temps en temps, `0` n'envoie chaque ordre qu'une fois. Un appareil têtu peut
+avoir la sienne, sans changer celle des autres :
+
+```json
+{ "devices": { "Baie vitrée": { "type": 4098, "pid": 25455, "addr": 8295, "repeat": 3 } } }
+```
+
+Seuls les ordres qui veulent dire la même chose deux fois sont répétés — Ouvrir,
+Stop, Fermer, une position. Un TOGGLE de bouton poussoir, lui, part une seule
+fois : entendu deux fois, il revient d'où il part.
+
+### Gladys ne se prend pas pour la télécommande
+
+Tout ce que l'intégration émet lui revient : le boîtier répond à l'ordre, et
+comme il écoute en permanence, il s'entend lui-même émettre. Cet écho porte
+l'ordre qui vient d'être envoyé — et le relire comme un ordre neuf défait ce que
+l'ordre était en train de faire. Un volet chronométré envoyé à 40 % en est
+l'exemple : l'écho de son « Ouvrir » le renvoyait à 100 % et annulait le Stop
+prévu à mi-course, si bien que le volet montait tout en haut. L'intégration
+reconnaît maintenant ses propres ordres et ne les rejoue pas.
+
+Deux conséquences visibles :
+
+- une télécommande murale émet depuis une **autre adresse** : elle n'est jamais
+  prise pour cet écho, et continue de piloter le volet dans Gladys ;
+- quand le boîtier répond qu'il n'a **pas pu émettre**, l'intégration l'écrit
+  dans ses journaux, en nommant l'appareil. C'est la seule trace d'un ordre parti
+  dans le vide, et elle vaut le coup d'œil si vous cliquez souvent deux fois.
 
 ## La position d'un volet
 
@@ -233,6 +286,11 @@ quand on l'ouvre depuis sa télécommande.
 C'est **actif par défaut**, et il n'y a rien à régler : l'intégration abonne le
 boîtier au protocole radio de vos appareils et reçoit les trames chez elle.
 Rien à installer, rien à lier.
+
+L'abonnement est **réarmé après chaque ordre**, et renouvelé toutes les dix
+minutes. Émettre sort le boîtier de la réception, et un abonnement qui n'a pas
+survécu à une commande, c'est une télécommande murale que Gladys cesse de suivre
+sans rien en dire — jusqu'au renouvellement suivant.
 
 ### Le canal d'écoute
 
@@ -466,6 +524,7 @@ votre clé Open API dans le bloc **Webhooks** de l'écran de configuration.
 | Le boîtier est injoignable             | La partie `?gw=0&rhost=<IPv4>` de la chaîne de connexion                                   |
 | `Service AirSend intégré indisponible` | Les logs de l'intégration : le service y journalise son démarrage                          |
 | Le boîtier répond à la main, pas ici   | L'IPv4 `rhost=` doit être joignable **depuis le conteneur**, pas seulement de votre PC     |
+| Il faut cliquer plusieurs fois         | Montez **Répétitions des commandes** à `2` ou `3`, ou le `repeat` de l'appareil            |
 | Un volet n'affiche pas de position     | Chronométrez-le : `travel_up` / `travel_down`, puis ouvrez-le ou fermez-le à fond une fois |
 | La position dérive avec le temps       | Rechronométrez la course, et ouvrez le volet à fond une fois par jour pour le recaler      |
 | Aucune trame d'une télécommande 868    | **Tester la connexion** : le canal `1` est du 433 MHz. Déclarez l'appareil, ou son `pid`   |

@@ -2,7 +2,8 @@ import { test, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { AirSendClient, toThingUid } from '../src/devmel/client.js';
 import { normalizeConfig } from '../src/config.js';
-import { NOTE_TYPES, stateNote, STATE_VALUES } from '../src/devmel/notes.js';
+import { levelNote, NOTE_TYPES, stateNote, STATE_VALUES } from '../src/devmel/notes.js';
+import { SentOrders } from '../src/devmel/orders.js';
 
 const DEVICE = {
   name: 'Kitchen plug',
@@ -33,12 +34,17 @@ function jsonResponse(status, body = {}) {
   };
 }
 
+/**
+ * A client whose radio gaps and retry delays are instant, and which sends every
+ * order once: repeats and waiting are what the tests below drive on purpose.
+ */
 function clientWith(overrides = {}) {
-  const client = new AirSendClient();
+  const client = new AirSendClient({ sleep: async () => {}, orders: new SentOrders() });
   client.configure(
     normalizeConfig({
       service_url: 'http://192.168.1.50:33863',
       spurl: 'sp://pass@[fe80::1]?rhost=192.168.1.50',
+      command_repeat: 0,
       ...overrides,
     }),
   );
@@ -117,7 +123,9 @@ test('an unreachable box is reported as such, with no other channel to try', asy
     () => client.transfer(DEVICE, [stateNote(STATE_VALUES.OFF)]),
     /connect ECONNREFUSED/,
   );
-  assert.equal(calls.length, 1);
+  // Tried again — a box that answered nothing may well answer the next one —
+  // and then given up on: there is no second channel to fall back to.
+  assert.equal(calls.length, 2);
   // The badge remembers that nothing carried the order.
   assert.equal(client.transportOf(DEVICE).transport, 'unreachable');
 });
@@ -188,4 +196,127 @@ test('pingLocal accepts the 401 the service answers on its root path', async () 
 
   stubFetch(() => jsonResponse(502));
   await assert.rejects(() => clientWith().pingLocal(), /HTTP 502/);
+});
+
+// --- Getting the order through --------------------------------------------
+// Nothing acknowledges a 433 MHz order: a frame lost in the noise is a click
+// that did nothing, and the only defences are to say it again and to leave the
+// box alone between two transmissions.
+
+test('an order is repeated on the air, the way a remote repeats it', async () => {
+  stubFetch(() => jsonResponse(200, { type: 3 }));
+  const client = clientWith({ command_repeat: 2 });
+
+  await client.transfer(DEVICE, [stateNote(STATE_VALUES.ON)]);
+
+  assert.equal(calls.length, 3);
+  // The same order, word for word: a repeat is not a second command.
+  const bodies = calls.map((call) => call.options.body);
+  assert.equal(new Set(bodies).size, 1);
+});
+
+test('an order whose meaning depends on how often it is heard is sent once', async () => {
+  stubFetch(() => jsonResponse(200, { type: 3 }));
+  const client = clientWith({ command_repeat: 2 });
+
+  // A push button TOGGLE heard twice is back where it started.
+  await client.transfer(DEVICE, [stateNote(STATE_VALUES.TOGGLE)]);
+  assert.equal(calls.length, 1);
+
+  // A read is answered once, and the answer is the point.
+  await client.transfer(DEVICE, [{ method: 'QUERY', type: 'TEMPERATURE' }], { wait: true });
+  assert.equal(calls.length, 2);
+});
+
+test('a device can ask for more repeats than the rest of the house', async () => {
+  stubFetch(() => jsonResponse(200, { type: 3 }));
+  const client = clientWith({ command_repeat: 0 });
+
+  await client.transfer({ ...DEVICE, repeat: 2 }, [levelNote(40)]);
+
+  assert.equal(calls.length, 3);
+});
+
+test('a transmission the box could not carry is tried again', async () => {
+  let answered = 0;
+  stubFetch(() => {
+    answered += 1;
+    // 500 is what the service answers when the box got no radio confirmation.
+    return jsonResponse(answered === 1 ? 500 : 200, { type: 3 });
+  });
+  const client = clientWith();
+
+  const result = await client.transfer(DEVICE, [stateNote(STATE_VALUES.ON)]);
+
+  assert.equal(result.transport, 'local');
+  assert.equal(calls.length, 2);
+});
+
+test('a refusal is not tried again: the answer would be the same', async () => {
+  stubFetch(() => jsonResponse(405));
+  const client = clientWith();
+
+  await assert.rejects(
+    () => client.transfer(DEVICE, [stateNote(STATE_VALUES.ON)]),
+    /Invalid input/,
+  );
+  assert.equal(calls.length, 1);
+});
+
+test('orders reach the box one at a time, in the order they were given', async () => {
+  const started = [];
+  const finished = [];
+  let release = null;
+  stubFetch((url, options) => {
+    const value = JSON.parse(options.body).thingnotes.notes[0].value;
+    started.push(value);
+    return new Promise((resolve) => {
+      release = () => {
+        finished.push(value);
+        resolve(jsonResponse(200, { type: 3 }));
+      };
+    });
+  });
+  const client = clientWith();
+
+  const first = client.transfer(DEVICE, [stateNote(STATE_VALUES.ON)]);
+  const second = client.transfer(DEVICE, [stateNote(STATE_VALUES.OFF)]);
+  await new Promise(setImmediate);
+
+  // The second order waits: a box busy transmitting hears nothing of it.
+  assert.deepEqual(started, [STATE_VALUES.ON]);
+  release();
+  await first;
+  await new Promise(setImmediate);
+  assert.deepEqual(started, [STATE_VALUES.ON, STATE_VALUES.OFF]);
+  release();
+  await second;
+  assert.deepEqual(finished, [STATE_VALUES.ON, STATE_VALUES.OFF]);
+});
+
+test('every exchange says the radio was used, so listening can be re-armed', async () => {
+  stubFetch(() => jsonResponse(200, { type: 3 }));
+  const client = clientWith();
+  let transmissions = 0;
+  client.afterTransmit = () => {
+    transmissions += 1;
+  };
+
+  await client.transfer(DEVICE, [stateNote(STATE_VALUES.ON)]);
+  assert.equal(transmissions, 1);
+
+  // Including the ones that failed: the box transmitted, or tried to.
+  stubFetch(() => jsonResponse(401));
+  await assert.rejects(() => client.transfer(DEVICE, [stateNote(STATE_VALUES.ON)]));
+  assert.equal(transmissions, 2);
+});
+
+test('an order is remembered, so its echo is not replayed as a fresh one', async () => {
+  stubFetch(() => jsonResponse(200, { type: 3 }));
+  const client = clientWith();
+
+  await client.transfer(DEVICE, [stateNote(STATE_VALUES.ON)], { uid: 'feature-1' });
+
+  const echo = { channel: DEVICE.channel, thingnotes: { uid: toThingUid('feature-1') } };
+  assert.equal(client.orders.match(echo)?.name, DEVICE.name);
 });
