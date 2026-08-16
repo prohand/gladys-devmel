@@ -438,6 +438,30 @@ The registry is emptied when the integration restarts: "no radio frame since the
 integration started" means "nothing since then", not "never". Press the remote,
 then run the action again.
 
+#### Three silences that look alike
+
+"Nothing heard" covers three very different problems, and the _Heard_ line now
+tells them apart:
+
+| What it says                                    | What is going on                                                                          |
+| ----------------------------------------------- | ----------------------------------------------------------------------------------------- |
+| `no radio frame since the integration started`  | nothing gets in at all: neither the frames of the house nor the echoes of your own orders |
+| `no frame from any other emitter, but N echoes` | the route works — the box simply hears nothing else on the protocol it listens to         |
+| `N frames arrived and were dropped`             | the radio works: it is the frames themselves that were not usable                         |
+
+Hence the test to run when the line says "no radio frame": **drive a device from
+Gladys**, then run the action again. Everything the integration transmits comes
+back to it, so the echo of that order must show up in the counter.
+
+- the echo comes back → the route is fine, and it is the **protocol being
+  listened to** that is not your remote's. Read the _Listening_ line again: it
+  says which channel is bound and which devices it covers. An 868 MHz remote
+  (Profalux, Somfy io) is never heard on channel `1`, which is 433 MHz;
+- the echo does not come back either → the problem is upstream of the radio: the
+  AirSend service posts nothing to the integration. Check the _Listening_ line
+  (did the box accept the subscription?) and the _Local_ line (does the service
+  answer?), then the detailed logs.
+
 ### Detailed logs
 
 Radio is the one part of this integration nobody can watch: a remote that never

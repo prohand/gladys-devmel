@@ -33,6 +33,40 @@ export class HeardChannels {
     this.now = now;
     /** @type {Map<string, object>} keyed by `pid-addr`, insertion-ordered */
     this.entries = new Map();
+    /**
+     * How many events reached the integration at all, whatever became of them.
+     *
+     * The emitters below are only the frames that got as far as being routed.
+     * A registry that is empty says nothing about WHY — a box that hears
+     * nothing and a box whose every frame was dropped on the way look exactly
+     * the same, and they are two completely different problems. These three
+     * counters are what tells them apart.
+     */
+    this.seen = 0;
+    /** Of those, the echoes of our own orders: proof the route back works. */
+    this.own = 0;
+    /** And those dropped before any device could see them, and why. */
+    this.dropped = 0;
+    /** @type {string|null} */
+    this.lastDrop = null;
+  }
+
+  /**
+   * Count one event handed to the integration.
+   *
+   * @param {object} [details]
+   * @param {string} [details.dropped] why it went no further, when it did not
+   * @param {boolean} [details.own] it is the echo of an order we sent
+   */
+  received({ dropped = null, own = false } = {}) {
+    this.seen += 1;
+    if (own) {
+      this.own += 1;
+    }
+    if (dropped) {
+      this.dropped += 1;
+      this.lastDrop = dropped;
+    }
   }
 
   /**
@@ -44,8 +78,11 @@ export class HeardChannels {
    * @param {boolean} [details.claimed] a declared device recognized it
    * @param {boolean} [details.understood] a device acted on it
    * @param {number} [details.timestamp] box timestamp, ms
+   * @param {string} [details.dropped] why the frame went no further, when it
+   *   was dropped on the way: an emitter heard and thrown away is still an
+   *   emitter heard, and hiding it is what makes a noisy install look silent
    */
-  record(channel, { readings = [], claimed = false, understood = false, timestamp } = {}) {
+  record(channel, { readings, claimed, understood = false, timestamp, dropped = null } = {}) {
     const id = Number(channel?.id);
     const source = Number(channel?.source);
     if (!Number.isFinite(id) || !Number.isFinite(source)) {
@@ -53,13 +90,29 @@ export class HeardChannels {
     }
     const key = `${id}-${source}`;
     const known = this.entries.get(key);
-    const entry = known ?? { id, source, frames: 0, claimed, understood, readings: [] };
+    const entry = known ?? {
+      id,
+      source,
+      frames: 0,
+      claimed: claimed ?? false,
+      understood,
+      readings: readings ?? [],
+      dropped: null,
+    };
     entry.frames += 1;
-    entry.claimed = claimed;
+    entry.dropped = dropped;
     // Sticky: a remote that was understood once is understood, even when its
     // next frame carries nothing (a released button, a repeated frame).
     entry.understood = entry.understood || understood;
-    entry.readings = readings;
+    // A frame dropped on the way says nothing about who claims the emitter or
+    // about what it usually carries: it was never routed. Only what the caller
+    // actually established is written down.
+    if (claimed !== undefined) {
+      entry.claimed = claimed;
+    }
+    if (readings !== undefined) {
+      entry.readings = readings;
+    }
     entry.lastSeen = Number.isFinite(Number(timestamp)) ? Number(timestamp) : this.now();
 
     // Re-insert so the map stays ordered by last frame: the emitter the user
@@ -79,6 +132,10 @@ export class HeardChannels {
 
   clear() {
     this.entries.clear();
+    this.seen = 0;
+    this.own = 0;
+    this.dropped = 0;
+    this.lastDrop = null;
   }
 }
 

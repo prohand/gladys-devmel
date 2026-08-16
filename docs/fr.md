@@ -456,6 +456,31 @@ Le registre est vidé au démarrage de l'intégration : « aucune trame radio de
 le démarrage » veut dire « rien depuis », pas « jamais ». Appuyez sur la
 télécommande, puis relancez l'action.
 
+#### Trois silences qui ne se ressemblent pas
+
+« Aucune trame » recouvre trois problèmes très différents, et la ligne
+_Entendu_ les distingue désormais :
+
+| Ce qu'elle dit                                    | Ce qui se passe                                                                       |
+| ------------------------------------------------- | ------------------------------------------------------------------------------------- |
+| `aucune trame radio depuis le démarrage`          | rien n'entre du tout : ni les trames de la maison, ni les échos de vos propres ordres |
+| `aucune trame d'un autre émetteur, mais N échos`  | la route fonctionne — le boîtier n'entend simplement rien sur le protocole écouté     |
+| `N trames reçues et écartées avant tout appareil` | la radio fonctionne : ce sont les trames qui n'étaient pas exploitables               |
+
+D'où le test à faire quand la ligne dit « aucune trame » : **actionnez un
+appareil depuis Gladys**, puis relancez l'action. Tout ce que l'intégration émet
+lui revient, donc l'écho de cet ordre doit apparaître dans le compteur.
+
+- l'écho revient → la route des trames est bonne, et c'est le **protocole
+  écouté** qui n'est pas celui de votre télécommande. Relisez la ligne _Écoute_ :
+  elle dit quel canal est écouté et quels appareils il couvre. Une télécommande
+  868 MHz (Profalux, Somfy io) n'est jamais entendue sur le canal `1`, qui est du
+  433 MHz ;
+- l'écho ne revient pas non plus → le problème est en amont de la radio : le
+  service AirSend ne poste rien à l'intégration. Regardez la ligne _Écoute_ (le
+  boîtier a-t-il accepté l'abonnement ?) et la ligne _Local_ (le service
+  répond-il ?), puis les journaux détaillés.
+
 ### Les journaux détaillés
 
 La radio est la seule partie de l'intégration que personne ne peut observer :

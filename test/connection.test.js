@@ -258,3 +258,48 @@ test('the implicit box follows the service that actually serves the local channe
     0,
   );
 });
+
+test('silence is told apart from a route that carries nothing back', async () => {
+  // "Nothing heard" is three problems wearing the same face. The counters of
+  // the registry are what separates them, and the answer differs every time.
+  const config = normalizeConfig({ spurl: SPURL, devices: DEVICES });
+
+  // Nothing at all: the user is sent to check the route, echo in hand.
+  const silent = new HeardChannels();
+  const nothing = await testConnection(fakeClient(), config, RUNNING, null, silent);
+  assert.match(nothing.en, /no radio frame since the integration started/);
+  assert.match(nothing.en, /drive a device from Gladys: the echo of that order should come back/);
+
+  // Our own orders come back, nobody else's: the route works, the box is
+  // listening to a protocol nothing else speaks.
+  const ownOnly = new HeardChannels();
+  ownOnly.received({ own: true });
+  ownOnly.received({ own: true });
+  const own = await testConnection(fakeClient(), config, RUNNING, null, ownOnly);
+  assert.match(own.en, /no frame from any other emitter, but 2 echoes of our own orders/);
+  assert.match(own.en, /Check the Listening line above/);
+  assert.match(own.fr, /2 échos de vos propres ordres/);
+
+  // Frames arrive and are thrown away: a radio problem, not a configuration one.
+  const noisy = new HeardChannels();
+  noisy.received({ dropped: 'unreliable, graded 2' });
+  const dropped = await testConnection(fakeClient(), config, RUNNING, null, noisy);
+  assert.match(dropped.en, /1 frame arrived and was dropped before any device/);
+  assert.match(dropped.en, /last reason: unreliable, graded 2/);
+  assert.match(dropped.fr, /1 trame reçue et écartée/);
+});
+
+test('an emitter heard and graded too low is listed, with what happened to it', async () => {
+  // It used to be invisible: recorded nowhere, so a box drowning in frames it
+  // grades badly reported exactly the same silence as a box hearing nothing.
+  const config = normalizeConfig({ spurl: SPURL, devices: DEVICES });
+  const heard = new HeardChannels();
+  heard.received({ dropped: 'unreliable, graded 2' });
+  heard.record(WALL_REMOTE, { dropped: 'unreliable, graded 2' });
+
+  const report = await testConnection(fakeClient(), config, RUNNING, null, heard);
+
+  assert.match(report.en, /1 emitter heard: pid 14177, addr 3359265281/);
+  assert.match(report.en, /its last frame was dropped before any device \(unreliable, graded 2\)/);
+  assert.match(report.fr, /sa dernière trame a été écartée avant tout appareil/);
+});

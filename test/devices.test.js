@@ -873,3 +873,64 @@ test('a device reporting where it actually is, is believed even in an echo', asy
   // Inverted shutter: 70 % on the radio is 30 % open in Gladys.
   assert.deepEqual(positionsOf('Sun sail'), [30]);
 });
+
+test('a frame dropped on the way in is counted, and its emitter remembered', async () => {
+  // The registry is what the "Heard" line of the report reads. Leaving the
+  // dropped frames out of it made a box hearing plenty and grading it badly
+  // report exactly the same silence as a box hearing nothing at all.
+  const { gladys, config } = setup();
+  const heard = new HeardChannels();
+
+  await applyEvents(
+    gladys,
+    config,
+    [
+      // Graded too low by the box, but its emitter is named.
+      {
+        type: 3,
+        reliability: 0x2,
+        channel: { id: 300, source: 94311 },
+        thingnotes: { notes: [{ type: NOTE_TYPES.STATE, value: STATE_VALUES.UP }] },
+      },
+      // Not even a channel: nothing to remember, everything to count.
+      { type: 3, reliability: 0x20 },
+    ],
+    heard,
+    new SentOrders(),
+  );
+
+  assert.equal(heard.seen, 2);
+  assert.equal(heard.dropped, 2);
+  assert.match(heard.lastDrop, /no channel/);
+  assert.deepEqual(
+    heard.list().map(({ id, source, dropped }) => ({ id, source, dropped })),
+    [{ id: 300, source: 94311, dropped: 'unreliable, graded 2' }],
+  );
+});
+
+test('the echo of our own order proves the route works, without posing as an emitter', async () => {
+  const { gladys, config } = setup();
+  const heard = new HeardChannels();
+  const orders = new SentOrders();
+  orders.remember('0xabc', deviceNamed(config, 'Kitchen plug'));
+
+  await applyEvents(
+    gladys,
+    config,
+    [
+      {
+        type: 3,
+        reliability: 0x20,
+        channel: { id: 200, source: 2 },
+        thingnotes: { uid: '0xabc', notes: [] },
+      },
+    ],
+    heard,
+    orders,
+  );
+
+  assert.equal(heard.own, 1);
+  assert.equal(heard.seen, 1);
+  // Not an emitter of the house: it is us, and "Attach a remote" must not offer it.
+  assert.deepEqual(heard.list(), []);
+});
