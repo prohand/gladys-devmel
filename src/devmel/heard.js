@@ -222,11 +222,16 @@ export class HeardChannels {
  * action and the connection report, so an emitter is spelled the same way
  * wherever the user meets it: they are comparing the two, pid in hand.
  *
+ * The pid is named whenever the channel table is at hand: a number identifies a
+ * protocol, it does not tell anybody WHICH — and "is pid 14177 the remote on my
+ * wall?" is a question the service can answer and a datasheet usually cannot.
+ *
  * @param {object} entry an entry of {@link HeardChannels.list}
  * @param {number} [now] clock, so a report can be dated in a test
  * @param {string} [language] 'fr', or English
+ * @param {Map<number, object>} [table] the protocol table of the service
  */
-export function describeEmitter(entry, now = Date.now(), language = 'en') {
+export function describeEmitter(entry, now = Date.now(), language = 'en', table = null) {
   // Everything it has been heard saying, not just its last frame: three
   // buttons that all decode to the same order is the answer to "why does my
   // remote change nothing?", and it cannot be read off one frame.
@@ -245,7 +250,9 @@ export function describeEmitter(entry, now = Date.now(), language = 'en') {
     : language === 'fr'
       ? ', aucune note décodée'
       : ', no decoded note';
-  return `pid ${entry.id}, ${describeAddress(entry, language)} (${frames}, ${age}${said})`;
+  const name = table?.get?.(Number(entry.id))?.name;
+  const protocol = name ? `pid ${entry.id} "${name}"` : `pid ${entry.id}`;
+  return `${protocol}, ${describeAddress(entry, language)} (${frames}, ${age}${said})`;
 }
 
 /**

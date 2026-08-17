@@ -104,9 +104,11 @@ export function unclaimedEmitters(config, heard) {
  * itself: the `devices` field is the user's own text, and an integration that
  * rewrites it behind their back is an integration nobody can trust with it.
  *
+ * @param {Map<number, object>} [table] the protocol table, so the emitter is
+ *   named by its protocol and not by a bare number
  * @returns {{en: string, fr: string}} what the Configuration screen shows
  */
-export function attachHeardRemote({ config, device, heard, now = Date.now() }) {
+export function attachHeardRemote({ config, device, heard, now = Date.now(), table = null }) {
   const candidates = unclaimedEmitters(config, heard);
 
   if (!device) {
@@ -125,22 +127,22 @@ export function attachHeardRemote({ config, device, heard, now = Date.now() }) {
   if (!line) {
     return {
       en:
-        `Heard ${describeEmitter(remote, now, 'en')}, but "${device.name}" is not in the device ` +
+        `Heard ${describeEmitter(remote, now, 'en', table)}, but "${device.name}" is not in the device ` +
         'list as it is pasted right now. Save the list again, then run this action.',
       fr:
-        `Télécommande entendue : ${describeEmitter(remote, now, 'fr')}, mais « ${device.name} » ` +
+        `Télécommande entendue : ${describeEmitter(remote, now, 'fr', table)}, mais « ${device.name} » ` +
         "ne figure pas dans la liste d'appareils telle qu'elle est collée. Enregistrez la liste, " +
         'puis relancez cette action.',
     };
   }
 
   const en = [
-    `Heard ${describeEmitter(remote, now, 'en')}.`,
+    `Heard ${describeEmitter(remote, now, 'en', table)}.`,
     `Attached to "${device.name}". Paste this line into the Devices field, then save:`,
     line,
   ];
   const fr = [
-    `Télécommande entendue : ${describeEmitter(remote, now, 'fr')}.`,
+    `Télécommande entendue : ${describeEmitter(remote, now, 'fr', table)}.`,
     `Rattachée à « ${device.name} ». Collez cette ligne dans le champ Appareils, puis enregistrez :`,
     line,
   ];
@@ -196,11 +198,11 @@ export function attachHeardRemote({ config, device, heard, now = Date.now() }) {
 
   const others = candidates.slice(1);
   if (others.length > 0) {
-    const listed = others.map((entry) => describeEmitter(entry, now, 'en')).join('; ');
+    const listed = others.map((entry) => describeEmitter(entry, now, 'en', table)).join('; ');
     en.push(`Other emitters heard, left out: ${listed}.`);
     fr.push(
       `Autres émetteurs entendus, non rattachés : ${others
-        .map((entry) => describeEmitter(entry, now, 'fr'))
+        .map((entry) => describeEmitter(entry, now, 'fr', table))
         .join(' ; ')}.`,
     );
   }

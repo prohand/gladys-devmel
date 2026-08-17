@@ -101,8 +101,19 @@ export async function describeConnection(client, config, service = null) {
  *   it: `{ url, error, plan }` — where the frames are pushed, or why they are
  *   not, and which protocol was subscribed to (see src/devmel/listening.js).
  * @param {object} [heard] the registry of emitters heard (see src/devmel/heard.js)
+ * @param {Map<number, object>} [table] the protocol table of the service, so
+ *   every pid the report prints is named. "pid 14177" identifies a protocol
+ *   without saying which one, and the name is what a user compares to the
+ *   brand written on their remote.
  */
-export async function testConnection(client, config, service = null, listen = null, heard = null) {
+export async function testConnection(
+  client,
+  config,
+  service = null,
+  listen = null,
+  heard = null,
+  table = null,
+) {
   const en = [];
   const fr = [];
 
@@ -143,8 +154,8 @@ export async function testConnection(client, config, service = null, listen = nu
   // internal is a line that helps nobody.
   if (typeof heard?.list === 'function') {
     const now = Date.now();
-    en.push(`Heard: ${describeHeard(config, heard.list(), 'en', now, heard)}`);
-    fr.push(`Entendu : ${describeHeard(config, heard.list(), 'fr', now, heard)}`);
+    en.push(`Heard: ${describeHeard(config, heard.list(), 'en', now, heard, table)}`);
+    fr.push(`Entendu : ${describeHeard(config, heard.list(), 'fr', now, heard, table)}`);
   }
 
   en.push(`Devices: ${summarize(config, 'en')}`);
@@ -334,14 +345,14 @@ const HEARD_SHOWN = 5;
  *   time: "nothing heard" also covers the box that hears everything and has
  *   every frame thrown away on the way in.
  */
-function describeHeard(config, entries, language, now = Date.now(), tally = null) {
+function describeHeard(config, entries, language, now = Date.now(), tally = null, table = null) {
   if (entries.length === 0) {
     return describeSilence(tally, language);
   }
 
   const listed = entries
     .slice(0, HEARD_SHOWN)
-    .map((entry) => describeHeardEmitter(config, entry, now, language))
+    .map((entry) => describeHeardEmitter(config, entry, now, language, table))
     .join(language === 'fr' ? ' ; ' : '; ');
   const more = entries.length > HEARD_SHOWN ? ` (+${entries.length - HEARD_SHOWN})` : '';
   const plural = entries.length > 1 ? 's' : '';
@@ -439,8 +450,11 @@ function dropped(entry, language) {
 }
 
 /** One emitter of the registry, and what the devices made of its frames. */
-function describeHeardEmitter(config, entry, now, language) {
-  return `${describeEmitter(entry, now, language)} — ${describeFate(config, entry, language)}`;
+function describeHeardEmitter(config, entry, now, language, table) {
+  return (
+    `${describeEmitter(entry, now, language, table)} — ` +
+    `${describeFate(config, entry, language)}`
+  );
 }
 
 /**

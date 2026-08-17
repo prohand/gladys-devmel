@@ -581,11 +581,17 @@ many frames each sent, how long ago, what they decoded to, and what the devices
 made of them:
 
 ```text
-Heard: 1 emitter heard: pid 14177, addr 3359265281 (3 frames, last one 4 s ago,
+Heard: 1 emitter heard: pid 14177 "Profalux", addr 3359265281 (3 frames, last one 4 s ago,
 no decoded note) — declared on Living room shutter, but its frames carry no
 order to replay (a protocol the service only partially decodes): the position
 cannot follow.
 ```
+
+The `pid` is **named** whenever the service answered with its protocol table:
+that is the most reliable answer to "which protocol does my remote speak?". The
+brand printed on the plastic does not always say — a shutter sold under one name
+may carry another manufacturer's radio — while the name here is the decoder that
+actually decoded the frame.
 
 Three possible verdicts per emitter:
 

@@ -154,7 +154,7 @@ gladys.onWebhookUpdated(async (info) => {
 // --- Manifest actions: buttons in the Configuration screen -------------------
 gladys.onAction('test_connection', async () => {
   logger.info('Action test_connection');
-  return testConnection(client, config, service, listenState, heardChannels);
+  return testConnection(client, config, service, listenState, heardChannels, await knownChannels());
 });
 
 // Turn the last emitter heard that nobody declares into a device list the user
@@ -166,6 +166,7 @@ gladys.onAction('attach_remote', async (fields) => {
     config,
     device: findDeviceByExternalId(gladys, config, fields.device)?.device,
     heard: heardChannels,
+    table: await knownChannels(),
   });
 });
 

@@ -609,11 +609,17 @@ ancien, avec le nombre de trames, leur ancienneté, ce qu'elles ont donné au
 décodage et ce que les appareils en ont fait :
 
 ```text
-Entendu : 1 émetteur entendu : pid 14177, addr 3359265281 (3 trames, dernière
-il y a 4 s, aucune note décodée) — déclaré sur Baie vitrée, mais ses trames ne
-portent aucun ordre rejouable (protocole seulement partiellement décodé) : la
-position ne peut pas suivre.
+Entendu : 1 émetteur entendu : pid 14177 « Profalux », addr 3359265281 (3 trames,
+dernière il y a 4 s, aucune note décodée) — déclaré sur Baie vitrée, mais ses
+trames ne portent aucun ordre rejouable (protocole seulement partiellement
+décodé) : la position ne peut pas suivre.
 ```
+
+Le `pid` est **nommé** quand le service a répondu sa table de protocoles : c'est
+la réponse la plus fiable à « quel protocole parle ma télécommande ? ». La
+marque inscrite sur le boîtier plastique ne le dit pas toujours — un volet vendu
+sous une marque française peut embarquer la radio d'un autre fabricant — alors
+que le nom donné ici est celui du décodeur qui a réellement décodé la trame.
 
 Trois verdicts possibles pour un émetteur :
 
