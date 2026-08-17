@@ -236,6 +236,41 @@
       ]
     },
     {
+      "key": "find_protocol",
+      "label": {
+        "en": "Find a radio protocol",
+        "fr": "Chercher un protocole radio"
+      },
+      "timeout_seconds": 30,
+      "fields": [
+        {
+          "key": "find_protocol_intro",
+          "type": "section",
+          "label": {
+            "en": "Which pid to listen to",
+            "fr": "Quel pid écouter"
+          },
+          "description": {
+            "en": "A box listens to a protocol, not to a band: hearing an 868 MHz remote means naming its protocol by its pid. Search the protocols the AirSend service knows by brand or by pid, and put the one you want in the Listening channel field.",
+            "fr": "Un boîtier écoute un protocole, pas une bande : entendre une télécommande 868 MHz, c'est nommer son protocole par son pid. Cherchez par marque ou par pid parmi les protocoles connus du service AirSend, et mettez celui qui convient dans le champ Canal d'écoute."
+          }
+        },
+        {
+          "key": "search",
+          "type": "string",
+          "label": {
+            "en": "Brand or pid",
+            "fr": "Marque ou pid"
+          },
+          "placeholder": {
+            "en": "somfy, nice, 25455…",
+            "fr": "somfy, nice, 25455…"
+          },
+          "required": false
+        }
+      ]
+    },
+    {
       "key": "identify",
       "label": {
         "en": "Identify a device",

@@ -33,6 +33,7 @@ import { CallbackServer } from './src/devmel/callback.js';
 import { indexChannels, planListening } from './src/devmel/listening.js';
 import { heardChannels } from './src/devmel/heard.js';
 import { attachHeardRemote } from './src/devmel/remotes.js';
+import { findProtocol } from './src/devmel/protocols.js';
 
 const gladys = new GladysIntegration();
 const client = new AirSendClient();
@@ -165,6 +166,19 @@ gladys.onAction('attach_remote', async (fields) => {
     config,
     device: findDeviceByExternalId(gladys, config, fields.device)?.device,
     heard: heardChannels,
+  });
+});
+
+// Which pid to put in the "Listening channel" field. A box listens to a
+// protocol, not to a band, so hearing an 868 MHz remote means naming its
+// protocol — and the only list of those was inside the service until now.
+gladys.onAction('find_protocol', async (fields) => {
+  logger.info(`Action find_protocol <- ${fields.search ?? ''}`);
+  return findProtocol({
+    table: await knownChannels(),
+    config,
+    plan: listenState.plan,
+    search: fields.search,
   });
 });
 

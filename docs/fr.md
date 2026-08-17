@@ -377,6 +377,43 @@ L'intégration le dit désormais dans ses logs et dans **Tester la connexion**.
 Deux façons d'en sortir : déclarer un appareil sur le protocole en question, ou
 renseigner son `pid` dans le champ **Canal d'écoute**.
 
+#### « Écouter en 868 MHz » : ça n'existe pas, et voici ce qui existe
+
+Un boîtier n'écoute pas une **bande**, il écoute un **protocole** : il n'y a pas
+d'interrupteur « 868 MHz » à activer, et le canal `1` n'est pas « le 433 » par
+opposition à un « le 868 » qui existerait ailleurs — c'est un décodeur parmi
+plus de cent quatre-vingts, celui qui couvre les protocoles 433 MHz génériques.
+Écouter du 868 MHz, c'est donc **nommer un protocole 868 MHz par son `pid`**.
+Trois chemins, du plus simple au dernier recours :
+
+1. **déclarez l'appareil** dans la liste **Appareils** (l'export airsend.cloud
+   contient son `pid`) : la déduction s'en charge, le champ **Canal d'écoute**
+   reste vide. C'est ce qui marche dans neuf cas sur dix ;
+2. **rattachez sa télécommande** (`remotes`) : elle émet pour de bon, et en cas
+   d'égalité c'est son protocole que la déduction retient — pas celui du volet,
+   qui ne parle jamais ;
+3. **forcez le `pid`** dans **Canal d'écoute** quand le protocole n'est pas
+   encore déclaré. Pour le trouver, l'action **Chercher un protocole radio**
+   interroge le service AirSend et cherche par marque ou par `pid` :
+
+```text
+2 protocoles pour « somfy » :
+- pid 25455 — Somfy RTS (décodé par lui-même, déclaré sur « Baie vitree »)
+- pid 26848 — Somfy io (décodé par lui-même)
+Mettez le pid voulu dans le champ Canal d'écoute…
+```
+
+Elle dit aussi comment chaque protocole est décodé — par lui-même, par le canal
+`1` générique 433 MHz, ou seulement partiellement — et lequel est écouté en ce
+moment.
+
+Reste le cas sans issue, qu'il vaut mieux connaître : le boîtier n'a qu'**une**
+radio, donc pour entendre une télécommande dont vous ignorez le protocole, il
+faut déjà écouter ce protocole. Il n'y a pas de balayage possible. Si son `pid`
+n'est écrit nulle part — ni dans l'appli AirSend, ni dans l'export —, il ne
+reste qu'à essayer les candidats de votre marque un par un, en appuyant sur la
+télécommande après chaque essai et en relançant **Tester la connexion**.
+
 Le **code tournant** de ces télécommandes, lui, n'est pas ce qui vous empêche de
 recevoir les trames. Il protège l'_émission_ : pour commander un volet Profalux,
 le boîtier AirSend doit avoir été appairé au moteur, comme une télécommande
@@ -668,6 +705,10 @@ votre clé Open API dans le bloc **Webhooks** de l'écran de configuration.
 - **Rattacher une télécommande** — appuyez sur la télécommande, choisissez
   l'appareil qu'elle pilote : l'action écrit la liste d'appareils à recoller,
   télécommande comprise (voir « La télécommande murale »).
+- **Chercher un protocole radio** — cherche par marque ou par `pid` parmi les
+  protocoles connus du service AirSend, dit comment chacun est décodé et lequel
+  est écouté : c'est là qu'on trouve le `pid` à mettre dans **Canal d'écoute**
+  (voir « Écouter en 868 MHz »).
 - **Identifier un appareil** — choisissez un appareil, un PING lui est envoyé.
   Tous les équipements 433 MHz n'y réagissent pas.
 
