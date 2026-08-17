@@ -209,10 +209,47 @@ test('an order is repeated on the air, the way a remote repeats it', async () =>
 
   await client.transfer(DEVICE, [stateNote(STATE_VALUES.ON)]);
 
+  // Answered as soon as it is on the air: the repeats are a second chance for a
+  // frame lost in the noise, and nothing in Gladys has to wait for them.
+  assert.equal(calls.length, 1);
+
+  await client.idle();
   assert.equal(calls.length, 3);
   // The same order, word for word: a repeat is not a second command.
   const bodies = calls.map((call) => call.options.body);
   assert.equal(new Set(bodies).size, 1);
+});
+
+test('the repeats keep their place in front of the next command', async () => {
+  stubFetch(() => jsonResponse(200, { type: 3 }));
+  const client = clientWith({ command_repeat: 1 });
+
+  // Exactly what a user does: open, then close. Answering before the repeats
+  // must not let the second order overtake the first one on the air.
+  await client.transfer(DEVICE, [stateNote(STATE_VALUES.OPEN)]);
+  await client.transfer(DEVICE, [stateNote(STATE_VALUES.CLOSE)]);
+  await client.idle();
+
+  assert.deepEqual(
+    calls.map((call) => JSON.parse(call.options.body).thingnotes.notes[0].value),
+    [STATE_VALUES.OPEN, STATE_VALUES.OPEN, STATE_VALUES.CLOSE, STATE_VALUES.CLOSE],
+  );
+});
+
+test('a repeat that fails changes nothing: the order did go out', async () => {
+  let answered = 0;
+  stubFetch(() => {
+    answered += 1;
+    // The first emission is carried; every attempt after it is refused.
+    return jsonResponse(answered === 1 ? 200 : 401, { type: 3 });
+  });
+  const client = clientWith({ command_repeat: 2 });
+
+  const result = await client.transfer(DEVICE, [stateNote(STATE_VALUES.ON)]);
+  await client.idle();
+
+  assert.equal(result.transport, 'local');
+  assert.equal(client.busy, false);
 });
 
 test('an order whose meaning depends on how often it is heard is sent once', async () => {
@@ -233,6 +270,7 @@ test('a device can ask for more repeats than the rest of the house', async () =>
   const client = clientWith({ command_repeat: 0 });
 
   await client.transfer({ ...DEVICE, repeat: 2 }, [levelNote(40)]);
+  await client.idle();
 
   assert.equal(calls.length, 3);
 });

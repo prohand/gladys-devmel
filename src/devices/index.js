@@ -225,7 +225,7 @@ export async function applyEvents(
       // line per press of a neighbour's gate remote is noise — but a user
       // hunting a remote that never shows up must not have to enable debug
       // logs to learn that something WAS heard.
-      if (isFirstFrame(dropped)) {
+      if (registry.announce(dropped, 'dropped')) {
         logger.info(`${line} ${adviseOnDropped(event, unusable)}`);
       } else {
         logger.debug(line);
@@ -251,12 +251,19 @@ export async function applyEvents(
       // Worth saying out loud: this is what the wall remote of an equipment
       // already in the list looks like — same protocol, its own address — and
       // the pair below is exactly what `remotes` takes to attach it.
-      logger.info(
+      //
+      // Once per emitter, like every line here: a remote held down emits a
+      // frame every half second, and a log that scrolls is a log nobody reads.
+      const line =
         `Heard a frame on a channel no device declares: ${describeChannel(event.channel)}` +
-          `${readings.length === 0 ? ' (no note the service could decode)' : ''}` +
-          '. Add it to the "remotes" of the device it drives to follow it, or run the ' +
-          '"Attach a remote" action, which writes that line for you.',
-      );
+        `${readings.length === 0 ? ' (no note the service could decode)' : ''}` +
+        '. Add it to the "remotes" of the device it drives to follow it, or run the ' +
+        '"Attach a remote" action, which writes that line for you.';
+      if (registry.announce(heard, 'undeclared')) {
+        logger.info(line);
+      } else {
+        logger.debug(line);
+      }
       continue;
     }
 
@@ -277,7 +284,7 @@ export async function applyEvents(
         'service could decode: this protocol is only partially decoded (a rolling-code 868 MHz ' +
         'remote, typically), so its frames prove the radio works and carry no order to replay. ' +
         'Nothing to publish.';
-      if (isFirstFrame(heard)) {
+      if (registry.announce(heard, 'mute')) {
         logger.info(line);
       } else {
         logger.debug(line);
@@ -303,6 +310,20 @@ export async function applyEvents(
             heard.understood = true;
           }
           applied += 1;
+          // The one line that says it WORKS, once per emitter and per
+          // configuration. Everything else here reports a frame going nowhere,
+          // and a user who attached a remote and reads a log full of silence
+          // has no way to tell "it is not heard" from "it is heard, followed,
+          // and the shutter simply did not move". They are not the same
+          // problem, and only this line tells them apart.
+          const followed =
+            `Heard ${describeChannel(event.channel)} -> "${device.name}" followed it: ` +
+            `${describeReadings(readings)}.`;
+          if (registry.announce(heard, `followed:${device.platformId}`)) {
+            logger.info(followed);
+          } else {
+            logger.debug(followed);
+          }
           continue;
         }
         // The frame reached its device and moved nothing. Silence here is the
@@ -310,12 +331,16 @@ export async function applyEvents(
         // attached, and the user has just attached it. So say what the frame
         // decoded to — that is what tells "wrong device declared" apart from
         // "this protocol carries no order Gladys can replay".
-        logger.info(
+        const unfollowed =
           `Heard ${describeChannel(event.channel)} for "${device.name}", but it says nothing ` +
-            `this device can follow: ${describeReadings(readings)}. A rolling-code 868 MHz ` +
-            'remote (Profalux, Somfy io) is only partially decoded: its frames prove the radio ' +
-            'works, they carry no order to replay.',
-        );
+          `this device can follow: ${describeReadings(readings)}. A rolling-code 868 MHz ` +
+          'remote (Profalux, Somfy io) is only partially decoded: its frames prove the radio ' +
+          'works, they carry no order to replay.';
+        if (registry.announce(heard, `unfollowed:${device.platformId}`)) {
+          logger.info(unfollowed);
+        } else {
+          logger.debug(unfollowed);
+        }
       } catch (err) {
         logger.error(`Could not publish the states of "${device.name}"`, err);
       }
@@ -403,15 +428,6 @@ function adviseOnDropped(event, reason) {
     'The box is not confident in what it decoded (a remote at the edge of its range, a noisy ' +
     'band). Turn on "Accept unreliable frames" to use it anyway.'
   );
-}
-
-/**
- * Is this the first frame the registry ever saw from that emitter? What is
- * worth an info line once is noise on every repeat. An unremembered frame (no
- * registry entry) counts as a first one: silence is the worse mistake.
- */
-function isFirstFrame(heard) {
-  return !heard || Number(heard.frames) <= 1;
 }
 
 /** The devices a frame was routed to, quoted as the user named them. */

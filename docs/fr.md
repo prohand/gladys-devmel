@@ -192,6 +192,14 @@ Seuls les ordres qui veulent dire la même chose deux fois sont répétés — O
 Stop, Fermer, une position. Un TOGGLE de bouton poussoir, lui, part une seule
 fois : entendu deux fois, il revient d'où il part.
 
+Ces répétitions ne font **pas attendre l'interface** : Gladys est servie dès que
+l'ordre est sur l'air, et les répétitions continuent derrière, à leur place dans
+la file. C'est une seconde chance pour une trame perdue dans le bruit, pas une
+partie de la réponse — et le réabonnement à l'écoute, qui a lui aussi besoin de
+la radio, attend maintenant que la file soit vide au lieu de se glisser entre
+deux ordres. C'est ce qui faisait qu'un « Fermer » cliqué juste après un
+« Ouvrir » mettait quelques secondes à partir.
+
 ### Gladys ne se prend pas pour la télécommande
 
 Tout ce que l'intégration émet lui revient : le boîtier répond à l'ordre, et
@@ -312,6 +320,33 @@ l'écoute.
 Pour vérifier, cliquez sur **Tester la connexion** : la ligne _Écoute_ dit quel
 protocole est écouté, quels appareils il couvre, et vers où les trames sont
 poussées — ou pourquoi elles ne le sont pas.
+
+Quand deux protocoles sont déclarés à égalité — un volet d'un côté, la
+télécommande murale qu'on lui a rattachée de l'autre —, c'est **celui qui émet**
+qui l'emporte. Un volet, un interrupteur, une lampe ne parlent pas : on leur
+parle. Une télécommande déclarée dans `remotes` est là, elle, précisément pour
+être entendue : c'est donc elle que le boîtier écoute.
+
+#### Un protocole où personne ne parle
+
+Si aucun appareil déclaré sur le canal écouté n'émet de lui-même, l'abonnement
+est en place, la route fonctionne, et il n'arrivera jamais rien : le boîtier
+n'entendra que l'écho des ordres envoyés par Gladys. C'est l'état normal d'une
+maison où l'on n'a déclaré que des volets — et c'est exactement à quoi ressemble
+une écoute qui ne marche pas, d'où la ligne que l'intégration écrit désormais
+dans ses logs au démarrage, et dans la ligne _Écoute_ de **Tester la
+connexion** :
+
+```text
+Aucun de ces appareils n'émet de lui-même : volets, interrupteurs et lampes
+reçoivent les ordres, ils ne parlent pas. Sur ce canal le boîtier n'entendra que
+l'écho des ordres de Gladys.
+```
+
+La sortie est la même que partout ailleurs sur cette page : rattachez la
+télécommande murale qui pilote l'équipement (voir plus bas). Elle a sa propre
+adresse, elle émet pour de bon, et une fois déclarée c'est elle que la déduction
+écoute.
 
 ### Le 868 MHz et le code tournant
 
@@ -467,6 +502,46 @@ arrivée, et il n'y a que trois raisons possibles :
   radio est bruyante, et le boîtier note chaque trame qu'il décode. Activez
   **Journaux détaillés (debug)** : ces trames-là y sont tracées, avec leur
   `pid`, leur `addr` et la raison de leur abandon.
+
+#### Ce qu'un appui écrit dans les logs
+
+Chacune de ces lignes est dite **une fois par émetteur** : une télécommande
+maintenue appuyée émet une trame toutes les demi-secondes, et un journal qui
+défile est un journal que personne ne lit. Le compteur est **réarmé à chaque
+enregistrement de la configuration** : si vous avez changé quelque chose, c'est
+que ça ne marchait pas, et l'appui qui suit est justement celui que vous
+guettez.
+
+Après un enregistrement, un appui écrit donc exactement une ligne, et laquelle
+dit où la trame s'est arrêtée :
+
+```text
+Heard pid 25455, addr 94311 -> "Baie vitrée" followed it: level 0 (down).
+Heard a frame on a channel no device declares: pid 14177, addr 3359265281.
+Heard pid 14177, addr 3359265281 for "Baie vitrée", but no note the service could decode
+Ignored a radio frame (unreliable, graded 2): pid 25455, addr 94311, carrying level 100 (up).
+```
+
+La première est la seule qui dise que **ça marche** — et elle vaut d'être lue
+avant d'accuser l'intégration quand un volet n'a pas bougé : la trame a été
+entendue, routée et suivie, ce qui reste se joue entre l'ordre et le moteur.
+Aucune ligne du tout signifie qu'aucune trame n'est arrivée : voir les trois
+raisons ci-dessus.
+
+#### Est-ce bien ma télécommande ?
+
+Un émetteur entendu n'est pas la preuve que c'est celui que vous avez en main :
+le 433 MHz est une bande publique, et le voisinage y est aussi. Appuyez cinq
+fois sur la vôtre, puis lancez **Tester la connexion** et lisez le compteur de
+l'émetteur dans la ligne _Entendu_ :
+
+```text
+pid 14177, addr 3359265281 (5 trames, dernière il y a 3 s, aucune note décodée)
+```
+
+Cinq trames et « il y a 3 s » : c'est la vôtre. Un compteur qui ne bouge pas
+pendant que vous appuyez est celui de quelqu'un d'autre, et le rattacher revient
+à déclarer la télécommande d'un inconnu sur votre volet.
 
 ### Ce que le boîtier a entendu
 
