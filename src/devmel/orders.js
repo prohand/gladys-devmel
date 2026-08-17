@@ -23,10 +23,18 @@
 //   by channel  the box hearing itself reports a plain radio frame on the
 //               device's own channel, with no uid of ours to recognize it by —
 //               so an order sent to that very device seconds ago is what
-//               identifies it.
+//               identifies it;
+//   by voice    and if it comes back later than that, it is still ours. A
+//               channel Gladys transmits ON is the address the box emits from:
+//               nothing else in the house speaks with that voice.
+//
+// That last test is the one that holds. The window above is a guess about how
+// fast a box repeats itself, and a box that takes its time turns every order
+// Gladys sends into an order Gladys believes it heard — a shutter driven to
+// 40 %, then sent to the top by the echo of its own UP, twenty seconds later.
 //
 // A wall remote emits from ANOTHER address (that is what makes it another
-// emitter), so neither test ever swallows it: what they suppress is the
+// emitter), so none of the three ever swallows it: what they suppress is the
 // integration hearing itself.
 // -----------------------------------------------------------------------------
 
@@ -65,6 +73,16 @@ export class SentOrders {
     this.now = now;
     /** @type {Map<string, object>} keyed by the thing uid, insertion-ordered */
     this.entries = new Map();
+    /**
+     * The channels Gladys transmits on, keyed `pid-addr`: our own voice.
+     *
+     * Never pruned, unlike the orders above — it is not a memory of what was
+     * said, it is the list of addresses we say things from, and that does not
+     * expire. One entry per device driven since the integration started.
+     *
+     * @type {Map<string, object>}
+     */
+    this.voices = new Map();
   }
 
   /**
@@ -96,6 +114,17 @@ export class SentOrders {
     this.entries.set(key, entry);
     while (this.entries.size > this.limit) {
       this.entries.delete(this.entries.keys().next().value);
+    }
+
+    // And remember the voice it was said with, for as long as the integration
+    // runs: an echo that comes back after the window above is still ours.
+    const voice = channelKey(device.channel);
+    if (voice) {
+      this.voices.delete(voice);
+      this.voices.set(voice, { name: entry.name, platformId: entry.platformId, channel: voice });
+      while (this.voices.size > this.limit) {
+        this.voices.delete(this.voices.keys().next().value);
+      }
     }
     return entry;
   }
@@ -130,7 +159,8 @@ export class SentOrders {
         return entry;
       }
     }
-    return null;
+    // Later than the window, and still on a channel we transmit on: ours.
+    return this.voices.get(channelKey(channel)) ?? null;
   }
 
   /** Forget the orders nothing can echo any more. */
@@ -145,7 +175,22 @@ export class SentOrders {
 
   clear() {
     this.entries.clear();
+    this.voices.clear();
   }
+}
+
+/**
+ * A channel as a key: the pid/addr pair, and nothing else. The counter, the
+ * `mac` and the `seed` change from one frame to the next — matching on them
+ * would make every frame a stranger.
+ */
+function channelKey(channel) {
+  const id = Number(channel?.id);
+  if (!Number.isFinite(id)) {
+    return null;
+  }
+  const source = channel?.source;
+  return `${id}-${source === undefined || source === null ? '' : source}`;
 }
 
 /**

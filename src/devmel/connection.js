@@ -346,8 +346,29 @@ function describeHeard(config, entries, language, now = Date.now(), tally = null
   const more = entries.length > HEARD_SHOWN ? ` (+${entries.length - HEARD_SHOWN})` : '';
   const plural = entries.length > 1 ? 's' : '';
   return language === 'fr'
-    ? `${entries.length} émetteur${plural} entendu${plural} : ${listed}${more}.`
-    : `${entries.length} emitter${plural} heard: ${listed}${more}.`;
+    ? `${entries.length} émetteur${plural} entendu${plural} : ${listed}${more}.${echoes(tally, language)}`
+    : `${entries.length} emitter${plural} heard: ${listed}${more}.${echoes(tally, language)}`;
+}
+
+/**
+ * The echoes of our own orders, counted apart from the emitters above.
+ *
+ * They are not emitters — Gladys is not a remote — but they are the proof that
+ * the frames have a route back into the integration, and that proof used to be
+ * printed only when the list was empty. Someone reading "1 emitter heard" needs
+ * it just as much: it is what tells "my remote is unheard" from "nothing gets
+ * in at all".
+ */
+function echoes(tally, language) {
+  const own = Number(tally?.own) || 0;
+  if (own === 0) {
+    return '';
+  }
+  return language === 'fr'
+    ? ` Plus ${own} écho${own > 1 ? 's' : ''} de vos propres ordres : la route des trames ` +
+        'fonctionne.'
+    : ` Plus ${own} echo${own > 1 ? 'es' : ''} of your own orders: the route the frames take ` +
+        'works.';
 }
 
 /**
@@ -458,13 +479,42 @@ function describeFate(config, entry, language) {
   }
   const claimed = names(claimants);
   if (entry.understood) {
-    return language === 'fr' ? `suivi par ${claimed}` : `followed by ${claimed}`;
+    return language === 'fr'
+      ? `suivi par ${claimed}${describeOneNote(entry, language)}`
+      : `followed by ${claimed}${describeOneNote(entry, language)}`;
   }
   return language === 'fr'
     ? `déclaré sur ${claimed}, mais ses trames ne portent aucun ordre rejouable (protocole ` +
         'seulement partiellement décodé) : la position ne peut pas suivre'
     : `declared on ${claimed}, but its frames carry no order to replay (a protocol the service ` +
         'only partially decodes): the position cannot follow';
+}
+
+/**
+ * Several frames, one and the same order.
+ *
+ * "Followed by Baie vitrée" reads as a success, and it is one — the frame
+ * arrives, the device acts on it. But a remote whose every press decodes to the
+ * same note moves nothing anybody can see: a STOP replayed on a shutter that is
+ * not moving changes a state and not one percent of position. That is a decoder
+ * that only half understands the remote, and from the sofa it is
+ * indistinguishable from a remote that was never attached.
+ *
+ * Said as the check to run rather than as a verdict: a user who has only ever
+ * pressed one button has one note too, and the answer is the same either way.
+ */
+function describeOneNote(entry, language) {
+  if (entry.frames < 3 || entry.notes?.size !== 1) {
+    return '';
+  }
+  const note = [...entry.notes][0];
+  return language === 'fr'
+    ? `, mais toutes ses trames portent le même ordre (${note}) : appuyez sur Ouvrir, puis sur ` +
+        'Fermer, et relancez cette action. Si la note ne change pas, le service AirSend ne ' +
+        'décode pas les boutons de cette télécommande — la position ne pourra pas suivre'
+    : `, but every one of its frames carries the same order (${note}): press Open, then Close, ` +
+        'and run this action again. If the note does not change, the AirSend service does not ' +
+        'decode the buttons of that remote — the position cannot follow';
 }
 
 /**

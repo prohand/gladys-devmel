@@ -22,6 +22,13 @@ import { describeReadings } from './notes.js';
 /** How many distinct emitters are remembered, oldest evicted first. */
 export const DEFAULT_LIMIT = 32;
 
+/**
+ * How many distinct notes are kept per emitter. A remote has a handful of
+ * buttons; past that it is a sensor reporting a changing value, and listing
+ * every temperature it has ever sent would say nothing at all.
+ */
+export const DISTINCT_NOTES = 4;
+
 export class HeardChannels {
   /**
    * @param {object} [options]
@@ -107,6 +114,12 @@ export class HeardChannels {
       claimed: claimed ?? false,
       understood,
       readings: readings ?? [],
+      // Every DISTINCT note this emitter has been heard saying, in the order
+      // they first turned up. A remote has several buttons, and the last frame
+      // alone cannot tell "the box decodes this remote" from "the box turns
+      // every button of it into the same order" — which is the difference
+      // between a remote Gladys can follow and one it can only acknowledge.
+      notes: new Set(),
       dropped: null,
     };
     entry.frames += 1;
@@ -122,6 +135,10 @@ export class HeardChannels {
     }
     if (readings !== undefined) {
       entry.readings = readings;
+      const said = describeReadings(readings);
+      if (said && entry.notes.size < DISTINCT_NOTES) {
+        entry.notes.add(said);
+      }
     }
     entry.lastSeen = Number.isFinite(Number(timestamp)) ? Number(timestamp) : this.now();
 
@@ -210,16 +227,21 @@ export class HeardChannels {
  * @param {string} [language] 'fr', or English
  */
 export function describeEmitter(entry, now = Date.now(), language = 'en') {
-  const notes = describeReadings(entry.readings);
+  // Everything it has been heard saying, not just its last frame: three
+  // buttons that all decode to the same order is the answer to "why does my
+  // remote change nothing?", and it cannot be read off one frame.
+  const notes =
+    entry.notes?.size > 0 ? [...entry.notes].join(language === 'fr' ? ' ; ' : '; ') : '';
   const frames =
     language === 'fr'
       ? `${entry.frames} trame${entry.frames > 1 ? 's' : ''}`
       : `${entry.frames} frame${entry.frames > 1 ? 's' : ''}`;
   const age = describeAge(now - entry.lastSeen, language);
+  const plural = entry.notes?.size > 1;
   const said = notes
     ? language === 'fr'
-      ? `, note : ${notes}`
-      : `, note: ${notes}`
+      ? `, note${plural ? 's' : ''} : ${notes}`
+      : `, note${plural ? 's' : ''}: ${notes}`
     : language === 'fr'
       ? ', aucune note décodée'
       : ', no decoded note';

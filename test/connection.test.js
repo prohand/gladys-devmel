@@ -255,6 +255,73 @@ test('test_connection tells an attached remote that moves nothing from one that 
   assert.match(workingReport.fr, /suivi par Baie vitree/);
 });
 
+test('test_connection lists every button a remote has been heard pressing', async () => {
+  // Three presses, three notes — or the same note three times, which is what a
+  // remote the service decodes only halfway looks like. The last frame alone
+  // cannot tell those apart, and that is the whole question being asked here.
+  const config = normalizeConfig({ spurl: SPURL, devices: DEVICES_WITH_REMOTE });
+  const heard = new HeardChannels();
+  heard.record(WALL_REMOTE, {
+    readings: [{ kind: 'level', value: 100, command: 'up' }],
+    claimed: true,
+    understood: true,
+  });
+  heard.record(WALL_REMOTE, {
+    readings: [{ kind: 'state', value: 'stop', command: 'stop' }],
+    claimed: true,
+    understood: true,
+  });
+
+  const report = await testConnection(fakeClient(), config, RUNNING, null, heard);
+
+  assert.match(report.en, /notes: level 100 \(up\); state stop \(stop\)/);
+  assert.match(report.fr, /notes : level 100 \(up\) ; state stop \(stop\)/);
+});
+
+test('test_connection tells a remote whose every press says the same thing', async () => {
+  // Followed, understood, and nothing moves: a STOP replayed on a shutter that
+  // is not moving changes a state and not one percent of position.
+  const config = normalizeConfig({ spurl: SPURL, devices: DEVICES_WITH_REMOTE });
+  const heard = new HeardChannels();
+  for (let press = 0; press < 3; press += 1) {
+    heard.record(WALL_REMOTE, {
+      readings: [{ kind: 'state', value: 'stop', command: 'stop' }],
+      claimed: true,
+      understood: true,
+    });
+  }
+
+  const report = await testConnection(fakeClient(), config, RUNNING, null, heard);
+
+  assert.match(report.en, /every one of its frames carries the same order \(state stop \(stop\)\)/);
+  assert.match(report.fr, /toutes ses trames portent le même ordre/);
+  // One press proves nothing: no verdict until there is something to compare.
+  const once = new HeardChannels();
+  once.record(WALL_REMOTE, {
+    readings: [{ kind: 'state', value: 'stop', command: 'stop' }],
+    claimed: true,
+    understood: true,
+  });
+  const early = await testConnection(fakeClient(), config, RUNNING, null, once);
+  assert.doesNotMatch(early.en, /the same order/);
+});
+
+test('test_connection keeps the proof that our own orders come back', async () => {
+  // The echoes are not emitters, so they are nowhere in the list above — and
+  // they are the difference between "my remote is unheard" and "nothing gets
+  // in at all", which is worth a few words even when something WAS heard.
+  const config = normalizeConfig({ spurl: SPURL, devices: DEVICES_WITH_REMOTE });
+  const heard = new HeardChannels();
+  heard.record(WALL_REMOTE, { readings: [], claimed: true });
+  heard.received({ own: true });
+  heard.received({ own: true });
+
+  const report = await testConnection(fakeClient(), config, RUNNING, null, heard);
+
+  assert.match(report.en, /Plus 2 echoes of your own orders: the route the frames take works\./);
+  assert.match(report.fr, /Plus 2 échos de vos propres ordres : la route des trames fonctionne\./);
+});
+
 test('test_connection counts the emitters it does not spell out', async () => {
   const config = normalizeConfig({ spurl: SPURL, devices: DEVICES });
   const heard = new HeardChannels();
