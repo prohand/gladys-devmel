@@ -307,7 +307,19 @@ decodes which protocol, and subscribes the box to the one your devices use.
 Leave the **Listening channel** field empty.
 
 Fill it in only to listen to something else: the `pid` of a protocol you have
-not declared yet, `1` for generic listening, or `0` to turn listening off.
+not declared yet, or `0` to turn listening off.
+
+**`1` and an empty field mean the same thing: "deduce it".** That is the value
+the field defaulted to before the deduction existed, and it is read as such — a
+`1` does not ask for generic 433 MHz listening. Generic listening is what the
+deduction falls back to when no radio device is declared, and nothing else. The
+field is a **text** field rather than a number for that very reason: a number
+field cannot be left empty, it makes you type something, and that something
+then reads as a choice nobody made.
+
+Either way, the _Listening_ line of **Test the connection** says which channel
+was actually chosen — that line is the authority, not what is typed in the
+field.
 
 To check, click **Test the connection**: the _Listening_ line says which
 protocol is listened to, which devices it covers, and where the frames are

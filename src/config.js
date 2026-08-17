@@ -441,6 +441,12 @@ function toBoolean(value, fallback) {
  *                    that finds nothing better falls back to it anyway;
  *   - anything else  that protocol, whatever the device list says.
  *
+ * The manifest declares it as a TEXT field for one reason: a number field in
+ * the Gladys form cannot be left empty. It makes the user type something, and
+ * what they type is then read as a decision they never took — which is how a
+ * user ends up believing they asked for 433 MHz listening on an 868 MHz house.
+ * Empty has to be typeable, because empty is the answer for almost everyone.
+ *
  * @returns {number|null} the forced channel, 0 to disable, null to deduce
  */
 function toListenChannel(value) {

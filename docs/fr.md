@@ -320,8 +320,19 @@ canal décode quel protocole, et abonne le boîtier à celui de vos appareils.
 Laissez le champ **Canal d'écoute** vide.
 
 Renseignez-le seulement pour écouter autre chose : le `pid` d'un protocole que
-vous n'avez pas encore déclaré, `1` pour l'écoute générique, ou `0` pour couper
-l'écoute.
+vous n'avez pas encore déclaré, ou `0` pour couper l'écoute.
+
+**`1` et un champ vide veulent dire la même chose : « déduis-le ».** C'est la
+valeur que le champ prenait par défaut avant que la déduction n'existe, et elle
+est lue comme telle — un `1` ne demande donc pas l'écoute générique 433 MHz.
+Cette dernière est ce sur quoi la déduction se rabat quand aucun appareil radio
+n'est déclaré, et rien d'autre. Le champ est d'ailleurs un champ **texte**, pas
+un nombre, précisément pour qu'il puisse rester vide : un champ numérique oblige
+à taper quelque chose, et ce quelque chose se lit ensuite comme un choix que
+personne n'a fait.
+
+Dans tous les cas, la ligne _Écoute_ de **Tester la connexion** dit le canal
+réellement retenu — c'est elle qui fait foi, pas ce qui est tapé dans le champ.
 
 Pour vérifier, cliquez sur **Tester la connexion** : la ligne _Écoute_ dit quel
 protocole est écouté, quels appareils il couvre, et vers où les trames sont

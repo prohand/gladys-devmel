@@ -118,18 +118,20 @@
     },
     {
       "key": "listen_channel",
-      "type": "number",
+      "type": "string",
       "label": {
         "en": "Listening channel",
         "fr": "Canal d'écoute"
       },
       "description": {
-        "en": "Leave empty: the box then listens to the radio protocol of the devices you declared, which is what pushes what it hears (wall remotes, sensors) to Gladys. Fill it only to listen to another protocol, by its pid: 1 is generic 433 MHz listening, and no 868 MHz remote (Profalux, Somfy io) is heard on it. 0 disables listening.",
-        "fr": "Laissez vide : le boîtier écoute alors le protocole radio des appareils que vous avez déclarés, ce qui remonte vers Gladys ce qu'il entend (télécommandes murales, capteurs). Ne le renseignez que pour écouter un autre protocole, par son pid : 1 correspond à l'écoute générique 433 MHz, sur laquelle aucune télécommande 868 MHz (Profalux, Somfy io) n'est entendue. 0 désactive l'écoute."
+        "en": "Which radio protocol the box listens to, by its pid. Leave it empty — or 1, which means the same thing — and it is deduced from the devices you declared: that is what pushes to Gladys what the box hears (wall remotes, sensors). \"Test the connection\" says on its Listening line which protocol was chosen and what it covers. Fill in a pid to listen to another protocol, 0 to turn listening off. With no radio device declared at all, the deduction falls back to generic 433 MHz listening, which is deaf to 868 MHz protocols (Profalux, Somfy io).",
+        "fr": "Le protocole radio écouté par le boîtier, par son pid. Laissez le champ vide — ou 1, qui veut dire la même chose — et il est déduit des appareils que vous avez déclarés : c'est ce qui remonte vers Gladys ce que le boîtier entend (télécommandes murales, capteurs). « Tester la connexion » indique sur sa ligne Écoute le protocole retenu et ce qu'il couvre. Renseignez un pid pour écouter un autre protocole, 0 pour désactiver l'écoute. Sans aucun appareil radio déclaré, la déduction se rabat sur l'écoute générique 433 MHz, sourde aux protocoles 868 MHz (Profalux, Somfy io)."
       },
-      "required": false,
-      "min": 0,
-      "max": 65535
+      "placeholder": {
+        "en": "empty = deduced from your devices",
+        "fr": "vide = déduit de vos appareils"
+      },
+      "required": false
     },
     {
       "key": "command_repeat",
