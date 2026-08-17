@@ -135,6 +135,15 @@ function describeProtocol(channel, config, plan, language) {
       language === 'fr' ? `déclaré sur ${users.join(', ')}` : `declared on ${users.join(', ')}`,
     );
   }
+  // The one protocol whose pid does not select it: `1` in that field has always
+  // meant "deduce it", so the generic decoder is asked for by name instead.
+  if (id === GENERIC_433_CHANNEL) {
+    parts.push(
+      language === 'fr'
+        ? 'à demander en tapant « générique », pas 1'
+        : 'ask for it by typing "generic", not 1',
+    );
+  }
   return `- pid ${id} — ${name} (${parts.join(', ')})`;
 }
 

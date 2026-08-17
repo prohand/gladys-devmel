@@ -82,6 +82,13 @@ test('a protocol carried by the generic 433 MHz decoder says so', () => {
   assert.match(report.fr, /décodé par le canal 1, générique 433 MHz/);
 });
 
+test('the generic decoder says how to select it, since its pid does not', () => {
+  const report = findProtocol({ table: TABLE, config: configWith(), search: 'generic' });
+
+  assert.match(report.en, /pid 1 — Generic 433MHz \(.*ask for it by typing "generic", not 1\)/);
+  assert.match(report.fr, /à demander en tapant « générique », pas 1/);
+});
+
 test('a search with nothing to show says what to search by', () => {
   const report = findProtocol({ table: TABLE, config: configWith(), search: 'zigbee' });
 

@@ -331,6 +331,12 @@ un nombre, précisément pour qu'il puisse rester vide : un champ numérique obl
 à taper quelque chose, et ce quelque chose se lit ensuite comme un choix que
 personne n'a fait.
 
+Une conséquence : le décodeur générique 433 MHz ne peut pas être demandé par son
+pid, puisque ce pid est `1`. Il se demande donc **par son nom** — tapez
+`générique` (ou `generic`) dans le champ. C'est un test qui vaut le coup pour
+une télécommande 433 MHz que son propre protocole ne décode qu'à moitié : le
+décodeur générique est une autre façon de lire les mêmes trames.
+
 Dans tous les cas, la ligne _Écoute_ de **Tester la connexion** dit le canal
 réellement retenu — c'est elle qui fait foi, pas ce qui est tapé dans le champ.
 

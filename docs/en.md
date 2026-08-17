@@ -317,6 +317,12 @@ field is a **text** field rather than a number for that very reason: a number
 field cannot be left empty, it makes you type something, and that something
 then reads as a choice nobody made.
 
+One consequence: the generic 433 MHz decoder cannot be asked for by its pid,
+since that pid is `1`. It is asked for **by name** instead — type `generic` in
+the field. That is a test worth running for a 433 MHz remote its own protocol
+only half decodes: the generic decoder is another way of reading the same
+frames.
+
 Either way, the _Listening_ line of **Test the connection** says which channel
 was actually chosen — that line is the authority, not what is typed in the
 field.
