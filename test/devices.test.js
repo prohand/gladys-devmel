@@ -438,26 +438,85 @@ test('an emitter nobody declares is remembered, for the action to attach it', as
   assert.equal(emitter.claimed, false);
 });
 
-test('a frame dropped before that is still traceable on the debug channel', async () => {
+test('a frame dropped again is said once, then left on the debug channel', async () => {
   const { gladys, config } = setup();
+  const heard = new HeardChannels();
+  // Graded too low by the box: never published, but heard — twice, because a
+  // remote at the edge of its range is pressed again, and again.
+  const frame = {
+    type: 3,
+    reliability: 0x2,
+    channel: { id: 300, source: 94311 },
+    thingnotes: { notes: [{ type: NOTE_TYPES.STATE, value: STATE_VALUES.UP }] },
+  };
   const lines = captureLogs(
-    async () =>
-      applyEvents(gladys, config, [
-        // Graded too low by the box: never published, but heard.
-        {
-          type: 3,
-          reliability: 0x2,
-          channel: { id: 300, source: 94311 },
-          thingnotes: { notes: [{ type: NOTE_TYPES.STATE, value: STATE_VALUES.UP }] },
-        },
-      ]),
+    async () => applyEvents(gladys, config, [frame, frame], heard),
     'debug',
   );
 
   assert.equal(await lines.result, 0);
-  assert.equal(lines.of('INFO').length, 0);
+  assert.equal(lines.of('INFO').length, 1);
+  assert.match(lines.of('INFO')[0], /unreliable, graded 2.*pid 300, addr 94311/);
   assert.equal(lines.of('DEBUG').length, 1);
   assert.match(lines.of('DEBUG')[0], /unreliable, graded 2.*pid 300, addr 94311/);
+});
+
+test('a configuration change gives every emitter its info line back', async () => {
+  const { gladys, config } = setup();
+  const heard = new HeardChannels();
+  const frame = {
+    type: 3,
+    reliability: 0x20,
+    channel: { id: 14177, source: 3359265281 },
+    thingnotes: { notes: [{ type: NOTE_TYPES.STATE, value: STATE_VALUES.UP }] },
+  };
+
+  const first = captureLogs(async () => applyEvents(gladys, config, [frame, frame], heard));
+  await first.result;
+  // Said once, then quiet: a remote held down emits for as long as it is held.
+  assert.equal(first.of('INFO').length, 1);
+
+  // The user just changed something to fix exactly what that line described.
+  // The next press is the one they are watching for, and it has to speak.
+  heard.reannounce();
+  const after = captureLogs(async () => applyEvents(gladys, config, [frame], heard));
+  await after.result;
+  assert.equal(after.of('INFO').length, 1);
+  assert.match(after.of('INFO')[0], /pid 14177, addr 3359265281/);
+});
+
+test('a remote that drives its device says so, once', async () => {
+  const { gladys } = setup();
+  const heard = new HeardChannels();
+  // The same shutter, with its wall remote attached: another address on the
+  // protocol of the device it drives.
+  const config = normalizeConfig({
+    devices: JSON.stringify({
+      devices: {
+        'Living room shutter': { type: 4098, channel: { id: 300, source: 3 }, remotes: [94311] },
+      },
+    }),
+    spurl: 'sp://pass@[fe80::1]?rhost=192.168.1.50',
+  });
+  const frame = {
+    type: 3,
+    reliability: 0x20,
+    channel: { id: 300, source: 94311 },
+    thingnotes: { notes: [{ type: NOTE_TYPES.STATE, value: STATE_VALUES.DOWN }] },
+  };
+
+  const lines = captureLogs(
+    async () => applyEvents(gladys, config, [frame, frame], heard),
+    'debug',
+  );
+
+  assert.equal(await lines.result, 2);
+  // The one line that says listening WORKS: without it, a remote that is heard,
+  // routed and followed logs exactly as much as one nobody ever hears.
+  assert.equal(lines.of('INFO').length, 1);
+  assert.match(lines.of('INFO')[0], /pid 300, addr 94311 -> "Living room shutter" followed it/);
+  assert.match(lines.of('INFO')[0], /level 0 \(down\)/);
+  assert.ok(lines.of('DEBUG').some((line) => /followed it/.test(line)));
 });
 
 test('transports report the channel each device would use', () => {

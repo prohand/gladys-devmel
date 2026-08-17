@@ -112,6 +112,27 @@ test('test_connection names the protocol it listens to, and the devices it cover
   assert.match(report.en, /channel 25455 "Somfy RTS" \(deduced from your devices\)/);
   assert.match(report.en, /Devices heard: Baie vitree\./);
   assert.match(report.fr, /Appareils entendus : Baie vitree\./);
+  // "Devices heard" on a shutter-only protocol is a promise this report has to
+  // qualify: a shutter is heard the way a letterbox is heard.
+  assert.match(report.en, /None of them emits by itself/);
+  assert.match(report.fr, /Aucun de ces appareils n'émet de lui-même/);
+});
+
+test('test_connection stops promising to hear a device that never speaks', async () => {
+  // The same shutter with its wall remote attached: something on that protocol
+  // does emit now, so the caveat above has no reason to be repeated.
+  const config = normalizeConfig({
+    spurl: SPURL,
+    devices: JSON.stringify({
+      devices: [{ name: 'Baie vitree', type: 4098, pid: 25455, addr: 8295, remotes: [94311] }],
+    }),
+  });
+  const listen = { url: 'http://127.0.0.1:33864/', error: null, plan: planListening(config) };
+
+  const report = await testConnection(fakeClient(), config, RUNNING, listen);
+
+  assert.match(report.en, /Devices heard: Baie vitree\./);
+  assert.doesNotMatch(report.en, /None of them emits by itself/);
 });
 
 test('test_connection says which devices a forced protocol leaves out', async () => {

@@ -34,6 +34,11 @@ export class HeardChannels {
     /** @type {Map<string, object>} keyed by `pid-addr`, insertion-ordered */
     this.entries = new Map();
     /**
+     * Which configuration the once-only lines were said for (see `announce`).
+     * Bumped by `reannounce()`, never read anywhere else.
+     */
+    this.generation = 0;
+    /**
      * How many events reached the integration at all, whatever became of them.
      *
      * The emitters below are only the frames that got as far as being routed.
@@ -128,6 +133,53 @@ export class HeardChannels {
       this.entries.delete(this.entries.keys().next().value);
     }
     return entry;
+  }
+
+  /**
+   * Is this the first time we say THIS about that emitter, under the
+   * configuration in force?
+   *
+   * What is worth an info line once is noise on every repeat: a remote pressed
+   * twice a day must not fill the logs with a fact the user has already been
+   * told. So each line is said once per emitter — and said again after every
+   * configuration change (see `reannounce`), because the user who just attached
+   * a remote is testing exactly the frames the throttle had gone quiet about.
+   *
+   * @param {?object} entry an entry of this registry, as `record` returns it
+   * @param {string} [kind] which line: an emitter can be worth several, and
+   *   dropping the others because the first one was said is how "heard and
+   *   claimed by nobody" hides "heard, claimed, and understood by nobody"
+   * @returns {boolean} true when the caller should say it out loud
+   */
+  announce(entry, kind = 'heard') {
+    // A frame nothing remembered (an unreadable channel) has no throttle to
+    // obey: silence is the worse mistake of the two.
+    if (!entry) {
+      return true;
+    }
+    if (entry.announcedAt !== this.generation) {
+      entry.announcedAt = this.generation;
+      entry.announced = new Set();
+    }
+    if (entry.announced.has(kind)) {
+      return false;
+    }
+    entry.announced.add(kind);
+    return true;
+  }
+
+  /**
+   * Say the once-only lines again, for the configuration that is now in force.
+   *
+   * A user changes their configuration BECAUSE something is not working, and
+   * the lines that would tell them whether it worked have all been said already:
+   * the emitter is known, so its next frame goes to debug, and the screen they
+   * are watching stays empty. Every configuration update re-arms them — one
+   * line per emitter, again — so the very next press of the remote says where
+   * its frame went this time.
+   */
+  reannounce() {
+    this.generation += 1;
   }
 
   /** Every emitter heard, most recent first. */

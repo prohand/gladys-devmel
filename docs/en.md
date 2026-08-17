@@ -184,6 +184,13 @@ Only orders that mean the same thing twice are repeated — Open, Stop, Close, a
 position. A push button TOGGLE goes out once: heard twice, it is back where it
 started.
 
+Those repeats do **not** make the interface wait: Gladys is answered as soon as
+the order is on the air, and the repeats keep going behind it, in their place in
+the queue. They are a second chance for a frame lost in the noise, not part of
+the answer — and re-arming the listener, which needs the radio too, now waits
+for the queue to empty instead of slipping between two orders. That is what made
+a "Close" clicked right after an "Open" take a few seconds to go out.
+
 ### Gladys does not mistake itself for the remote
 
 Everything the integration transmits comes back to it: the box answers the
@@ -299,6 +306,30 @@ not declared yet, `1` for generic listening, or `0` to turn listening off.
 To check, click **Test the connection**: the _Listening_ line says which
 protocol is listened to, which devices it covers, and where the frames are
 pushed — or why they are not.
+
+When two protocols are declared equally — a shutter on one side, the wall remote
+attached to it on the other — the one that **emits** wins. A shutter, a switch,
+a lamp do not talk: they are talked to. A remote declared in `remotes` is there
+precisely to be heard, so that is what the box is subscribed to.
+
+#### A protocol nobody speaks on
+
+If nothing declared on the channel being listened to ever emits by itself, the
+subscription is armed, the route works, and nothing will ever come through it:
+the box will only hear the echo of Gladys' own orders. That is the normal state
+of a house where only shutters are declared — and it looks exactly like a
+listener that never armed, so the integration says it out loud, in its logs at
+startup and in the _Listening_ line of **Test the connection**:
+
+```text
+Nothing declared on channel 25455 emits by itself: shutters, switches and lamps
+are talked to, they do not talk. The box will hear the echo of Gladys own orders
+and nothing else.
+```
+
+The way out is the same one as everywhere else on this page: attach the wall
+remote that drives the equipment (see below). It has its own address, it is a
+real emitter, and once declared it is what the deduction listens to.
 
 ### 868 MHz and rolling code
 
@@ -449,6 +480,43 @@ still nothing, the frame never arrived, and there are only three reasons why:
   noisy, and the box grades every frame it decodes. Turn on **Detailed logs
   (debug)**: those frames are traced there too, with their `pid`, their `addr`
   and the reason they went no further.
+
+#### What a press writes in the logs
+
+Each of those lines is said **once per emitter** — a remote held down emits a
+frame every half second, and a log that scrolls is a log nobody reads. The
+counter is re-armed **every time you save the configuration**: you changed
+something because it did not work, and the very next press is the one you are
+watching for.
+
+So after saving, one press writes exactly one line, and which line it is says
+where the frame stopped:
+
+```text
+Heard pid 25455, addr 94311 -> "Baie vitrée" followed it: level 0 (down).
+Heard a frame on a channel no device declares: pid 14177, addr 3359265281.
+Heard pid 14177, addr 3359265281 for "Baie vitrée", but no note the service could decode
+Ignored a radio frame (unreliable, graded 2): pid 25455, addr 94311, carrying level 100 (up).
+```
+
+The first one is the only one that says it works — and it is worth reading twice
+before blaming the integration for a shutter that did not move: the frame was
+heard, routed and followed, so what is left is between the order and the motor.
+No line at all means no frame arrived; see the three reasons above.
+
+#### Is that really my remote?
+
+An emitter heard is not proof it is the one in your hand: 433 MHz is a public
+band, and the neighbourhood is on it too. Press yours five times, then run
+**Test the connection** and read the counter of the emitter under _Heard_:
+
+```text
+pid 14177, addr 3359265281 (5 frames, last one 3 s ago, no decoded note)
+```
+
+Five frames and "3 s ago" is your remote. A counter that does not move while you
+press is somebody else's, and attaching it declares a stranger's remote on your
+shutter.
 
 ### What the box actually heard
 

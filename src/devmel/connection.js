@@ -233,10 +233,11 @@ function describeCoverage(plan, language) {
           'protocol, or fill in its pid as the listening channel.';
   }
   const heard = names(plan.covered);
+  const extra = `${describeEchoOnly(plan, language)}${describeUnheardRemotes(plan, language)}`;
   if (plan.uncovered.length === 0) {
     return language === 'fr'
-      ? ` Appareils entendus : ${heard}.${describeUnheardRemotes(plan, language)}`
-      : ` Devices heard: ${heard}.${describeUnheardRemotes(plan, language)}`;
+      ? ` Appareils entendus : ${heard}.${extra}`
+      : ` Devices heard: ${heard}.${extra}`;
   }
   const deaf = names(plan.uncovered);
   if (plan.covered.length === 0) {
@@ -248,9 +249,34 @@ function describeCoverage(plan, language) {
   }
   return language === 'fr'
     ? ` Appareils entendus : ${heard}. Le boîtier n'écoute qu'un protocole à la ` +
-        `fois : ${deaf} ne seront pas entendus.${describeUnheardRemotes(plan, language)}`
+        `fois : ${deaf} ne seront pas entendus.${extra}`
     : ` Devices heard: ${heard}. The box listens to one protocol at a time: ` +
-        `${deaf} will not be heard.${describeUnheardRemotes(plan, language)}`;
+        `${deaf} will not be heard.${extra}`;
+}
+
+/**
+ * "Devices heard" is a promise this line has to qualify.
+ *
+ * A shutter is heard the way a letterbox is heard: it is on the protocol being
+ * listened to, and it never says anything. Nothing but the echo of Gladys' own
+ * orders will ever come back on such a channel, and a report that stops at
+ * "Devices heard: Baie vitree" reads as "everything is fine" to someone whose
+ * wall remote has never once shown up.
+ */
+function describeEchoOnly(plan, language) {
+  if (!plan.echoOnly) {
+    return '';
+  }
+  return language === 'fr'
+    ? " Aucun de ces appareils n'émet de lui-même : volets, interrupteurs et lampes reçoivent " +
+        'les ordres, ils ne parlent pas. Sur ce canal le boîtier n’entendra que l’écho des ordres ' +
+        'de Gladys. Une télécommande murale, elle, a son propre protocole et sa propre adresse : ' +
+        'appuyez dessus, puis relancez cette action — si rien n’apparaît dans « Entendu », c’est ' +
+        "que le boîtier n'écoute pas SON protocole."
+    : ' None of them emits by itself: shutters, switches and lamps are talked to, they do not ' +
+        'talk. On this channel the box will only ever hear the echo of Gladys own orders. A wall ' +
+        'remote has its own protocol and its own address: press it, then run this action again — ' +
+        'if nothing shows up under "Heard", the box is not listening to ITS protocol.';
 }
 
 /**

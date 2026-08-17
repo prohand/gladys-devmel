@@ -74,6 +74,10 @@ export class AirSendClient {
     this.orders = orders;
     /** Tail of the radio queue: one operation at a time, in order. */
     this.queue = Promise.resolve();
+    /** Radio operations queued or in flight: the box is not free while > 0. */
+    this.pending = 0;
+    /** Emissions still going out behind an order already answered. */
+    this.trailing = Promise.resolve();
     /** When the box last had the radio to itself. */
     this.lastRadioAt = 0;
     /**
@@ -127,6 +131,12 @@ export class AirSendClient {
    *     long as the button is held. A TOGGLE, which does NOT mean the same
    *     thing twice, never is.
    *
+   * The caller is answered as soon as the order is ON THE AIR: the repeats keep
+   * going behind it, on the same queue and in the same order. They are a second
+   * chance for a frame lost in the noise, not part of the answer — and making
+   * Gladys wait for them is a second of "the interface takes a moment to react"
+   * bought for nothing.
+   *
    * @param {object} device normalized Devmel device (see src/config.js)
    * @param {Array<object>} notes notes to transfer
    * @param {object} [options]
@@ -145,28 +155,61 @@ export class AirSendClient {
       });
     }
 
-    const emissions = 1 + this.repeatsFor(device, notes, options);
-    let answer = null;
-    for (let emission = 0; emission < emissions; emission += 1) {
-      try {
-        const result = await this.emit(device, notes, options);
-        answer = answer ?? result;
-      } catch (err) {
-        if (emission === 0) {
-          logger.warn(`Local transfer failed for "${device.name}": ${err.message}`);
-          this.rememberTransport(device, DEVICE_TRANSPORTS.UNREACHABLE);
-          this.notifyTransmit();
-          throw err;
-        }
-        // A repeat is a second chance, not a promise: the order did go out, and
-        // failing to say it again changes nothing the user can see.
-        logger.debug(`Could not repeat the order sent to "${device.name}": ${err.message}`);
-        break;
-      }
-      this.rememberTransport(device, DEVICE_TRANSPORTS.LOCAL);
+    const repeats = this.repeatsFor(device, notes, options);
+    let answer;
+    try {
+      answer = await this.emit(device, notes, options);
+    } catch (err) {
+      logger.warn(`Local transfer failed for "${device.name}": ${err.message}`);
+      this.rememberTransport(device, DEVICE_TRANSPORTS.UNREACHABLE);
+      this.notifyTransmit();
+      throw err;
     }
+    this.rememberTransport(device, DEVICE_TRANSPORTS.LOCAL);
     this.notifyTransmit();
+    this.repeat(device, notes, options, repeats);
     return { transport: DEVICE_TRANSPORTS.LOCAL, degraded: false, notes: answer?.notes ?? [] };
+  }
+
+  /**
+   * Say an order again, behind the answer already given.
+   *
+   * Queued straight away, so it keeps its place in front of whatever the user
+   * does next — the radio order stays the same, only the waiting moved. A
+   * repeat that fails is dropped in silence: the order did go out, and failing
+   * to say it a second time changes nothing anyone can see.
+   */
+  repeat(device, notes, options, times) {
+    if (times <= 0) {
+      return;
+    }
+    this.trailing = this.trailing.then(async () => {
+      for (let emission = 0; emission < times; emission += 1) {
+        try {
+          await this.emit(device, notes, options);
+        } catch (err) {
+          logger.debug(`Could not repeat the order sent to "${device.name}": ${err.message}`);
+          return;
+        }
+        this.rememberTransport(device, DEVICE_TRANSPORTS.LOCAL);
+        this.notifyTransmit();
+      }
+    });
+  }
+
+  /** Is the box in the middle of something? (An order queued, a repeat going out.) */
+  get busy() {
+    return this.pending > 0;
+  }
+
+  /**
+   * Resolves once everything queued has left, repeats included. Nothing in the
+   * integration waits for this — a radio order is fire-and-forget by nature —
+   * but a test that asserts what went on the air has to know when to look.
+   */
+  async idle() {
+    await this.trailing;
+    await this.queue;
   }
 
   /**
@@ -213,15 +256,20 @@ export class AirSendClient {
    * box one at a time, in the order the user gave them.
    */
   radio(operation) {
+    this.pending += 1;
     const run = this.queue.then(async () => {
-      const idle = this.lastRadioAt + RADIO_GAP_MS - this.now();
-      if (idle > 0) {
-        await this.sleep(idle);
-      }
       try {
-        return await operation();
+        const idle = this.lastRadioAt + RADIO_GAP_MS - this.now();
+        if (idle > 0) {
+          await this.sleep(idle);
+        }
+        try {
+          return await operation();
+        } finally {
+          this.lastRadioAt = this.now();
+        }
       } finally {
-        this.lastRadioAt = this.now();
+        this.pending -= 1;
       }
     });
     // The tail must stay resolved: a failed operation cannot be allowed to

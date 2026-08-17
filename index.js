@@ -217,6 +217,11 @@ async function initialize(rawConfig) {
   // First, so that everything this initialization logs already obeys the level
   // the user just asked for — the frames of a freshly armed listener included.
   applyLogLevel(config);
+  // A configuration is changed because something did not work, and the frames
+  // that would say whether it works now belong to emitters the logs have
+  // already had their say about. Re-arm those once-only lines: the next press
+  // of the remote is the one the user is watching for.
+  heardChannels.reannounce();
   // The protocol table belongs to the service the configuration points at.
   channelTable = new Map();
 
@@ -316,6 +321,7 @@ async function startListening() {
   }
 
   await bindBoxes(callbackUrl);
+  announceBlindSpots(listenState.plan);
   listenTimer = setInterval(() => {
     bindBoxes(radioCallbackUrl(), { renewal: true }).catch((err) =>
       logger.error('Could not renew the radio listener', err),
@@ -323,6 +329,45 @@ async function startListening() {
   }, LISTEN_REFRESH_MS);
   // Do not hold the event loop open just to renew a subscription.
   listenTimer.unref?.();
+}
+
+/**
+ * What the protocol just bound will NOT bring back.
+ *
+ * The box has one radio and listens to one protocol at a time, so every choice
+ * of channel is also a list of things that will never be heard again. Until now
+ * that list only existed in the "Test the connection" report — a screen nobody
+ * opens while everything looks fine — and its absence is what makes a perfectly
+ * armed listener indistinguishable from a broken one.
+ */
+function announceBlindSpots(plan) {
+  if (!plan?.enabled || !listenState.url) {
+    return;
+  }
+  for (const device of plan.uncovered) {
+    logger.warn(
+      `"${device.name}" speaks protocol ${device.channel?.id}, not the ${plan.channel} the box ` +
+        'listens to: nothing it emits will be heard. One radio, one protocol at a time.',
+    );
+  }
+  for (const { device, remote } of plan.unheardRemotes) {
+    logger.warn(
+      `The remote declared on "${device.name}" (pid ${remote.id}) speaks another protocol than ` +
+        `the ${plan.channel} the box listens to: pressing it will do nothing in Gladys. Fill in ` +
+        `${remote.id} as the listening channel to hear it instead.`,
+    );
+  }
+  if (plan.echoOnly) {
+    // The silence this explains is total: the box is listening, the route works,
+    // and nothing will ever come through it — because nothing declared on that
+    // protocol ever speaks first.
+    logger.info(
+      `Nothing declared on channel ${plan.channel} emits by itself: shutters, switches and lamps ` +
+        'are talked to, they do not talk. The box will hear the echo of Gladys own orders and ' +
+        'nothing else. A wall remote has its own protocol and its own address: press it, then ' +
+        'run "Attach a remote" — if nothing turns up, the box is not listening to ITS protocol.',
+    );
+  }
 }
 
 /**
@@ -375,20 +420,34 @@ async function bindBoxes(callbackUrl, { renewal = false } = {}) {
  * what has to be armed again is the state the LAST of them left the box in.
  */
 function scheduleRebind() {
-  if (rebindTimer || !listenState.plan?.enabled) {
+  if (!listenState.plan?.enabled || !radioCallbackUrl()) {
     return;
   }
-  const callbackUrl = radioCallbackUrl();
-  if (!callbackUrl) {
-    return;
+  // Pushed back by every transmission, so a burst is followed by ONE bind,
+  // after the last of them. Keeping the first schedule instead let the bind
+  // land in the middle of the burst — between an order and the STOP that ends
+  // a timed travel, or between the two buttons a user presses in a row, where
+  // it costs the second order everything the box takes to subscribe.
+  if (rebindTimer) {
+    clearTimeout(rebindTimer);
   }
-  rebindTimer = setTimeout(() => {
-    rebindTimer = null;
-    bindBoxes(radioCallbackUrl(), { renewal: true }).catch((err) =>
-      logger.debug(`Could not re-arm the radio listener after a command: ${err.message}`),
-    );
-  }, REBIND_AFTER_COMMAND_MS);
+  rebindTimer = setTimeout(rebindNow, REBIND_AFTER_COMMAND_MS);
   rebindTimer.unref?.();
+}
+
+/** Re-arm the listener, unless the radio has better things to do right now. */
+function rebindNow() {
+  rebindTimer = null;
+  // An order queued behind a subscription is an order the user waits for: the
+  // box has one radio, and a bind holds it for as long as it takes. Listening
+  // can wait — it has nobody watching a slider.
+  if (client.busy) {
+    scheduleRebind();
+    return;
+  }
+  bindBoxes(radioCallbackUrl(), { renewal: true }).catch((err) =>
+    logger.debug(`Could not re-arm the radio listener after a command: ${err.message}`),
+  );
 }
 
 function stopListening() {

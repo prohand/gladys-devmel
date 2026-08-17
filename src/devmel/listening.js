@@ -29,6 +29,21 @@
 import { DEVICE_TYPES, GENERIC_433_CHANNEL } from '../config.js';
 
 /**
+ * Device types that speak on their own.
+ *
+ * The distinction is invisible in the configuration and decides everything the
+ * listener is worth: a radio sensor wakes up and emits, a wall remote declared
+ * in `remotes` is pressed by a hand. A shutter, a switch, a lamp are talked TO —
+ * the only frame ever heard on their own channel is the echo of an order Gladys
+ * itself sent, which the driver then throws away as its own (see orders.js).
+ *
+ * So a protocol where nothing but shutters are declared is a protocol where the
+ * box hears Gladys and no one else. That is a listener that works perfectly and
+ * reports nothing, and it is what "my remote never shows up" is made of.
+ */
+const EMITTING_TYPES = new Set([DEVICE_TYPES.SENSOR]);
+
+/**
  * Index the `GET /channels/` answer by channel id.
  *
  * @param {Array<object>} channels
@@ -71,7 +86,8 @@ export function channelName(channelId, table) {
  *   devices themselves
  * @returns {{
  *   enabled: boolean, channel: ?number, name: ?string, deduced: boolean,
- *   fallback: boolean, covered: Array<object>, uncovered: Array<object>,
+ *   fallback: boolean, echoOnly: boolean, covered: Array<object>,
+ *   uncovered: Array<object>,
  *   unheardRemotes: Array<{device: object, remote: object}>
  * }}
  */
@@ -85,6 +101,7 @@ export function planListening(config, table = new Map()) {
       name: null,
       deduced: false,
       fallback: false,
+      echoOnly: false,
       covered: [],
       uncovered: [],
       unheardRemotes: [],
@@ -111,6 +128,11 @@ export function planListening(config, table = new Map()) {
     // is silent for exactly the same reason as a box listening to the wrong
     // protocol, and neither looks any different from a remote nobody presses.
     fallback: deduced && devices.length === 0,
+    // Nothing declared on that channel ever emits: the box will hear Gladys
+    // talking to itself, and nothing else. Not an error — it is what a house
+    // with nothing but shutters declared looks like — but it is the whole
+    // difference between "listening is armed" and "listening reports something".
+    echoOnly: devices.length > 0 && !emitsOn(channel, devices, table),
     covered,
     uncovered,
     // A device counts as covered as soon as ONE of its channels is heard, so a
@@ -143,9 +165,14 @@ function listenableDevices(config) {
 
 /**
  * The protocol shared by the most declared devices — one radio, one protocol,
- * so the majority is the best a single bind can do. Ties are settled by the
- * lowest channel, which keeps the choice stable across restarts, and a
- * configuration with no radio device at all falls back to generic 433 MHz: it
+ * so the majority is the best a single bind can do.
+ *
+ * A tie is settled by what actually emits on each channel: between the protocol
+ * of a shutter, which will only ever echo Gladys back, and the protocol of the
+ * wall remote declared next to it, the remote is the one worth hearing. That is
+ * the whole reason `remotes` was written down. Ties that no emitter settles fall
+ * back to the lowest channel, which keeps the choice stable across restarts, and
+ * a configuration with no radio device at all falls back to generic 433 MHz: it
  * is the only useful thing to listen to before anything is declared.
  */
 function deduceChannel(devices, table) {
@@ -159,7 +186,32 @@ function deduceChannel(devices, table) {
   if (counts.size === 0) {
     return GENERIC_433_CHANNEL;
   }
-  return [...counts.entries()].sort((a, b) => b[1] - a[1] || a[0] - b[0])[0][0];
+  const emitting = new Set(
+    [...counts.keys()].filter((channel) => emitsOn(channel, devices, table)),
+  );
+  return [...counts.entries()].sort(
+    (a, b) => b[1] - a[1] || Number(emitting.has(b[0])) - Number(emitting.has(a[0])) || a[0] - b[0],
+  )[0][0];
+}
+
+/**
+ * Is anything that emits by itself declared on this channel? A radio sensor, or
+ * a remote someone presses — as opposed to the equipment they drive, which is
+ * only ever talked to.
+ */
+function emitsOn(channel, devices, table) {
+  return devices.some((device) =>
+    emitterChannelsOf(device).some((own) => decoderOf(own.id, table) === Number(channel)),
+  );
+}
+
+/** The channels of a device that carry frames somebody else emitted. */
+function emitterChannelsOf(device) {
+  const remotes = (device.remotes ?? []).filter((remote) => Number(remote?.id) > 0);
+  if (!EMITTING_TYPES.has(device.rtype)) {
+    return remotes;
+  }
+  return Number(device.channel?.id) > 0 ? [device.channel, ...remotes] : remotes;
 }
 
 /** Is this device (or one of its remotes) heard on that channel? */

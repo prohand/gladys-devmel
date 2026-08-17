@@ -92,6 +92,55 @@ test('a tie is settled the same way on every restart', () => {
   assert.equal(reversed.channel, 25455);
 });
 
+test('a tie between a device and a remote goes to the one that emits', () => {
+  // One shutter, one wall remote on another protocol: two channels, one vote
+  // each. The shutter is talked to and never answers; the remote is the only
+  // thing in the house that will ever say anything on the air, so it wins.
+  const config = configWith([{ ...SHUTTER, remotes: [{ pid: 14177, addr: 3359265281 }] }]);
+
+  const plan = planListening(config, TABLE);
+
+  assert.equal(plan.channel, 14177);
+  assert.equal(plan.echoOnly, false);
+  assert.deepEqual(plan.unheardRemotes, []);
+  // The shutter is heard through its remote, so it is not left behind.
+  assert.deepEqual(
+    plan.covered.map((device) => device.name),
+    ['Baie vitree'],
+  );
+});
+
+test('a majority still wins over a lone remote, and says what it costs', () => {
+  const config = configWith([
+    { ...SHUTTER, remotes: [{ pid: 14177, addr: 3359265281 }] },
+    OTHER_SHUTTER,
+  ]);
+
+  const plan = planListening(config, TABLE);
+
+  assert.equal(plan.channel, 25455);
+  assert.deepEqual(
+    plan.unheardRemotes.map(({ remote }) => remote.id),
+    [14177],
+  );
+});
+
+test('a protocol nothing emits on is a listener that only hears Gladys', () => {
+  // A shutter answers nothing: bound to its protocol, the box hears the echo of
+  // our own orders and not one frame more. Said out loud, because it looks
+  // exactly like a listener that never armed.
+  assert.equal(planListening(configWith([SHUTTER]), TABLE).echoOnly, true);
+  // A radio sensor speaks on its own, and a declared remote is pressed by hand.
+  assert.equal(planListening(configWith([CHEAP_SENSOR]), TABLE).echoOnly, false);
+  assert.equal(
+    planListening(configWith([{ ...SHUTTER, remotes: [94311] }]), TABLE).echoOnly,
+    false,
+  );
+  // Nothing declared at all is the generic-433 default, which `fallback` covers.
+  assert.equal(planListening(normalizeConfig(), TABLE).echoOnly, false);
+  assert.equal(planListening(configWith([SHUTTER], { listen_channel: 0 }), TABLE).echoOnly, false);
+});
+
 test('a wall remote declared on a device is heard like the device itself', () => {
   const config = configWith([{ ...LIGHT, remotes: [{ pid: 25455, addr: 94311 }] }]);
 
