@@ -7,7 +7,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
-import { DEFAULT_CONFIG } from '../src/config.js';
+import { DEFAULT_CONFIG, normalizeConfig } from '../src/config.js';
 
 const manifest = JSON.parse(
   await readFile(new URL('../gladys-assistant-integration.json', import.meta.url), 'utf8'),
@@ -73,6 +73,23 @@ test('every field uses a type the store accepts', () => {
       assert.equal(field.type, 'number', `field "${field.key}": min/max are number-only`);
     }
   }
+});
+
+test('the listening channel can actually be left empty', () => {
+  // A number field in the Gladys form cannot be cleared: it makes the user type
+  // something, and whatever they type then reads as a choice they never made —
+  // "1", typically, which the description used to call generic 433 MHz
+  // listening while the code read it as "deduce it". A text field can be empty,
+  // and empty is exactly what "deduce it from my devices" is.
+  const field = manifest.config_schema.find((entry) => entry.key === 'listen_channel');
+
+  assert.equal(field.type, 'string');
+  assert.equal(field.required, false);
+  assert.equal(field.min, undefined);
+  assert.equal(normalizeConfig({ listen_channel: '' }).listen_channel, null);
+  assert.equal(normalizeConfig({ listen_channel: '1' }).listen_channel, null);
+  assert.equal(normalizeConfig({ listen_channel: '14177' }).listen_channel, 14177);
+  assert.equal(normalizeConfig({ listen_channel: '0' }).listen_channel, 0);
 });
 
 test('the description fits what the store allows', () => {

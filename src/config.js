@@ -435,23 +435,59 @@ function toBoolean(value, fallback) {
  * 433 MHz decoder, and every other value is one of the protocols the AirSend
  * Web Service knows (see src/devmel/listening.js). So:
  *
- *   - `0`            listening off;
- *   - empty, or `1`  deduce it from the device list — `1` is what the field
- *                    defaulted to before it could be deduced, and a deduction
- *                    that finds nothing better falls back to it anyway;
- *   - anything else  that protocol, whatever the device list says.
+ *   - `0`             listening off;
+ *   - empty, or `1`   deduce it from the device list — `1` is what the field
+ *                     defaulted to before it could be deduced, and a deduction
+ *                     that finds nothing better falls back to it anyway;
+ *   - `generic`       the generic 433 MHz decoder, asked for on purpose;
+ *   - anything else   that protocol, whatever the device list says.
+ *
+ * The manifest declares it as a TEXT field for one reason: a number field in
+ * the Gladys form cannot be left empty. It makes the user type something, and
+ * what they type is then read as a decision they never took — which is how a
+ * user ends up believing they asked for 433 MHz listening on an 868 MHz house.
+ * Empty has to be typeable, because empty is the answer for almost everyone.
+ *
+ * And a word, because the generic decoder is the one choice that has no pid
+ * left to name it with: its channel is `1`, which every configuration written
+ * before the deduction existed carries as "work it out yourself". Reading those
+ * as "listen to generic 433 MHz" would take the ears off every 868 MHz
+ * installation that ever filled that field, silently. So the number keeps the
+ * meaning it has always had, and the deliberate choice gets a word — the one
+ * thing nobody types by accident. Listening on the generic decoder is worth
+ * asking for: it is another way of decoding a 433 MHz remote its own protocol
+ * only half understands.
  *
  * @returns {number|null} the forced channel, 0 to disable, null to deduce
  */
 function toListenChannel(value) {
-  if (value === undefined || value === null || String(value).trim() === '') {
+  if (value === undefined || value === null) {
     return null;
   }
-  const number = Number(value);
+  const text = normalizeWord(value);
+  if (text === '') {
+    return null;
+  }
+  if (GENERIC_WORDS.has(text)) {
+    return GENERIC_433_CHANNEL;
+  }
+  const number = Number(text);
   if (!Number.isFinite(number) || number === GENERIC_433_CHANNEL) {
     return null;
   }
   return number > 0 ? Math.trunc(number) : 0;
+}
+
+/** How the generic 433 MHz decoder is asked for by name, in both languages. */
+const GENERIC_WORDS = new Set(['generic', 'generique', 'generic433', '433mhz', 'generic 433']);
+
+/** Lowercase, accent-free, trimmed: nobody types "générique" the same way twice. */
+function normalizeWord(value) {
+  return String(value)
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .trim()
+    .toLowerCase();
 }
 
 /**

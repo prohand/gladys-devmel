@@ -307,7 +307,25 @@ decodes which protocol, and subscribes the box to the one your devices use.
 Leave the **Listening channel** field empty.
 
 Fill it in only to listen to something else: the `pid` of a protocol you have
-not declared yet, `1` for generic listening, or `0` to turn listening off.
+not declared yet, or `0` to turn listening off.
+
+**`1` and an empty field mean the same thing: "deduce it".** That is the value
+the field defaulted to before the deduction existed, and it is read as such — a
+`1` does not ask for generic 433 MHz listening. Generic listening is what the
+deduction falls back to when no radio device is declared, and nothing else. The
+field is a **text** field rather than a number for that very reason: a number
+field cannot be left empty, it makes you type something, and that something
+then reads as a choice nobody made.
+
+One consequence: the generic 433 MHz decoder cannot be asked for by its pid,
+since that pid is `1`. It is asked for **by name** instead — type `generic` in
+the field. That is a test worth running for a 433 MHz remote its own protocol
+only half decodes: the generic decoder is another way of reading the same
+frames.
+
+Either way, the _Listening_ line of **Test the connection** says which channel
+was actually chosen — that line is the authority, not what is typed in the
+field.
 
 To check, click **Test the connection**: the _Listening_ line says which
 protocol is listened to, which devices it covers, and where the frames are
@@ -348,6 +366,40 @@ says so, in its logs and in **Test the connection**.
 
 Two ways out: declare a device on that protocol, or fill in its `pid` as the
 **Listening channel**.
+
+#### "Listening on 868 MHz" is not a thing — here is what is
+
+A box does not listen to a **band**, it listens to a **protocol**: there is no
+"868 MHz" switch to flip, and channel `1` is not "the 433 one" as opposed to
+some "868 one" living elsewhere — it is one decoder among a couple of hundred,
+the one covering generic 433 MHz protocols. Listening on 868 MHz therefore means
+**naming an 868 MHz protocol by its `pid`**. Three ways, simplest first:
+
+1. **declare the device** in the **Devices** list (the airsend.cloud export
+   carries its `pid`): the deduction does the rest and the **Listening channel**
+   field stays empty. This is what works nine times out of ten;
+2. **attach its remote** (`remotes`): a remote actually emits, so on a tie the
+   deduction keeps its protocol rather than the shutter's, which never speaks;
+3. **force the `pid`** in **Listening channel** when the protocol is not
+   declared yet. To find it, the **Find a radio protocol** action asks the
+   AirSend service and searches by brand or by `pid`:
+
+```text
+2 protocols for "somfy":
+- pid 25455 — Somfy RTS (decodes itself, declared on "Patio door")
+- pid 26848 — Somfy io (decodes itself)
+Put the pid you want in the Listening channel field…
+```
+
+It also says how each protocol is decoded — by itself, by the generic 433 MHz
+channel `1`, or only partially — and which one is being listened to right now.
+
+And then there is the dead end, which is worth knowing about: the box has
+**one** radio, so hearing a remote whose protocol you do not know requires
+already listening to that protocol. There is no scanning. If its `pid` is
+written nowhere — not in the AirSend app, not in the export — the only way left
+is trying the candidates of your brand one by one, pressing the remote after
+each attempt and running **Test the connection** again.
 
 The **rolling code** of those remotes is not what stops the frames from coming
 in. It protects _emission_: to drive a Profalux shutter, the AirSend box has to
@@ -535,11 +587,17 @@ many frames each sent, how long ago, what they decoded to, and what the devices
 made of them:
 
 ```text
-Heard: 1 emitter heard: pid 14177, addr 3359265281 (3 frames, last one 4 s ago,
+Heard: 1 emitter heard: pid 14177 "Profalux", addr 3359265281 (3 frames, last one 4 s ago,
 no decoded note) — declared on Living room shutter, but its frames carry no
 order to replay (a protocol the service only partially decodes): the position
 cannot follow.
 ```
+
+The `pid` is **named** whenever the service answered with its protocol table:
+that is the most reliable answer to "which protocol does my remote speak?". The
+brand printed on the plastic does not always say — a shutter sold under one name
+may carry another manufacturer's radio — while the name here is the decoder that
+actually decoded the frame.
 
 Three possible verdicts per emitter:
 
@@ -623,6 +681,10 @@ provides: link your Gladys Plus account and paste your Open API key in the
   not parse, or an attached remote whose frames carry no order.
 - **Attach a remote** — press the remote, pick the device it drives: the action
   writes the device list to paste back, remote included (see "The wall remote").
+- **Find a radio protocol** — searches the protocols the AirSend service knows,
+  by brand or by `pid`, says how each one is decoded and which one is being
+  listened to: this is where the `pid` for **Listening channel** comes from (see
+  "Listening on 868 MHz").
 - **Identify a device** — pick a device and it is sent a PING. Not every piece
   of 433 MHz equipment reacts to it.
 

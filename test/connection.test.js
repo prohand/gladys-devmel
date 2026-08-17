@@ -255,6 +255,24 @@ test('test_connection tells an attached remote that moves nothing from one that 
   assert.match(workingReport.fr, /suivi par Baie vitree/);
 });
 
+test('test_connection names the protocol a pid stands for', async () => {
+  // "pid 14177" identifies a protocol without saying which one, and the name
+  // is what a user compares to the brand written on their remote — a thing no
+  // datasheet answers as well as the box that decoded the frame.
+  const config = normalizeConfig({ spurl: SPURL, devices: DEVICES_WITH_REMOTE });
+  const heard = new HeardChannels();
+  heard.record(WALL_REMOTE, { readings: [], claimed: true });
+  const table = indexChannels([{ id: 14177, name: 'Profalux', getDecoder: 0 }]);
+
+  const named = await testConnection(fakeClient(), config, RUNNING, null, heard, table);
+  assert.match(named.en, /pid 14177 "Profalux", addr 3359265281/);
+
+  // Without the table — the service never answered — the pid stands alone
+  // rather than being invented.
+  const bare = await testConnection(fakeClient(), config, RUNNING, null, heard);
+  assert.match(bare.en, /pid 14177, addr 3359265281/);
+});
+
 test('test_connection lists every button a remote has been heard pressing', async () => {
   // Three presses, three notes — or the same note three times, which is what a
   // remote the service decodes only halfway looks like. The last frame alone

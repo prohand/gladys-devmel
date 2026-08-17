@@ -118,18 +118,20 @@
     },
     {
       "key": "listen_channel",
-      "type": "number",
+      "type": "string",
       "label": {
         "en": "Listening channel",
         "fr": "Canal d'écoute"
       },
       "description": {
-        "en": "Leave empty: the box then listens to the radio protocol of the devices you declared, which is what pushes what it hears (wall remotes, sensors) to Gladys. Fill it only to listen to another protocol, by its pid: 1 is generic 433 MHz listening, and no 868 MHz remote (Profalux, Somfy io) is heard on it. 0 disables listening.",
-        "fr": "Laissez vide : le boîtier écoute alors le protocole radio des appareils que vous avez déclarés, ce qui remonte vers Gladys ce qu'il entend (télécommandes murales, capteurs). Ne le renseignez que pour écouter un autre protocole, par son pid : 1 correspond à l'écoute générique 433 MHz, sur laquelle aucune télécommande 868 MHz (Profalux, Somfy io) n'est entendue. 0 désactive l'écoute."
+        "en": "Which radio protocol the box listens to, by its pid. Leave it empty — or 1, which means the same thing — and it is deduced from the devices you declared: that is what pushes to Gladys what the box hears (wall remotes, sensors). \"Test the connection\" says on its Listening line which protocol was chosen and what it covers, and \"Find a radio protocol\" searches the pids by brand. Fill in a pid to listen to another protocol, the word generic for generic 433 MHz listening (its pid, 1, is taken), 0 to turn listening off.",
+        "fr": "Le protocole radio écouté par le boîtier, par son pid. Laissez le champ vide — ou 1, qui veut dire la même chose — et il est déduit des appareils que vous avez déclarés : c'est ce qui remonte vers Gladys ce que le boîtier entend (télécommandes murales, capteurs). « Tester la connexion » indique sur sa ligne Écoute le protocole retenu et ce qu'il couvre, et « Chercher un protocole radio » cherche les pid par marque. Renseignez un pid pour écouter un autre protocole, le mot générique pour l'écoute générique 433 MHz (son pid, 1, est déjà pris), 0 pour désactiver l'écoute."
       },
-      "required": false,
-      "min": 0,
-      "max": 65535
+      "placeholder": {
+        "en": "empty = deduced from your devices",
+        "fr": "vide = déduit de vos appareils"
+      },
+      "required": false
     },
     {
       "key": "command_repeat",
@@ -230,6 +232,41 @@
             "fr": "Appareil piloté"
           },
           "required": true
+        }
+      ]
+    },
+    {
+      "key": "find_protocol",
+      "label": {
+        "en": "Find a radio protocol",
+        "fr": "Chercher un protocole radio"
+      },
+      "timeout_seconds": 30,
+      "fields": [
+        {
+          "key": "find_protocol_intro",
+          "type": "section",
+          "label": {
+            "en": "Which pid to listen to",
+            "fr": "Quel pid écouter"
+          },
+          "description": {
+            "en": "A box listens to a protocol, not to a band: hearing an 868 MHz remote means naming its protocol by its pid. Search the protocols the AirSend service knows by brand or by pid, and put the one you want in the Listening channel field.",
+            "fr": "Un boîtier écoute un protocole, pas une bande : entendre une télécommande 868 MHz, c'est nommer son protocole par son pid. Cherchez par marque ou par pid parmi les protocoles connus du service AirSend, et mettez celui qui convient dans le champ Canal d'écoute."
+          }
+        },
+        {
+          "key": "search",
+          "type": "string",
+          "label": {
+            "en": "Brand or pid",
+            "fr": "Marque ou pid"
+          },
+          "placeholder": {
+            "en": "somfy, nice, 25455…",
+            "fr": "somfy, nice, 25455…"
+          },
+          "required": false
         }
       ]
     },
