@@ -30,16 +30,31 @@ test('the answer to our own transfer is recognized by its uid', () => {
 });
 
 test('the box hearing itself is recognized by the channel it emitted on', () => {
-  // No uid of ours on that route: what identifies the frame is that we were
-  // talking to that very device a moment ago.
+  // No uid of ours on that route: what identifies the frame is the address it
+  // was emitted from, which is the one Gladys transmits on.
   const { orders, advance } = registry();
   orders.remember('0xabc', SHUTTER);
 
   assert.ok(orders.match({ type: 3, channel: { id: 700, source: 7, counter: 3 } }));
 
-  // Seconds later it is somebody's press, not our echo any more.
-  advance(6000);
-  assert.equal(orders.match({ type: 3, channel: { id: 700, source: 7, counter: 4 } }), null);
+  // And a box that takes its time repeating itself is still that box. Reading
+  // a late echo as a fresh order is what sent a shutter stopped at 40 % to the
+  // top, seconds after it got there.
+  advance(60000);
+  const late = orders.match({ type: 3, channel: { id: 700, source: 7, counter: 4 } });
+  assert.equal(late?.name, 'Timed shutter');
+});
+
+test('a voice is only ours once we have spoken with it', () => {
+  const { orders } = registry();
+
+  // Nothing sent yet: a frame on that channel is somebody else emitting.
+  assert.equal(orders.match({ type: 3, channel: SHUTTER.channel }), null);
+
+  orders.remember('0xabc', SHUTTER);
+  assert.ok(orders.match({ type: 3, channel: SHUTTER.channel }));
+  // A channel we never transmitted on stays a stranger, whatever we sent.
+  assert.equal(orders.match({ type: 3, channel: { id: 700, source: 8 } }), null);
 });
 
 test('a wall remote emits from another address and is never taken for our echo', () => {
@@ -55,7 +70,9 @@ test('an order that can no longer echo is forgotten', () => {
   orders.remember('0xabc', SHUTTER);
 
   advance(31000);
-  assert.equal(orders.match(echo('0xabc')), null);
+  // The order itself is gone — what is left is the voice it was said with,
+  // which is not a memory of an order and does not expire.
+  assert.equal(orders.match(echo('0xabc', { id: 900, source: 9 })), null);
   assert.equal(orders.entries.size, 0);
 });
 

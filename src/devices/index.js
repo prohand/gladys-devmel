@@ -319,7 +319,7 @@ export async function applyEvents(
           const followed =
             `Heard ${describeChannel(event.channel)} -> "${device.name}" followed it: ` +
             `${describeReadings(readings)}.`;
-          if (registry.announce(heard, `followed:${device.platformId}`)) {
+          if (registry.announce(heard, `followed:${device.platformId}:${shapeOf(readings)}`)) {
             logger.info(followed);
           } else {
             logger.debug(followed);
@@ -336,7 +336,7 @@ export async function applyEvents(
           `this device can follow: ${describeReadings(readings)}. A rolling-code 868 MHz ` +
           'remote (Profalux, Somfy io) is only partially decoded: its frames prove the radio ' +
           'works, they carry no order to replay.';
-        if (registry.announce(heard, `unfollowed:${device.platformId}`)) {
+        if (registry.announce(heard, `unfollowed:${device.platformId}:${shapeOf(readings)}`)) {
           logger.info(unfollowed);
         } else {
           logger.debug(unfollowed);
@@ -428,6 +428,19 @@ function adviseOnDropped(event, reason) {
     'The box is not confident in what it decoded (a remote at the edge of its range, a noisy ' +
     'band). Turn on "Accept unreliable frames" to use it anyway.'
   );
+}
+
+/**
+ * What a frame said, stripped of its values: `up`, `stop`, `temperature`.
+ *
+ * Used to throttle the lines above. A remote has several buttons, and each one
+ * deserves to be reported once — that is how a user finds out that all three of
+ * theirs decode to the same order. A sensor, on the other hand, says the same
+ * thing with a different number every five minutes, and keying on the number
+ * would turn one line per emitter into one line per reading.
+ */
+function shapeOf(readings) {
+  return readings.map((reading) => reading.command ?? reading.kind).join(',');
 }
 
 /** The devices a frame was routed to, quoted as the user named them. */

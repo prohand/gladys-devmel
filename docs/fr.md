@@ -210,6 +210,12 @@ l'exemple : l'écho de son « Ouvrir » le renvoyait à 100 % et annulait le Sto
 prévu à mi-course, si bien que le volet montait tout en haut. L'intégration
 reconnaît maintenant ses propres ordres et ne les rejoue pas.
 
+Ce qui identifie un écho, c'est **l'adresse d'où il part**. Le canal sur lequel
+Gladys émet est celui du boîtier : rien d'autre dans la maison ne parle avec
+cette voix, quel que soit le délai. Un boîtier qui met dix secondes à se répéter
+n'est donc plus pris pour une main sur une télécommande — c'était de quoi
+renvoyer en haut un volet arrêté à 40 %.
+
 Deux conséquences visibles :
 
 - une télécommande murale émet depuis une **autre adresse** : elle n'est jamais
@@ -568,6 +574,21 @@ Trois verdicts possibles pour un émetteur :
 | `suivi par <appareil>`             | tout marche : ses trames pilotent bien l'appareil                             |
 | `aucun appareil ne le déclare`     | l'émetteur est entendu, mais rattaché à rien — **Rattacher une télécommande** |
 | `ne portent aucun ordre rejouable` | la trame arrive à l'appareil et ne porte rien à rejouer (code tournant)       |
+
+La ligne cite **toutes** les notes différentes entendues d'un même émetteur, pas
+seulement la dernière — c'est ce qui distingue une télécommande dont le service
+décode les boutons (`notes : level 100 (up) ; level 0 (down) ; state stop`)
+d'une télécommande dont tous les boutons donnent le même ordre. Ce second cas
+est celui d'un `suivi par` qui ne bouge rien : un STOP rejoué sur un volet à
+l'arrêt change un état, pas un pourcentage. Le rapport le dit maintenant et
+propose le test : appuyez sur Ouvrir, puis sur Fermer, et relancez l'action. Si
+la note ne change pas, le service AirSend ne décode pas les boutons de cette
+télécommande, et la position ne pourra pas suivre.
+
+Les échos de vos propres ordres, eux, ne sont pas des émetteurs : ils sont
+comptés à part, en fin de ligne (`Plus 3 échos de vos propres ordres`). C'est la
+preuve que la route des trames fonctionne, même quand rien d'autre n'est
+entendu.
 
 Le registre est vidé au démarrage de l'intégration : « aucune trame radio depuis
 le démarrage » veut dire « rien depuis », pas « jamais ». Appuyez sur la

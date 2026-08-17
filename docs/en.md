@@ -201,6 +201,12 @@ order was doing. A timed shutter sent to 40 % is the example: the echo of its
 shutter ran to the top. The integration now recognizes its own orders and does
 not replay them.
 
+What identifies an echo is **the address it comes from**. The channel Gladys
+transmits on is the box's own: nothing else in the house speaks with that voice,
+whatever the delay. A box that takes ten seconds to repeat itself is no longer
+mistaken for a hand on a remote — which was enough to send a shutter stopped at
+40 % back to the top.
+
 Two visible consequences:
 
 - a wall remote emits from **another address**: it is never taken for that echo,
@@ -542,6 +548,19 @@ Three possible verdicts per emitter:
 | `followed by <device>`     | it works: those frames do drive the device                                |
 | `no device declares it`    | the emitter is heard but attached to nothing — **Attach a remote**        |
 | `carry no order to replay` | the frame reaches its device and carries nothing to replay (rolling code) |
+
+The line quotes **every** distinct note an emitter has been heard saying, not
+just its last frame — that is what tells a remote whose buttons the service
+decodes (`notes: level 100 (up); level 0 (down); state stop`) from one whose
+every button decodes to the same order. The second is a `followed by` that moves
+nothing: a STOP replayed on a shutter that is not moving changes a state, not a
+percentage. The report now says so and offers the check: press Open, then Close,
+and run the action again. If the note does not change, the AirSend service does
+not decode the buttons of that remote, and the position cannot follow.
+
+The echoes of your own orders are not emitters: they are counted apart, at the
+end of the line (`Plus 3 echoes of your own orders`). That is the proof the
+frames have a route back in, even when nothing else is heard.
 
 The registry is emptied when the integration restarts: "no radio frame since the
 integration started" means "nothing since then", not "never". Press the remote,

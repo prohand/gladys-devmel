@@ -865,6 +865,37 @@ test('the box hearing its own emission is the same echo, with no uid to go by', 
   assert.equal(positionsOf('Timed shutter').at(-1), 40);
 });
 
+test('an echo that comes back late is still ours, not a fresh order', async (t) => {
+  const { gladys, config, clock, send, positionsOf } = setupTimed(t);
+  let stamp = 0;
+  const orders = new SentOrders({ now: () => stamp });
+  const heard = new HeardChannels();
+
+  await send('Timed shutter', 'state', -1);
+  await clock.advance(10000);
+  await send('Timed shutter', 'position', 40);
+  orders.remember(toThingUid('shutter:700-7:position'), deviceNamed(config, 'Timed shutter'));
+
+  // A box repeating itself takes as long as it takes. A minute is well past
+  // any window, and this frame is still the order Gladys sent: it comes from
+  // the address Gladys transmits on, which nothing else in the house uses.
+  stamp += 60000;
+  await applyEvents(
+    gladys,
+    config,
+    [ownEcho(config, 'Timed shutter', STATE_VALUES.UP)],
+    heard,
+    orders,
+  );
+  await clock.advance(8000);
+
+  assert.equal(positionsOf('Timed shutter').at(-1), 40);
+  // And it is counted as ours: an echo is not an emitter, it is the proof that
+  // the frames have a route back in.
+  assert.equal(heard.own, 1);
+  assert.deepEqual(heard.list(), []);
+});
+
 test('a wall remote pressed during that time is still a fresh order', async (t) => {
   const { gladys, config, clock, send, positionsOf } = setupTimed(t);
   const orders = new SentOrders();
