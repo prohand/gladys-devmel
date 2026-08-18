@@ -11,6 +11,7 @@
 // is — one line included, which is what the single-line field allows.
 // -----------------------------------------------------------------------------
 
+import { isIPv6 } from 'node:net';
 import { createLogger } from '@gladysassistant/integration-sdk';
 import { SHUTTER_ORDERS } from './devmel/notes.js';
 import { SERVICE_URL as EMBEDDED_SERVICE_URL } from './devmel/service.js';
@@ -94,6 +95,14 @@ export function normalizeConfig(raw = {}) {
   config.shutterOrders = config.shutter_open_close
     ? SHUTTER_ORDERS.OPEN_CLOSE
     : SHUTTER_ORDERS.UP_DOWN;
+
+  // What is wrong with the connection string, before the box gets a chance to
+  // answer 401 about it. Kept on the config so every screen that has to explain
+  // the local channel says the same thing (see src/devmel/connection.js).
+  config.spurlProblems = checkSpurl(config.spurl);
+  for (const problem of config.spurlProblems) {
+    logger.warn(`Connection string: ${problem.en}`);
+  }
 
   config.devmelDevices = parseDevices(raw.devices, config);
   return config;
@@ -405,6 +414,109 @@ function buildPlatformId(device) {
     }
   }
   return slug(parts.join('-'));
+}
+
+/**
+ * What is visibly wrong with a `sp://` connection string.
+ *
+ * The box answers a malformed one exactly the way it answers a wrong password:
+ * `HTTP 401, Invalid connection string`. That is the whole reason this
+ * function exists — "check the sp:// URL" is not advice a user can act on when
+ * the password IS the right one, and the mistake is a colon.
+ *
+ * It is the link-local address that gets mistyped, because it is the one part
+ * nobody reads: `fe80::dcf6:e5ff:fe8f:89cd` retyped by hand loses its double
+ * colon and becomes `fe80:dcf6:e5ff:fe8f:89cd`, five groups of an eight-group
+ * address — still colon-shaped, still plausible, and no longer an address. The
+ * brackets go the same way, and without them the colons of an IPv6 host read as
+ * a port number.
+ *
+ * Deliberately not a parser: it reports what it is sure about and stays silent
+ * about the rest. A string it has nothing to say about is not thereby declared
+ * valid — only the box can say that.
+ *
+ * @param {string} spurl the string as the user pasted it
+ * @returns {Array<{en: string, fr: string}>} what to fix, empty when nothing
+ *   obvious is wrong
+ */
+export function checkSpurl(spurl) {
+  const raw = String(spurl ?? '').trim();
+  if (!raw) {
+    // Not typed yet is not mistyped: the Configuration screen already says so.
+    return [];
+  }
+
+  const problems = [];
+  if (!/^sp:\/\//i.test(raw)) {
+    problems.push({
+      en: 'it must start with sp:// — paste the string exported by airsend.cloud whole.',
+      fr: 'elle doit commencer par sp:// — collez telle quelle la chaîne exportée par airsend.cloud.',
+    });
+    return problems;
+  }
+
+  const rest = raw.slice('sp://'.length);
+  // The password comes first and may itself contain an `@`, so the host is what
+  // follows the LAST one.
+  const at = rest.lastIndexOf('@');
+  if (at < 0) {
+    problems.push({
+      en: 'no password: the string reads sp://<password>@<address>.',
+      fr: 'pas de mot de passe : la chaîne s’écrit sp://<motdepasse>@<adresse>.',
+    });
+    return problems;
+  }
+  if (at === 0) {
+    problems.push({
+      en: 'the password is empty, before the @.',
+      fr: 'le mot de passe est vide, avant le @.',
+    });
+  }
+
+  const host = rest.slice(at + 1).split(/[?/]/)[0];
+  if (!host) {
+    problems.push({
+      en: 'no box address after the @.',
+      fr: 'pas d’adresse de boîtier après le @.',
+    });
+    return problems;
+  }
+
+  const bracketed = host.startsWith('[');
+  if (bracketed && !host.includes(']')) {
+    problems.push({
+      en: `the address "${host}" opens a bracket it never closes.`,
+      fr: `l’adresse « ${host} » ouvre un crochet qu’elle ne referme jamais.`,
+    });
+    return problems;
+  }
+  const address = bracketed ? host.slice(1, host.indexOf(']')) : host;
+  // A link-local address may carry the interface it lives on (`%eth0`), which
+  // is part of the address and not part of what makes it valid.
+  const literal = address.split('%')[0];
+
+  if (!literal.includes(':')) {
+    // An IPv4 or a name: nothing here can tell a good one from a bad one.
+    return problems;
+  }
+  if (!isIPv6(literal)) {
+    problems.push({
+      en:
+        `"${literal}" is not a valid IPv6 address. Copy it from airsend.cloud rather than ` +
+        'retyping it — a link-local address is written fe80::… , with TWO colons after fe80.',
+      fr:
+        `« ${literal} » n’est pas une adresse IPv6 valide. Recopiez-la depuis airsend.cloud ` +
+        'plutôt que de la retaper — une adresse lien-local s’écrit fe80::… , avec DEUX ' +
+        'deux-points après fe80.',
+    });
+  }
+  if (!bracketed) {
+    problems.push({
+      en: `the IPv6 address must be in square brackets: sp://<password>@[${address}]?…`,
+      fr: `l’adresse IPv6 doit être entre crochets : sp://<motdepasse>@[${address}]?…`,
+    });
+  }
+  return problems;
 }
 
 /** Extract the box address from a `sp://…@[fe80::…]?…&rhost=192.168.1.50` URL. */

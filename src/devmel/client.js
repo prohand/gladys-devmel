@@ -16,7 +16,7 @@
 
 import { createHash } from 'node:crypto';
 import { createLogger, DEVICE_TRANSPORTS } from '@gladysassistant/integration-sdk';
-import { MAX_COMMAND_REPEAT } from '../config.js';
+import { checkSpurl, MAX_COMMAND_REPEAT } from '../config.js';
 import { isRepeatable } from './notes.js';
 import { sentOrders } from './orders.js';
 
@@ -317,7 +317,7 @@ export class AirSendClient {
     const payload = await readJson(response);
 
     if (response.status !== 200) {
-      throw new AirSendError(localErrorMessage(response.status), {
+      throw new AirSendError(localErrorMessage(response.status, this.spurlOf(device)), {
         status: response.status,
         transport: DEVICE_TRANSPORTS.LOCAL,
       });
@@ -390,7 +390,7 @@ export class AirSendClient {
       ),
     );
     if (response.status !== 200) {
-      throw new AirSendError(localErrorMessage(response.status), {
+      throw new AirSendError(localErrorMessage(response.status, this.spurlOf(device)), {
         status: response.status,
         transport: DEVICE_TRANSPORTS.LOCAL,
       });
@@ -479,10 +479,23 @@ function defaultSleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-function localErrorMessage(status) {
+/**
+ * What went wrong, in the words of the box.
+ *
+ * A 401 is the one worth more than its own message: the box says the same thing
+ * about a wrong password and about a string it could not parse, and "check the
+ * sp:// URL" sends a user to stare at a password that was right all along. So
+ * when the string itself has something visibly wrong with it, that is what the
+ * log line says instead.
+ */
+function localErrorMessage(status, spurl) {
   switch (status) {
-    case 401:
-      return 'Invalid connection string (HTTP 401): check the sp:// URL';
+    case 401: {
+      const [problem] = checkSpurl(spurl);
+      return problem
+        ? `Invalid connection string (HTTP 401): ${problem.en}`
+        : 'Invalid connection string (HTTP 401): check the sp:// URL';
+    }
     case 405:
       return 'Invalid input (HTTP 405): check the channel of this device';
     case 500:

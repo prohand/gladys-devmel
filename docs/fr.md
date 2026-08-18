@@ -78,6 +78,32 @@ Les deux qui comptent sont les autres :
 Après toute modification, cliquez sur **Enregistrer**, puis **recopiez** la
 chaîne de connexion dans Gladys : elle a changé.
 
+#### Ne la retapez jamais
+
+Copiez-collez la chaîne entière, du `sp://` jusqu'au bout. Le boîtier répond à
+une chaîne mal formée exactement ce qu'il répond à un mauvais mot de passe :
+
+```
+[WARN] [airsend] Local transfer failed for "Chambre parents": Invalid connection string (HTTP 401)
+[WARN] Could not listen through "AirSend box": Invalid connection string (HTTP 401)
+```
+
+Deux détails de l'adresse se perdent à la saisie, et ils suffisent tous les
+deux à provoquer ce 401 avec un mot de passe parfaitement juste :
+
+- **les deux-points doubles.** Une adresse lien-local s'écrit
+  `fe80::dcf6:e5ff:fe8f:89cd` — `fe80`, puis **deux** deux-points. Retapée,
+  elle devient `fe80:dcf6:e5ff:fe8f:89cd` : cinq groupes d'une adresse qui en
+  compte huit. Toujours en forme d'adresse, et plus une adresse ;
+- **les crochets.** Une adresse IPv6 dans une URL se met entre `[` et `]`, sans
+  quoi ses deux-points se lisent comme un numéro de port.
+
+L'intégration vérifie maintenant la chaîne avant le boîtier : ce qu'elle a de
+visiblement faux est écrit dans les journaux au chargement de la configuration,
+sur l'écran de configuration, et sur la ligne _Local_ de **Tester la
+connexion** — au lieu d'un 401 qui vous renvoie vers un mot de passe qui n'y
+était pour rien.
+
 #### Utiliser un service que vous faites déjà tourner
 
 Si le service web AirSend tourne déjà quelque part sur votre réseau — l'add-on

@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  checkSpurl,
   DEFAULT_CONFIG,
   EMBEDDED_SERVICE_URL,
   hostFromSpurl,
@@ -317,4 +318,39 @@ test('a shutter can carry the spelling its own protocol answers to', () => {
   // rather than quietly driving the shutter the other way.
   assert.equal(orders('Ordinary'), SHUTTER_ORDERS.UP_DOWN);
   assert.equal(orders('Nonsense'), SHUTTER_ORDERS.UP_DOWN);
+});
+
+test('a connection string the box will refuse says why, before the box does', () => {
+  const problems = (spurl) => checkSpurl(spurl).map((problem) => problem.en);
+
+  // The mistake that costs an afternoon: a link-local address retyped by hand
+  // loses its double colon, and the box answers 401 as if the password were
+  // wrong.
+  const mistyped = problems('sp://secret@fe80:dcf6:e5ff:fe8f:89cd?gw=1&rhost=192.168.15.1');
+  assert.equal(mistyped.length, 2);
+  assert.match(mistyped[0], /not a valid IPv6 address/);
+  assert.match(mistyped[1], /square brackets/);
+
+  // Right address, no brackets: the colons of an IPv6 host read as a port.
+  assert.deepEqual(problems('sp://secret@[fe80::1]?gw=0&rhost=192.168.1.50'), []);
+  assert.equal(problems('sp://secret@fe80::1?gw=0').length, 1);
+
+  // An IPv4 or a name: nothing here can tell a good one from a bad one.
+  assert.deepEqual(problems('sp://secret@192.168.1.50?gw=0'), []);
+  // And a link-local address may name the interface it lives on.
+  assert.deepEqual(problems('sp://secret@[fe80::1%eth0]?gw=0'), []);
+
+  assert.match(problems('fe80::1')[0], /must start with sp:\/\//);
+  assert.match(problems('sp://@[fe80::1]')[0], /password is empty/);
+  assert.match(problems('sp://secret@')[0], /no box address/);
+  // Not typed yet is not mistyped.
+  assert.deepEqual(problems(''), []);
+  assert.deepEqual(problems(undefined), []);
+});
+
+test('the connection string is checked once, and carried on the config', () => {
+  const config = normalizeConfig({ spurl: '  sp://secret@fe80:dcf6:e5ff:fe8f:89cd?gw=1  ' });
+  assert.equal(config.spurlProblems.length, 2);
+  assert.deepEqual(normalizeConfig({ spurl: 'sp://secret@[fe80::1]?gw=0' }).spurlProblems, []);
+  assert.deepEqual(normalizeConfig({}).spurlProblems, []);
 });

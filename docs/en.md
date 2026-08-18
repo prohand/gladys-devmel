@@ -73,6 +73,31 @@ The two that matter are the others:
 After any change, click **Save**, then **copy the connection string again**
 into Gladys: it changed.
 
+#### Never retype it
+
+Copy and paste the whole string, from `sp://` to the end. The box answers a
+malformed string exactly what it answers a wrong password:
+
+```
+[WARN] [airsend] Local transfer failed for "Chambre parents": Invalid connection string (HTTP 401)
+[WARN] Could not listen through "AirSend box": Invalid connection string (HTTP 401)
+```
+
+Two details of the address get lost when it is typed by hand, and either one is
+enough to produce that 401 with a perfectly good password:
+
+- **the double colon.** A link-local address is written
+  `fe80::dcf6:e5ff:fe8f:89cd` — `fe80`, then **two** colons. Retyped, it
+  becomes `fe80:dcf6:e5ff:fe8f:89cd`: five groups of an eight-group address.
+  Still address-shaped, no longer an address;
+- **the square brackets.** An IPv6 address in a URL goes between `[` and `]`,
+  without which its colons read as a port number.
+
+The integration now checks the string before the box does: whatever is visibly
+wrong with it is written to the logs when the configuration loads, on the
+Configuration screen, and on the _Local_ line of **Test the connection** —
+instead of a 401 sending you back to a password that had nothing to do with it.
+
 #### Using a service you already run
 
 If the AirSend Web Service is already running somewhere on your network — the
@@ -795,7 +820,7 @@ provides: link your Gladys Plus account and paste your Open API key in the
 
 | Symptom                            | What to check                                                                          |
 | ---------------------------------- | -------------------------------------------------------------------------------------- |
-| `Invalid connection string`        | The `sp://` URL, and that its password matches the box                                 |
+| `Invalid connection string`        | **Test the connection**: it says what is wrong with the `sp://` string                 |
 | `Invalid input`                    | The `channel` of the device (`id`/`pid` and `source`/`addr`)                           |
 | `no radio channel` in the logs     | The entry carries no channel: it needs `channel.id`, or the `pid`/`addr` pair          |
 | `no radio confirmation`            | Normal on equipment without feedback: set `wait: false`                                |

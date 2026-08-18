@@ -64,6 +64,20 @@ export async function describeConnection(client, config, service = null) {
     };
   }
 
+  // A connection string the box will refuse is worth saying BEFORE the service
+  // is probed: the probe passes (it does not use the string), the screen says
+  // "connected", and every single order answers 401.
+  const [problem] = config.spurlProblems ?? [];
+  if (problem) {
+    return {
+      connected: false,
+      message: {
+        en: `Connection string: ${problem.en}`,
+        fr: `Chaîne de connexion : ${problem.fr}`,
+      },
+    };
+  }
+
   // The embedded service failing to start is worth saying out loud: nothing
   // else explains why a perfectly good connection string reaches nothing.
   const serviceError = embeddedServiceError(config, service);
@@ -125,6 +139,11 @@ export async function testConnection(
   if (serviceError) {
     en.push(`Service: the built-in AirSend service is not running (${serviceError}).`);
     fr.push(`Service : le service AirSend intégré ne tourne pas (${serviceError}).`);
+  }
+
+  for (const problem of config.spurlProblems ?? []) {
+    en.push(`Connection string: ${problem.en}`);
+    fr.push(`Chaîne de connexion : ${problem.fr}`);
   }
 
   if (config.effectiveServiceUrl && config.spurl) {
