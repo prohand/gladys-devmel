@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {
   checkSpurl,
   DEFAULT_CONFIG,
+  describeSpurl,
   EMBEDDED_SERVICE_URL,
   hostFromSpurl,
   normalizeConfig,
@@ -327,13 +328,20 @@ test('a connection string the box will refuse says why, before the box does', ()
   // loses its double colon, and the box answers 401 as if the password were
   // wrong.
   const mistyped = problems('sp://secret@fe80:dcf6:e5ff:fe8f:89cd?gw=1&rhost=192.168.15.1');
-  assert.equal(mistyped.length, 2);
+  assert.equal(mistyped.length, 1);
   assert.match(mistyped[0], /not a valid IPv6 address/);
-  assert.match(mistyped[1], /square brackets/);
 
-  // Right address, no brackets: the colons of an IPv6 host read as a port.
+  // Both spellings of the host are in the wild — airsend.cloud exports the
+  // address bare — and neither is corrected here.
   assert.deepEqual(problems('sp://secret@[fe80::1]?gw=0&rhost=192.168.1.50'), []);
-  assert.equal(problems('sp://secret@fe80::1?gw=0').length, 1);
+  assert.deepEqual(problems('sp://secret@fe80::1?gw=0'), []);
+  assert.equal(problems('sp://secret@[fe80:dcf6::1:2:3:4:5:6]?gw=0').length, 1);
+
+  // Characters nobody can see in a field that shows dots: the mask copied
+  // instead of the password, a zero-width space, an errant newline.
+  assert.match(problems('sp://\u2022\u2022\u2022\u2022@fe80::1?gw=0')[0], /U\+2022/);
+  assert.match(problems('sp://sec\u200Bret@fe80::1?gw=0')[0], /U\+200B/);
+  assert.match(problems('sp://sec ret@fe80::1?gw=0')[0], /contains a space/);
 
   // An IPv4 or a name: nothing here can tell a good one from a bad one.
   assert.deepEqual(problems('sp://secret@192.168.1.50?gw=0'), []);
@@ -350,7 +358,19 @@ test('a connection string the box will refuse says why, before the box does', ()
 
 test('the connection string is checked once, and carried on the config', () => {
   const config = normalizeConfig({ spurl: '  sp://secret@fe80:dcf6:e5ff:fe8f:89cd?gw=1  ' });
-  assert.equal(config.spurlProblems.length, 2);
+  assert.equal(config.spurlProblems.length, 1);
   assert.deepEqual(normalizeConfig({ spurl: 'sp://secret@[fe80::1]?gw=0' }).spurlProblems, []);
   assert.deepEqual(normalizeConfig({}).spurlProblems, []);
+});
+
+test('the connection string can be shown without giving the password away', () => {
+  assert.equal(
+    describeSpurl('sp://0123456789abcdef@fe80::dcf6:e5ff:fe8f:89cd?gw=0&rhost=192.168.1.50'),
+    'sp://<16 characters>@fe80::dcf6:e5ff:fe8f:89cd?gw=0&rhost=192.168.1.50',
+  );
+  assert.equal(describeSpurl('  sp://pass@[fe80::1]  '), 'sp://<4 characters>@[fe80::1]');
+  assert.equal(describeSpurl(''), '');
+  // Nothing recognizable to take a password out of: nothing is shown, because a
+  // string that shape may be anything, secret included.
+  assert.equal(describeSpurl('whatever'), '8 characters, and no sp://…@ in them');
 });

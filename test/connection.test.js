@@ -421,5 +421,21 @@ test('a mistyped connection string is named before the box is asked about it', a
 
   const report = await testConnection(fakeClient(), config, RUNNING);
   assert.match(report.en, /Connection string: "fe80:dcf6:e5ff:fe8f:89cd" is not a valid IPv6/);
-  assert.match(report.en, /square brackets/);
+});
+
+test('test_connection shows the connection string, without the password in it', async () => {
+  const config = normalizeConfig({
+    spurl: 'sp://0123456789abcdef@fe80::1?gw=1&rhost=192.168.1.50',
+  });
+  const report = await testConnection(fakeClient(), config, RUNNING);
+
+  // Nothing is wrong with this one: it is printed anyway, because half of what
+  // it catches is what no check can name — the address of the other box, a
+  // gw=1 nobody asked for.
+  assert.deepEqual(config.spurlProblems, []);
+  assert.match(
+    report.fr,
+    /Chaîne de connexion : sp:\/\/<16 characters>@fe80::1\?gw=1&rhost=192\.168\.1\.50/,
+  );
+  assert.doesNotMatch(report.en, /0123456789abcdef/);
 });

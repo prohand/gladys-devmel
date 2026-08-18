@@ -8,7 +8,7 @@
 //     demand, in more detail.
 // -----------------------------------------------------------------------------
 
-import { DEVICE_TYPES } from '../config.js';
+import { describeSpurl, DEVICE_TYPES } from '../config.js';
 import { planListening } from './listening.js';
 import { describeEmitter } from './heard.js';
 import { hearsChannel } from '../devices/index.js';
@@ -141,6 +141,15 @@ export async function testConnection(
     fr.push(`Service : le service AirSend intégré ne tourne pas (${serviceError}).`);
   }
 
+  // The string itself, password removed. It is the one thing a 401 never says
+  // and nobody can look up: the field shows dots, and the string is never
+  // logged. Printed whether or not anything is wrong with it — half the
+  // mistakes it catches are ones no check can name (the address of the other
+  // box, a gw=1 nobody asked for).
+  if (config.spurl) {
+    en.push(`Connection string: ${describeSpurl(config.spurl)}`);
+    fr.push(`Chaîne de connexion : ${describeSpurl(config.spurl)}`);
+  }
   for (const problem of config.spurlProblems ?? []) {
     en.push(`Connection string: ${problem.en}`);
     fr.push(`Chaîne de connexion : ${problem.fr}`);

@@ -90,13 +90,13 @@
         "fr": "Chaîne de connexion locale"
       },
       "description": {
-        "en": "The sp:// URL exported by airsend.cloud, e.g. sp://password@[fe80::...]?gw=0&rhost=192.168.1.50",
-        "fr": "L'URL sp:// exportée par airsend.cloud, par exemple sp://motdepasse@[fe80::...]?gw=0&rhost=192.168.1.50"
+        "en": "The sp:// URL exported by airsend.cloud, pasted exactly as it is given to you — add nothing, remove nothing. It reads sp://password@fe80::...?gw=0&rhost=192.168.1.50",
+        "fr": "L'URL sp:// exportée par airsend.cloud, collée exactement telle qu'elle vous est donnée — n'ajoutez rien, n'enlevez rien. Elle s'écrit sp://motdepasse@fe80::...?gw=0&rhost=192.168.1.50"
       },
       "required": false,
       "placeholder": {
-        "en": "sp://password@[fe80::...]?gw=0&rhost=192.168.1.50",
-        "fr": "sp://motdepasse@[fe80::...]?gw=0&rhost=192.168.1.50"
+        "en": "sp://password@fe80::...?gw=0&rhost=192.168.1.50",
+        "fr": "sp://motdepasse@fe80::...?gw=0&rhost=192.168.1.50"
       }
     },
     {
@@ -201,8 +201,8 @@
         "fr": "Journaux détaillés (debug)"
       },
       "description": {
-        "en": "Log every radio frame the box hears, including the ones dropped as unreliable or left undecoded. Turn it on to find out why a remote does not show up, and off again once you know: it is verbose. Your connection string is never logged.",
-        "fr": "Journalise chaque trame radio entendue par le boîtier, y compris celles écartées comme peu fiables ou non décodées. Activez-le pour comprendre pourquoi une télécommande ne remonte pas, puis désactivez-le : c'est verbeux. Votre chaîne de connexion n'est jamais journalisée."
+        "en": "Log every radio frame the box hears, including the ones dropped as unreliable or left undecoded. Turn it on to find out why a remote does not show up, and off again once you know: it is verbose. The password of your connection string is never logged; the rest of it is, at this level, so you can see what Gladys is really holding.",
+        "fr": "Journalise chaque trame radio entendue par le boîtier, y compris celles écartées comme peu fiables ou non décodées. Activez-le pour comprendre pourquoi une télécommande ne remonte pas, puis désactivez-le : c'est verbeux. Le mot de passe de votre chaîne de connexion n'est jamais journalisé ; le reste de la chaîne l'est à ce niveau, pour que vous voyiez ce que Gladys tient vraiment."
       },
       "required": false,
       "default": false
