@@ -9,7 +9,6 @@ import {
   normalizeConfig,
   parseDevices,
 } from '../src/config.js';
-import { SHUTTER_ORDERS } from '../src/devmel/notes.js';
 
 test('normalizeConfig falls back to the defaults', () => {
   const config = normalizeConfig();
@@ -283,42 +282,6 @@ test('a device can carry its own repeat count, or follow the global one', () => 
   assert.equal(config.devmelDevices[0].repeat, 4);
   // null, not 0: nothing was said, so the global setting decides.
   assert.equal(config.devmelDevices[1].repeat, null);
-});
-
-test('the shutter orders default to UP/DOWN, and follow the global setting', () => {
-  const list = JSON.stringify({
-    devices: { Shutter: { type: 4098, pid: 300, addr: 3 } },
-  });
-
-  assert.equal(normalizeConfig({ devices: list }).shutterOrders, SHUTTER_ORDERS.UP_DOWN);
-  assert.equal(normalizeConfig({ devices: list }).devmelDevices[0].orders, SHUTTER_ORDERS.UP_DOWN);
-
-  const openClose = normalizeConfig({ devices: list, shutter_open_close: true });
-  assert.equal(openClose.shutterOrders, SHUTTER_ORDERS.OPEN_CLOSE);
-  assert.equal(openClose.devmelDevices[0].orders, SHUTTER_ORDERS.OPEN_CLOSE);
-});
-
-test('a shutter can carry the spelling its own protocol answers to', () => {
-  const config = normalizeConfig({
-    devices: JSON.stringify({
-      devices: {
-        Somfy: { type: 4098, pid: 300, addr: 3, orders: 'open_close' },
-        Loose: { type: 4098, pid: 301, addr: 4, orders: 'OPEN/CLOSE' },
-        Stubborn: { type: 4098, pid: 302, addr: 5, orders: 'up-down' },
-        Ordinary: { type: 4098, pid: 303, addr: 6 },
-        Nonsense: { type: 4098, pid: 304, addr: 7, orders: 'sideways' },
-      },
-    }),
-  });
-  const orders = (name) => config.devmelDevices.find((device) => device.name === name).orders;
-
-  assert.equal(orders('Somfy'), SHUTTER_ORDERS.OPEN_CLOSE);
-  assert.equal(orders('Loose'), SHUTTER_ORDERS.OPEN_CLOSE);
-  assert.equal(orders('Stubborn'), SHUTTER_ORDERS.UP_DOWN);
-  // Nothing said, and a word nobody recognizes: both follow the global setting
-  // rather than quietly driving the shutter the other way.
-  assert.equal(orders('Ordinary'), SHUTTER_ORDERS.UP_DOWN);
-  assert.equal(orders('Nonsense'), SHUTTER_ORDERS.UP_DOWN);
 });
 
 test('a connection string the box will refuse says why, before the box does', () => {

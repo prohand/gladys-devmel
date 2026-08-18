@@ -150,20 +150,6 @@
       "max": 5
     },
     {
-      "key": "shutter_open_close",
-      "type": "boolean",
-      "label": {
-        "en": "Drive shutters with Open/Close",
-        "fr": "Piloter les volets en Ouvrir/Fermer"
-      },
-      "description": {
-        "en": "A shutter order has two spellings on the air, Up/Down and Open/Close, and a protocol may know only one of them — Devmel's own plugins disagree about which to send. Gladys sends Up/Down by default. Turn this on when the AirSend app drives your shutter and Gladys does not: the logs then show the order leaving and its echo coming back, and nothing moves. Stop is the same either way. A device can override it with its own orders value (\"up_down\" or \"open_close\").",
-        "fr": "Un ordre de volet s'écrit de deux façons sur les ondes, Monter/Descendre et Ouvrir/Fermer, et un protocole peut ne connaître que l'une des deux — les plugins de Devmel eux-mêmes ne sont pas d'accord. Gladys envoie Monter/Descendre par défaut. Activez ceci si l'application AirSend pilote votre volet et pas Gladys : les journaux montrent alors l'ordre qui part et son écho qui revient, et rien ne bouge. Stop s'écrit pareil dans les deux cas. Un appareil peut la surcharger avec sa propre valeur orders (\"up_down\" ou \"open_close\")."
-      },
-      "required": false,
-      "default": false
-    },
-    {
       "key": "poll_frequency",
       "type": "number",
       "label": {
