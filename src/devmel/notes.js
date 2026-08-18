@@ -93,39 +93,6 @@ export const COMMANDS = {
   FAVORITE: 'favorite',
 };
 
-/**
- * The two spellings of a shutter order.
- *
- * The protocol has both, and they are not synonyms on the air: an encoder maps
- * a state to the button of a radio frame, and a protocol that knows OPEN/CLOSE
- * may know nothing of UP/DOWN — or the other way round. Devmel's own plugins
- * disagree about which to use (the Home Assistant component sends UP/DOWN, the
- * Domoticz one sends OPEN/CLOSE), because both are right, on different
- * protocols.
- *
- * Getting it wrong is invisible from everywhere except the shutter: the service
- * answers 200, the box transmits, its own echo comes back — and nothing moves,
- * while the AirSend app drives the very same device without trouble. Hence the
- * setting, and hence this table rather than a constant.
- */
-export const SHUTTER_ORDERS = {
-  UP_DOWN: 'up_down',
-  OPEN_CLOSE: 'open_close',
-};
-
-/**
- * The pair of states a shutter is driven with. STOP is absent on purpose: it is
- * spelled the same way in both, and the one order no protocol disagrees about.
- *
- * @param {string} [orders] one of {@link SHUTTER_ORDERS}
- * @returns {{up: number, down: number}}
- */
-export function shutterStates(orders) {
-  return orders === SHUTTER_ORDERS.OPEN_CLOSE
-    ? { up: STATE_VALUES.OPEN, down: STATE_VALUES.CLOSE }
-    : { up: STATE_VALUES.UP, down: STATE_VALUES.DOWN };
-}
-
 /** Build a `{ method: SET, type: STATE, value }` note. */
 export function stateNote(value) {
   return { method: NOTE_METHODS.SET, type: NOTE_TYPES.STATE, value };

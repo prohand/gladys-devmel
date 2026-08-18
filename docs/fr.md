@@ -38,46 +38,6 @@ Conservez toujours la partie `?gw=0&rhost=<IPv4 du boîtier>` : sans elle le
 boîtier n'est joignable qu'en IPv6 lien-local et le service renvoie des
 erreurs inattendues.
 
-#### Où cette chaîne se règle sur airsend.cloud
-
-Elle n'est pas à écrire à la main : elle est produite par l'écran
-**Communication** de [app.airsend.cloud](https://app.airsend.cloud). Chaque
-champ y écrit un morceau de la chaîne, et deux d'entre eux décident si
-l'intégration parlera à votre boîtier par votre réseau ou par internet.
-
-| Champ sur airsend.cloud                    | Ce qu'il écrit dans la chaîne | Ce qu'il faut y mettre pour Gladys                                                |
-| ------------------------------------------ | ----------------------------- | --------------------------------------------------------------------------------- |
-| **IP locale**                              | la partie après `@`           | Rien à saisir : c'est l'adresse IPv6 lien-local du boîtier, la même que `localip` |
-| **Mot de passe**                           | la partie avant `@`           | Le mot de passe du boîtier                                                        |
-| **Passerelle internet**                    | `gw=1` ou `gw=0`              | **Désactivée**, soit `gw=0` : l'ordre reste sur votre réseau                      |
-| **Adresse secondaire**                     | `rhost=`                      | L'**IPv4 du boîtier** sur votre réseau, pas celle de votre box internet           |
-| **Mode de connexion** / **WebService Url** | rien                          | Ne concerne que la page airsend.cloud elle-même (voir ci-dessous)                 |
-| **Délai maximum (ms)**                     | rien                          | Laissez vide                                                                      |
-
-**Mode de connexion** et **WebService Url** disent comment la _page
-airsend.cloud_ joint votre boîtier depuis votre navigateur — typiquement un
-service AirSend qui tourne sur votre PC, d'où le `http://127.0.0.1:33863`.
-Gladys ne s'en sert jamais : elle fait tourner son propre service dans son
-conteneur. Ces deux champs peuvent donc rester comme ils sont.
-
-Les deux qui comptent sont les autres :
-
-- **Passerelle internet** activée écrit `gw=1`, et le boîtier devient joignable
-  en passant par internet. C'est pratique depuis un téléphone en 4G, et c'est
-  un détour inutile pour une intégration qui est sur le même réseau que le
-  boîtier : chaque ordre fait un aller-retour par le cloud, ce qui se voit dans
-  les journaux (une bonne seconde entre l'ordre et son écho, au lieu de deux ou
-  trois dixièmes). Désactivez-la, et gardez `gw=0`.
-- **Adresse secondaire** écrit `rhost=`. C'est l'adresse que le service AirSend
-  compose **depuis le conteneur de Gladys**, et elle doit donc être l'IPv4 du
-  boîtier, joignable depuis l'hôte Gladys. Relevez-la dans les baux DHCP de
-  votre box internet et réservez-la, pour qu'elle ne change pas ; sans elle, le
-  boîtier n'est joignable qu'en IPv6 lien-local et le service renvoie des
-  erreurs inattendues.
-
-Après toute modification, cliquez sur **Enregistrer**, puis **recopiez** la
-chaîne de connexion dans Gladys : elle a changé.
-
 #### Utiliser un service que vous faites déjà tourner
 
 Si le service web AirSend tourne déjà quelque part sur votre réseau — l'add-on
@@ -176,25 +136,24 @@ sous `channel` plutôt que le couple `pid` / `addr` à plat. Cela reste du JSON 
 
 ### Options d'un appareil
 
-| Option              | Signification                                                                   |
-| ------------------- | ------------------------------------------------------------------------------- |
-| `type`              | Type d'appareil (tableau ci-dessus), **obligatoire**                            |
-| `channel`           | Canal radio (`id`, `source`, `mac`, `seed`), **obligatoire**                    |
-| `pid`               | Le `channel.id` de l'export JSON (utilisez l'un ou l'autre)                     |
-| `addr`              | Le `channel.source` de l'export JSON                                            |
-| `remotes`           | Autres émetteurs qui pilotent l'appareil (voir « La télécommande murale »)      |
-| `spurl`             | Chaîne de connexion propre à cet appareil, si différente de la globale          |
-| `wait`              | Attendre la confirmation radio avant de répondre (`false` par défaut)           |
-| `repeat`            | Émissions supplémentaires des ordres envoyés à cet appareil (voir plus bas)     |
-| `invert`            | Inverser ouverture et fermeture, pour les volets posés à l'envers               |
-| `orders`            | Sur un volet : `up_down` ou `open_close`, l'écriture de l'ordre (voir plus bas) |
-| `travel_up`         | Sur un volet : durée d'une ouverture complète, en secondes (voir plus bas)      |
-| `travel_down`       | Sur un volet : durée d'une fermeture complète, en secondes                      |
-| `travel`            | Les deux à la fois, pour un moteur qui se comporte pareil dans les deux sens    |
-| `favorite_position` | Sur un volet : la position programmée dans le moteur, en %                      |
-| `sensors`           | Sur un boîtier (`type: 0`), exposer ses capteurs de température et lumière      |
-| `refresh`           | Intervalle de lecture de ces capteurs, en secondes                              |
-| `features`          | Sur un capteur (`type: 1`) : `temperature`, `humidity`, `illuminance`, `click`  |
+| Option              | Signification                                                                  |
+| ------------------- | ------------------------------------------------------------------------------ |
+| `type`              | Type d'appareil (tableau ci-dessus), **obligatoire**                           |
+| `channel`           | Canal radio (`id`, `source`, `mac`, `seed`), **obligatoire**                   |
+| `pid`               | Le `channel.id` de l'export JSON (utilisez l'un ou l'autre)                    |
+| `addr`              | Le `channel.source` de l'export JSON                                           |
+| `remotes`           | Autres émetteurs qui pilotent l'appareil (voir « La télécommande murale »)     |
+| `spurl`             | Chaîne de connexion propre à cet appareil, si différente de la globale         |
+| `wait`              | Attendre la confirmation radio avant de répondre (`false` par défaut)          |
+| `repeat`            | Émissions supplémentaires des ordres envoyés à cet appareil (voir plus bas)    |
+| `invert`            | Inverser ouverture et fermeture, pour les volets posés à l'envers              |
+| `travel_up`         | Sur un volet : durée d'une ouverture complète, en secondes (voir plus bas)     |
+| `travel_down`       | Sur un volet : durée d'une fermeture complète, en secondes                     |
+| `travel`            | Les deux à la fois, pour un moteur qui se comporte pareil dans les deux sens   |
+| `favorite_position` | Sur un volet : la position programmée dans le moteur, en %                     |
+| `sensors`           | Sur un boîtier (`type: 0`), exposer ses capteurs de température et lumière     |
+| `refresh`           | Intervalle de lecture de ces capteurs, en secondes                             |
+| `features`          | Sur un capteur (`type: 1`) : `temperature`, `humidity`, `illuminance`, `click` |
 
 Un boîtier déclaré sans `sensors: true` ne crée aucun appareil dans Gladys :
 il n'est là que pour porter la chaîne de connexion.
@@ -240,58 +199,6 @@ partie de la réponse — et le réabonnement à l'écoute, qui a lui aussi beso
 la radio, attend maintenant que la file soit vide au lieu de se glisser entre
 deux ordres. C'est ce qui faisait qu'un « Fermer » cliqué juste après un
 « Ouvrir » mettait quelques secondes à partir.
-
-### L'ordre part, le boîtier confirme, et le volet ne bouge pas
-
-C'est la panne la plus déroutante de toutes, parce que **tout a l'air de
-marcher** : les journaux montrent l'ordre qui part, le boîtier ne signale
-aucune erreur, son écho revient — et le volet ne fait rien, alors que
-l'application AirSend le pilote sans problème.
-
-```
-[INFO]  [shutter] "Salon complet" -> CLOSE (radio DOWN)
-[DEBUG] [devices] Own order echoed back for "Salon complet": pid 25455, addr 106599
-```
-
-Quand cet écho revient, tout ce qui est entre Gladys et l'antenne fonctionne :
-la chaîne de connexion, le service, le boîtier, l'émission. Ce qui reste, c'est
-**le bouton émis**.
-
-Un ordre de volet s'écrit en effet de deux façons dans le protocole AirSend, et
-ce ne sont pas des synonymes sur les ondes :
-
-| Écriture     | Ordres envoyés     |
-| ------------ | ------------------ |
-| `up_down`    | MONTER / DESCENDRE |
-| `open_close` | OUVRIR / FERMER    |
-
-Un protocole radio connaît l'une, l'autre, ou les deux — les plugins de Devmel
-eux-mêmes ne sont pas d'accord sur celle à envoyer. Un boîtier à qui l'on
-demande une écriture que le protocole du moteur n'utilise pas émet quand même
-une trame, la confirme, et le moteur l'ignore. Vu du canapé, c'est un volet qui
-n'obéit pas.
-
-Gladys envoie **MONTER / DESCENDRE** par défaut. Si l'application AirSend
-pilote votre volet et pas Gladys, cochez **Piloter les volets en
-Ouvrir/Fermer** dans la configuration : les ordres partent alors en OUVRIR /
-FERMER. Stop s'écrit pareil dans les deux cas, il n'est pas concerné.
-
-La ligne de journal le dit à chaque ordre : `-> CLOSE (radio DOWN)` devient
-`-> CLOSE (radio CLOSE)` une fois le réglage changé — de quoi vérifier d'un
-coup d'œil ce qui est réellement parti sur l'air.
-
-Le réglage est global, mais une maison est rarement d'un seul protocole : un
-volet qui n'est pas d'accord avec les autres porte la sienne, sans changer
-celle de ses voisins.
-
-```json
-{
-  "devices": {
-    "Baie vitrée": { "type": 4098, "pid": 25455, "addr": 8295, "orders": "open_close" },
-    "Portail": { "type": 4098, "pid": 1368, "addr": 542, "orders": "up_down" }
-  }
-}
-```
 
 ### Gladys ne se prend pas pour la télécommande
 
@@ -845,8 +752,6 @@ votre clé Open API dans le bloc **Webhooks** de l'écran de configuration.
 | `Service AirSend intégré indisponible` | Les logs de l'intégration : le service y journalise son démarrage                          |
 | Le boîtier répond à la main, pas ici   | L'IPv4 `rhost=` doit être joignable **depuis le conteneur**, pas seulement de votre PC     |
 | Il faut cliquer plusieurs fois         | Montez **Répétitions des commandes** à `2` ou `3`, ou le `repeat` de l'appareil            |
-| L'ordre part, le volet ne bouge pas    | **Piloter les volets en Ouvrir/Fermer** : le protocole n'utilise pas MONTER/DESCENDRE      |
-| Un ordre met une seconde à partir      | `gw=1` dans la chaîne : coupez **Passerelle internet** sur airsend.cloud                   |
 | Un volet n'affiche pas de position     | Chronométrez-le : `travel_up` / `travel_down`, puis ouvrez-le ou fermez-le à fond une fois |
 | La position dérive avec le temps       | Rechronométrez la course, et ouvrez le volet à fond une fois par jour pour le recaler      |
 | Aucune trame d'une télécommande 868    | **Tester la connexion** : le canal `1` est du 433 MHz. Déclarez l'appareil, ou son `pid`   |

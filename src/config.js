@@ -12,7 +12,6 @@
 // -----------------------------------------------------------------------------
 
 import { createLogger } from '@gladysassistant/integration-sdk';
-import { SHUTTER_ORDERS } from './devmel/notes.js';
 import { SERVICE_URL as EMBEDDED_SERVICE_URL } from './devmel/service.js';
 
 const logger = createLogger({ name: 'config' });
@@ -28,7 +27,6 @@ export const DEFAULT_CONFIG = {
   devices: '', // JSON exported from airsend.cloud
   listen_channel: null, // radio protocol to listen to; null = deduced, 0 = disabled
   command_repeat: 1, // extra emissions of an order, the way a remote repeats it
-  shutter_open_close: false, // drive shutters with OPEN/CLOSE rather than UP/DOWN
   accept_unreliable: false, // use the frames the box itself grades as doubtful
   poll_frequency: 300, // seconds between two sensor reads
   debug_logs: false, // raise the log level to debug, from the Configuration screen
@@ -77,7 +75,6 @@ export function normalizeConfig(raw = {}) {
     poll_frequency: toPositiveNumber(raw.poll_frequency, DEFAULT_CONFIG.poll_frequency),
     use_embedded_service: raw.use_embedded_service !== false,
     accept_unreliable: toBoolean(raw.accept_unreliable, DEFAULT_CONFIG.accept_unreliable),
-    shutter_open_close: toBoolean(raw.shutter_open_close, DEFAULT_CONFIG.shutter_open_close),
     debug_logs: toBoolean(raw.debug_logs, DEFAULT_CONFIG.debug_logs),
   };
 
@@ -88,12 +85,6 @@ export function normalizeConfig(raw = {}) {
   config.embeddedService = config.use_embedded_service && !config.service_url;
   config.effectiveServiceUrl =
     config.service_url || (config.embeddedService ? EMBEDDED_SERVICE_URL : '');
-
-  // The spelling of a shutter order, resolved once: devices read a value of
-  // SHUTTER_ORDERS, never the boolean the form carries.
-  config.shutterOrders = config.shutter_open_close
-    ? SHUTTER_ORDERS.OPEN_CLOSE
-    : SHUTTER_ORDERS.UP_DOWN;
 
   config.devmelDevices = parseDevices(raw.devices, config);
   return config;
@@ -239,12 +230,6 @@ function normalizeDevice(name, entry, config) {
     repeat: toRepeat(firstDefined(entry.repeat, entry.repeats), null),
     // Some covers are wired the other way round (sun sails, screens).
     invert: toBoolean(entry.invert, false),
-    // Which pair of radio states drives THIS shutter, when its protocol
-    // disagrees with the global setting (see `toShutterOrders`).
-    orders: toShutterOrders(
-      firstDefined(entry.orders, entry.shutter_orders),
-      config.shutterOrders ?? SHUTTER_ORDERS.UP_DOWN,
-    ),
     // How long a full travel takes, in seconds. This is what makes the position
     // of a one-way shutter computable (see src/devmel/travel.js); a single
     // `travel` serves both directions when the motor is symmetrical.
@@ -523,40 +508,6 @@ function toRepeat(value, fallback) {
     return fallback;
   }
   return Math.max(0, Math.min(MAX_COMMAND_REPEAT, Math.trunc(number)));
-}
-
-/**
- * The spelling of the shutter orders written next to one device.
- *
- * A house is rarely all one protocol — a Somfy shutter and a Bubendorff one do
- * not answer the same buttons — so the global setting is only a default, and a
- * device that disagrees says so in the list it is declared in:
- *
- *   "orders": "open_close"   OPEN / CLOSE
- *   "orders": "up_down"      UP / DOWN
- *
- * Written loosely on purpose: `openclose`, `open-close` and `OPEN/CLOSE` all
- * name the same pair, and a word nobody recognizes falls back to the global
- * setting rather than silently driving the shutter the other way.
- *
- * @returns {string} one of {@link SHUTTER_ORDERS}
- */
-function toShutterOrders(value, fallback) {
-  const wanted = String(value ?? '')
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z]/g, '');
-  if (!wanted) {
-    return fallback;
-  }
-  if (wanted === 'openclose' || wanted === 'closeopen') {
-    return SHUTTER_ORDERS.OPEN_CLOSE;
-  }
-  if (wanted === 'updown' || wanted === 'downup') {
-    return SHUTTER_ORDERS.UP_DOWN;
-  }
-  logger.warn(`Unknown shutter orders "${value}": expected "up_down" or "open_close"`);
-  return fallback;
 }
 
 function toPositiveNumber(value, fallback) {
