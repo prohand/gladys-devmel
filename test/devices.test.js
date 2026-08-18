@@ -1125,3 +1125,67 @@ test('a remote declared by its protocol alone follows the frames nobody can attr
   assert.equal(applied, 1);
   assert.deepEqual(gladys.statesOf('shutter:300-3:state'), [-1]);
 });
+
+test('a shutter whose protocol says Open/Close is driven with Open/Close', async () => {
+  const gladys = createFakeGladys();
+  const config = normalizeConfig({
+    shutter_open_close: true,
+    spurl: 'sp://pass@[fe80::1]?rhost=192.168.1.50',
+    devices: JSON.stringify({
+      devices: {
+        Salon: { type: 4098, pid: 25455, addr: 106599 },
+        Pergola: { type: 4098, pid: 25455, addr: 106600, invert: true },
+        // One protocol per house is the exception, not the rule.
+        Garage: { type: 4098, pid: 300, addr: 3, orders: 'up_down' },
+      },
+    }),
+  });
+  const client = createFakeClient({ config });
+  const send = async (name, value) => {
+    const found = findDeviceByExternalId(gladys, config, deviceExternalId(config, name));
+    await found.blueprint.onSetValue(gladys, {
+      device: found.device,
+      feature: featureOf(gladys, config, name, 'state'),
+      value,
+      client,
+    });
+  };
+
+  await send('Salon', -1);
+  assert.equal(client.noteAt(0).value, STATE_VALUES.CLOSE);
+  await send('Salon', 1);
+  assert.equal(client.noteAt(1).value, STATE_VALUES.OPEN);
+  // STOP is spelled the same in both pairs: nothing to choose.
+  await send('Salon', 0);
+  assert.equal(client.noteAt(2).value, STATE_VALUES.STOP);
+  // `invert` still swaps the two, whichever pair they are drawn from.
+  await send('Pergola', 1);
+  assert.equal(client.noteAt(3).value, STATE_VALUES.CLOSE);
+  // And a device that named its own spelling keeps it.
+  await send('Garage', -1);
+  assert.equal(client.noteAt(4).value, STATE_VALUES.DOWN);
+});
+
+test('the log of an order names the radio state it went out as', async () => {
+  const { gladys, config, client } = setup();
+  const found = findDeviceByExternalId(
+    gladys,
+    config,
+    deviceExternalId(config, 'Living room shutter'),
+  );
+  const logs = captureLogs(async () => {
+    await found.blueprint.onSetValue(gladys, {
+      device: found.device,
+      feature: featureOf(gladys, config, 'Living room shutter', 'state'),
+      value: -1,
+      client,
+    });
+  });
+  await logs.result;
+  const lines = logs.of('shutter');
+
+  assert.ok(
+    lines.some((line) => line.includes('"Living room shutter" -> CLOSE (radio DOWN)')),
+    lines.join('\n'),
+  );
+});
