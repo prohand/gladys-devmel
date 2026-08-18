@@ -409,3 +409,33 @@ test('an emitter heard and graded too low is listed, with what happened to it', 
   assert.match(report.en, /its last frame was dropped before any device \(unreliable, graded 2\)/);
   assert.match(report.fr, /sa dernière trame a été écartée avant tout appareil/);
 });
+
+test('a mistyped connection string is named before the box is asked about it', async () => {
+  const config = normalizeConfig({ spurl: 'sp://pass@fe80:dcf6:e5ff:fe8f:89cd?gw=1' });
+  const status = await describeConnection(fakeClient(), config, RUNNING);
+
+  // The probe would have passed — it does not use the connection string — and
+  // the screen would have said "connected" while every order answered 401.
+  assert.equal(status.connected, false);
+  assert.match(status.message.fr, /n’est pas une adresse IPv6 valide/);
+
+  const report = await testConnection(fakeClient(), config, RUNNING);
+  assert.match(report.en, /Connection string: "fe80:dcf6:e5ff:fe8f:89cd" is not a valid IPv6/);
+});
+
+test('test_connection shows the connection string, without the password in it', async () => {
+  const config = normalizeConfig({
+    spurl: 'sp://0123456789abcdef@fe80::1?gw=1&rhost=192.168.1.50',
+  });
+  const report = await testConnection(fakeClient(), config, RUNNING);
+
+  // Nothing is wrong with this one: it is printed anyway, because half of what
+  // it catches is what no check can name — the address of the other box, a
+  // gw=1 nobody asked for.
+  assert.deepEqual(config.spurlProblems, []);
+  assert.match(
+    report.fr,
+    /Chaîne de connexion : sp:\/\/<16 characters>@fe80::1\?gw=1&rhost=192\.168\.1\.50/,
+  );
+  assert.doesNotMatch(report.en, /0123456789abcdef/);
+});

@@ -28,8 +28,11 @@ So the only thing the local channel needs from you is the **connection
 string** exported by airsend.cloud, which looks like:
 
 ```
-sp://password@[fe80::xxxx:xxxx:xxxx:xxxx]?gw=0&rhost=192.168.1.50
+sp://password@fe80::xxxx:xxxx:xxxx:xxxx?gw=0&rhost=192.168.1.50
 ```
+
+Paste it **exactly as airsend.cloud gives it to you**: add nothing, remove
+nothing, do not retype it.
 
 Always keep the `?gw=0&rhost=<box IPv4>` part: without it the box is reached
 by IPv6 link-local only and the service answers unexpected errors.
@@ -72,6 +75,48 @@ The two that matter are the others:
 
 After any change, click **Save**, then **copy the connection string again**
 into Gladys: it changed.
+
+#### Never retype it
+
+Copy and paste the whole string, from `sp://` to the end, into an emptied field.
+The box answers a damaged string exactly what it answers a wrong password:
+
+```
+[WARN] [airsend] Local transfer failed for "Chambre parents": Invalid connection string (HTTP 401)
+[WARN] Could not listen through "AirSend box": Invalid connection string (HTTP 401)
+```
+
+What gets damaged, by retyping and by proofreading alike:
+
+- **the double colon.** A link-local address is written
+  `fe80::dcf6:e5ff:fe8f:89cd` — `fe80`, then **two** colons. Retyped, it becomes
+  `fe80:dcf6:e5ff:fe8f:89cd`: five groups of an eight-group address. Still
+  address-shaped, no longer an address;
+- **what looks like it needs correcting.** A URL normally puts an IPv6 address
+  between square brackets; airsend.cloud exports it without them, and boxes
+  answer that form. Both spellings exist, neither is to be added: what
+  airsend.cloud gives you is what to paste;
+- **what cannot be seen.** The field is a secret and shows nothing but dots: the
+  masking dots copied instead of the password, a thin space picked up from a web
+  page, an apostrophe turned typographic by a note-taking app — all of it pastes
+  in with nothing to show for it.
+
+The integration now checks what can be checked without a box — the `sp://`, the
+password, the address, characters that have no business being there — and writes
+it to the logs when the configuration loads, on the Configuration screen, and on
+the _Local_ line of **Test the connection**.
+
+Above all, that action shows **the string itself, password removed**:
+
+```
+Connection string: sp://<16 characters>@fe80::dcf6:e5ff:fe8f:89cd?gw=0&rhost=192.168.1.50
+```
+
+It is the only way to see what Gladys is really holding. Half the mistakes it
+catches are ones no check can name: the address of the other box, a `gw=1`
+nobody asked for, an `rhost` left on the old IP. The password itself is never
+shown and never logged — only its length is, which is enough to spot a mask
+pasted in its place.
 
 #### Using a service you already run
 
@@ -748,7 +793,9 @@ The **Detailed logs (debug)** field of the Configuration screen turns them on.
 It takes effect at once, with no restart: tick it, press the remote, read the
 logs, untick it. It is verbose, and not meant to stay on.
 
-Your `sp://` connection string is never logged, at any level.
+The **password** of your `sp://` connection string is never logged, at any
+level: the rest of the string — the address, `gw`, `rhost` — is, at debug, with
+the password replaced by its length alone (see "Never retype it").
 
 If you would rather use the container environment variable, `LOG_LEVEL` still
 works and still wins: the switch raises the level to debug while it is on, then
@@ -795,7 +842,7 @@ provides: link your Gladys Plus account and paste your Open API key in the
 
 | Symptom                            | What to check                                                                          |
 | ---------------------------------- | -------------------------------------------------------------------------------------- |
-| `Invalid connection string`        | The `sp://` URL, and that its password matches the box                                 |
+| `Invalid connection string`        | **Test the connection**: it shows the `sp://` string, password removed                 |
 | `Invalid input`                    | The `channel` of the device (`id`/`pid` and `source`/`addr`)                           |
 | `no radio channel` in the logs     | The entry carries no channel: it needs `channel.id`, or the `pid`/`addr` pair          |
 | `no radio confirmation`            | Normal on equipment without feedback: set `wait: false`                                |

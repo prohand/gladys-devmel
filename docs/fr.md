@@ -31,8 +31,11 @@ La seule chose que le canal local attend de vous est donc la **chaîne de
 connexion** exportée par airsend.cloud, de la forme :
 
 ```
-sp://motdepasse@[fe80::xxxx:xxxx:xxxx:xxxx]?gw=0&rhost=192.168.1.50
+sp://motdepasse@fe80::xxxx:xxxx:xxxx:xxxx?gw=0&rhost=192.168.1.50
 ```
+
+Collez-la **exactement telle qu'airsend.cloud vous la donne** : n'ajoutez rien,
+n'enlevez rien, ne la retapez pas.
 
 Conservez toujours la partie `?gw=0&rhost=<IPv4 du boîtier>` : sans elle le
 boîtier n'est joignable qu'en IPv6 lien-local et le service renvoie des
@@ -77,6 +80,49 @@ Les deux qui comptent sont les autres :
 
 Après toute modification, cliquez sur **Enregistrer**, puis **recopiez** la
 chaîne de connexion dans Gladys : elle a changé.
+
+#### Ne la retapez jamais
+
+Copiez-collez la chaîne entière, du `sp://` jusqu'au bout, dans un champ vidé au
+préalable. Le boîtier répond à une chaîne abîmée exactement ce qu'il répond à un
+mauvais mot de passe :
+
+```
+[WARN] [airsend] Local transfer failed for "Chambre parents": Invalid connection string (HTTP 401)
+[WARN] Could not listen through "AirSend box": Invalid connection string (HTTP 401)
+```
+
+Ce qui s'abîme, à la ressaisie comme à la relecture :
+
+- **les deux-points doubles.** Une adresse lien-local s'écrit
+  `fe80::dcf6:e5ff:fe8f:89cd` — `fe80`, puis **deux** deux-points. Retapée, elle
+  devient `fe80:dcf6:e5ff:fe8f:89cd` : cinq groupes d'une adresse qui en compte
+  huit. Toujours en forme d'adresse, et plus une adresse ;
+- **ce qu'on croit devoir corriger.** Une adresse IPv6 se met normalement entre
+  crochets dans une URL ; airsend.cloud, lui, l'exporte sans, et les boîtiers
+  répondent à cette forme-là. Les deux s'écrivent, aucune ne se rajoute : ce
+  qu'airsend.cloud donne est ce qu'il faut coller ;
+- **ce qui ne se voit pas.** Le champ est un secret et n'affiche que des points :
+  les points de masquage recopiés à la place du mot de passe, une espace fine
+  ramassée dans une page web, une apostrophe rendue typographique par un
+  bloc-notes — tout cela se colle sans que rien ne le montre.
+
+L'intégration vérifie maintenant ce qui est vérifiable sans boîtier — le
+`sp://`, le mot de passe, l'adresse, les caractères qui n'ont rien à y faire —
+et l'écrit dans les journaux au chargement de la configuration, sur l'écran de
+configuration, et sur la ligne _Local_ de **Tester la connexion**.
+
+Et cette action affiche surtout **la chaîne elle-même, mot de passe retiré** :
+
+```
+Chaîne de connexion : sp://<16 characters>@fe80::dcf6:e5ff:fe8f:89cd?gw=0&rhost=192.168.1.50
+```
+
+C'est la seule façon de voir ce que Gladys tient vraiment. La moitié des erreurs
+qu'on y repère ne sont vérifiables par aucun contrôle : l'adresse de l'autre
+boîtier, un `gw=1` que personne n'a demandé, un `rhost` resté sur l'ancienne IP.
+Le mot de passe, lui, n'est jamais affiché ni journalisé — seule sa longueur
+l'est, ce qui suffit à repérer un masque collé à sa place.
 
 #### Utiliser un service que vous faites déjà tourner
 
@@ -784,8 +830,10 @@ Il prend effet immédiatement, sans redémarrer l'intégration : cochez, appuyez
 sur la télécommande, lisez les logs, décochez. C'est verbeux, ce n'est pas fait
 pour rester allumé.
 
-Votre chaîne de connexion `sp://` n'est jamais journalisée, quel que soit le
-niveau.
+Le **mot de passe** de votre chaîne de connexion `sp://` n'est jamais
+journalisé, quel que soit le niveau : le reste de la chaîne — l'adresse, `gw`,
+`rhost` — l'est en debug, mot de passe remplacé par sa seule longueur (voir
+« Ne la retapez jamais »).
 
 Si vous préférez la variable d'environnement du conteneur, `LOG_LEVEL` marche
 toujours et reste prioritaire : l'interrupteur monte le niveau à debug tant

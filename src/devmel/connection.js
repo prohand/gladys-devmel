@@ -8,7 +8,7 @@
 //     demand, in more detail.
 // -----------------------------------------------------------------------------
 
-import { DEVICE_TYPES } from '../config.js';
+import { describeSpurl, DEVICE_TYPES } from '../config.js';
 import { planListening } from './listening.js';
 import { describeEmitter } from './heard.js';
 import { hearsChannel } from '../devices/index.js';
@@ -61,6 +61,20 @@ export async function describeConnection(client, config, service = null) {
             en: 'Not configured yet: fill in the AirSend Web Service URL and its connection string.',
             fr: "Pas encore configuré : renseignez l'URL du service AirSend et sa chaîne de connexion.",
           },
+    };
+  }
+
+  // A connection string the box will refuse is worth saying BEFORE the service
+  // is probed: the probe passes (it does not use the string), the screen says
+  // "connected", and every single order answers 401.
+  const [problem] = config.spurlProblems ?? [];
+  if (problem) {
+    return {
+      connected: false,
+      message: {
+        en: `Connection string: ${problem.en}`,
+        fr: `Chaîne de connexion : ${problem.fr}`,
+      },
     };
   }
 
@@ -125,6 +139,20 @@ export async function testConnection(
   if (serviceError) {
     en.push(`Service: the built-in AirSend service is not running (${serviceError}).`);
     fr.push(`Service : le service AirSend intégré ne tourne pas (${serviceError}).`);
+  }
+
+  // The string itself, password removed. It is the one thing a 401 never says
+  // and nobody can look up: the field shows dots, and the string is never
+  // logged. Printed whether or not anything is wrong with it — half the
+  // mistakes it catches are ones no check can name (the address of the other
+  // box, a gw=1 nobody asked for).
+  if (config.spurl) {
+    en.push(`Connection string: ${describeSpurl(config.spurl)}`);
+    fr.push(`Chaîne de connexion : ${describeSpurl(config.spurl)}`);
+  }
+  for (const problem of config.spurlProblems ?? []) {
+    en.push(`Connection string: ${problem.en}`);
+    fr.push(`Chaîne de connexion : ${problem.fr}`);
   }
 
   if (config.effectiveServiceUrl && config.spurl) {

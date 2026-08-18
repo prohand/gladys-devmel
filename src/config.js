@@ -11,6 +11,7 @@
 // is — one line included, which is what the single-line field allows.
 // -----------------------------------------------------------------------------
 
+import { isIPv6 } from 'node:net';
 import { createLogger } from '@gladysassistant/integration-sdk';
 import { SHUTTER_ORDERS } from './devmel/notes.js';
 import { SERVICE_URL as EMBEDDED_SERVICE_URL } from './devmel/service.js';
@@ -24,7 +25,7 @@ export { EMBEDDED_SERVICE_URL };
 export const DEFAULT_CONFIG = {
   use_embedded_service: true, // run the bundled AirSend Web Service ourselves
   service_url: '', // an AirSend Web Service elsewhere, e.g. http://192.168.1.50:33863/
-  spurl: '', // sp://password@[fe80::…]?gw=0&rhost=192.168.1.50
+  spurl: '', // sp://password@fe80::…?gw=0&rhost=192.168.1.50, as airsend.cloud exports it
   devices: '', // JSON exported from airsend.cloud
   listen_channel: null, // radio protocol to listen to; null = deduced, 0 = disabled
   command_repeat: 1, // extra emissions of an order, the way a remote repeats it
@@ -94,6 +95,19 @@ export function normalizeConfig(raw = {}) {
   config.shutterOrders = config.shutter_open_close
     ? SHUTTER_ORDERS.OPEN_CLOSE
     : SHUTTER_ORDERS.UP_DOWN;
+
+  // What is wrong with the connection string, before the box gets a chance to
+  // answer 401 about it. Kept on the config so every screen that has to explain
+  // the local channel says the same thing (see src/devmel/connection.js).
+  config.spurlProblems = checkSpurl(config.spurl);
+  for (const problem of config.spurlProblems) {
+    logger.warn(`Connection string: ${problem.en}`);
+  }
+  if (config.spurl) {
+    // Password removed — see `describeSpurl`. Debug, because it is only ever
+    // read by someone already looking at why the box refuses them.
+    logger.debug(`Connection string: ${describeSpurl(config.spurl)}`);
+  }
 
   config.devmelDevices = parseDevices(raw.devices, config);
   return config;
@@ -407,7 +421,161 @@ function buildPlatformId(device) {
   return slug(parts.join('-'));
 }
 
-/** Extract the box address from a `sp://…@[fe80::…]?…&rhost=192.168.1.50` URL. */
+/**
+ * What is visibly wrong with a `sp://` connection string.
+ *
+ * The box answers a malformed one exactly the way it answers a wrong password:
+ * `HTTP 401, Invalid connection string`. That is the whole reason this
+ * function exists — "check the sp:// URL" is not advice a user can act on when
+ * the password IS the right one, and the mistake is a colon.
+ *
+ * It is the link-local address that gets mistyped, because it is the one part
+ * nobody reads: `fe80::dcf6:e5ff:fe8f:89cd` retyped by hand loses its double
+ * colon and becomes `fe80:dcf6:e5ff:fe8f:89cd`, five groups of an eight-group
+ * address — still colon-shaped, still plausible, and no longer an address.
+ *
+ * Deliberately not a parser, and deliberately not an opinion about style: it
+ * reports what it is sure about and stays silent about the rest. The square
+ * brackets a URL normally puts around an IPv6 host are the example — airsend.cloud
+ * exports the address bare, boxes answer that form, so both are accepted here
+ * and neither is asked for. A string this function has nothing to say about is
+ * not thereby declared valid: only the box can say that.
+ *
+ * @param {string} spurl the string as the user pasted it
+ * @returns {Array<{en: string, fr: string}>} what to fix, empty when nothing
+ *   obvious is wrong
+ */
+export function checkSpurl(spurl) {
+  const raw = String(spurl ?? '').trim();
+  if (!raw) {
+    // Not typed yet is not mistyped: the Configuration screen already says so.
+    return [];
+  }
+
+  const problems = [];
+  if (!/^sp:\/\//i.test(raw)) {
+    problems.push({
+      en: 'it must start with sp:// — paste the string exported by airsend.cloud whole.',
+      fr: 'elle doit commencer par sp:// — collez telle quelle la chaîne exportée par airsend.cloud.',
+    });
+    return problems;
+  }
+
+  // Anything outside printable ASCII got in on the way, and there are only so
+  // many ways: the masking dots of the field copied instead of its contents, a
+  // zero-width space brought along by a web page, a quote turned typographic by
+  // a note-taking app. All of them are invisible in a field that shows dots.
+  const stray = [...raw].find((character) => character < ' ' || character > '~');
+  if (stray) {
+    problems.push({
+      en:
+        `it contains a character that cannot be in it (U+${codePoint(stray)}). Copy the string ` +
+        'from airsend.cloud again, into an emptied field.',
+      fr:
+        `elle contient un caractère qui ne peut pas s’y trouver (U+${codePoint(stray)}). ` +
+        'Recopiez la chaîne depuis airsend.cloud, dans un champ vidé au préalable.',
+    });
+  }
+  if (/\s/.test(raw)) {
+    problems.push({
+      en: 'it contains a space: the string is one unbroken run of characters.',
+      fr: 'elle contient une espace : la chaîne est d’un seul tenant.',
+    });
+  }
+
+  const rest = raw.slice('sp://'.length);
+  // The password comes first and may itself contain an `@`, so the host is what
+  // follows the LAST one.
+  const at = rest.lastIndexOf('@');
+  if (at < 0) {
+    problems.push({
+      en: 'no password: the string reads sp://<password>@<address>.',
+      fr: 'pas de mot de passe : la chaîne s’écrit sp://<motdepasse>@<adresse>.',
+    });
+    return problems;
+  }
+  if (at === 0) {
+    problems.push({
+      en: 'the password is empty, before the @.',
+      fr: 'le mot de passe est vide, avant le @.',
+    });
+  }
+
+  const host = rest.slice(at + 1).split(/[?/]/)[0];
+  if (!host) {
+    problems.push({
+      en: 'no box address after the @.',
+      fr: 'pas d’adresse de boîtier après le @.',
+    });
+    return problems;
+  }
+
+  // Both spellings are in the wild: airsend.cloud exports the address bare, and
+  // a URL normally brackets an IPv6 host. Neither is corrected here.
+  const bracketed = host.startsWith('[');
+  if (bracketed && !host.includes(']')) {
+    problems.push({
+      en: `the address "${host}" opens a bracket it never closes.`,
+      fr: `l’adresse « ${host} » ouvre un crochet qu’elle ne referme jamais.`,
+    });
+    return problems;
+  }
+  const address = bracketed ? host.slice(1, host.indexOf(']')) : host;
+  // A link-local address may carry the interface it lives on (`%eth0`), which
+  // is part of the address and not part of what makes it valid.
+  const literal = address.split('%')[0];
+
+  if (literal.includes(':') && !isIPv6(literal)) {
+    problems.push({
+      en:
+        `"${literal}" is not a valid IPv6 address. Copy it from airsend.cloud rather than ` +
+        'retyping it — a link-local address is written fe80::… , with TWO colons after fe80.',
+      fr:
+        `« ${literal} » n’est pas une adresse IPv6 valide. Recopiez-la depuis airsend.cloud ` +
+        'plutôt que de la retaper — une adresse lien-local s’écrit fe80::… , avec DEUX ' +
+        'deux-points après fe80.',
+    });
+  }
+  return problems;
+}
+
+/** A character as `U+XXXX`, for naming one nobody can see. */
+function codePoint(character) {
+  return character.codePointAt(0).toString(16).toUpperCase().padStart(4, '0');
+}
+
+/**
+ * The string as Gladys holds it, with the password taken out.
+ *
+ * The one question a 401 leaves unanswered is what the integration is actually
+ * sending, and it is the one question nobody can answer by looking: the field
+ * is a secret, so the Configuration screen shows dots, and the string is never
+ * logged. A user who has pasted the same string four times has no way to see
+ * that what arrived is not what they copied.
+ *
+ * So: everything except the password, which is replaced by its length — enough
+ * to see a missing colon, an address that is not the box's, a `gw=1` nobody
+ * asked for, a mask pasted over the password, and not enough to drive anyone's
+ * shutters.
+ *
+ * @returns {string} e.g. `sp://<16 characters>@fe80::dcf6:e5ff:fe8f:89cd?gw=0&rhost=192.168.1.50`
+ */
+export function describeSpurl(spurl) {
+  const raw = String(spurl ?? '').trim();
+  if (!raw) {
+    return '';
+  }
+  const at = raw.lastIndexOf('@');
+  if (at < 0 || !/^sp:\/\//i.test(raw)) {
+    // Nothing recognizable to take a password out of, so nothing is shown: a
+    // string this shape may be anything, secret included.
+    return `${raw.length} characters, and no sp://…@ in them`;
+  }
+  const password = raw.slice('sp://'.length, at);
+  return `sp://<${password.length} characters>@${raw.slice(at + 1)}`;
+}
+
+/** Extract the box address from a `sp://…@fe80::…?…&rhost=192.168.1.50` URL. */
 export function hostFromSpurl(spurl) {
   if (!spurl) {
     return null;
