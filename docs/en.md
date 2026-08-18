@@ -224,7 +224,6 @@ under `channel` instead of the flat `pid` / `addr` pair. It stays JSON:
 | `wait`              | Wait for the radio confirmation before answering (`false` by default)      |
 | `repeat`            | Extra emissions of the orders sent to this device (see below)              |
 | `invert`            | Swap open and close, for shutters installed the other way round            |
-| `orders`            | On a shutter: `up_down` or `open_close`, how the order is spelled (below)  |
 | `travel_up`         | On a shutter: seconds for a full opening (see below)                       |
 | `travel_down`       | On a shutter: seconds for a full closing                                   |
 | `travel`            | Both at once, for a motor that behaves the same in either direction        |
@@ -275,56 +274,6 @@ the queue. They are a second chance for a frame lost in the noise, not part of
 the answer — and re-arming the listener, which needs the radio too, now waits
 for the queue to empty instead of slipping between two orders. That is what made
 a "Close" clicked right after an "Open" take a few seconds to go out.
-
-### The order goes out, the box confirms, and the shutter does not move
-
-This is the most confusing failure of the lot, because **everything looks
-fine**: the logs show the order leaving, the box reports no error, its echo
-comes back — and the shutter does nothing, while the AirSend app drives it
-without trouble.
-
-```
-[INFO]  [shutter] "Salon complet" -> CLOSE (radio DOWN)
-[DEBUG] [devices] Own order echoed back for "Salon complet": pid 25455, addr 106599
-```
-
-Once that echo comes back, everything between Gladys and the antenna works: the
-connection string, the service, the box, the emission. What is left is **the
-button that went out**.
-
-A shutter order has two spellings in the AirSend protocol, and they are not
-synonyms on the air:
-
-| Spelling     | Orders sent  |
-| ------------ | ------------ |
-| `up_down`    | UP / DOWN    |
-| `open_close` | OPEN / CLOSE |
-
-A radio protocol knows one, the other, or both — Devmel's own plugins disagree
-about which to send. A box asked for a spelling the motor's protocol does not
-use still transmits a frame, still confirms it, and the motor ignores it. From
-the sofa, that is a shutter that will not obey.
-
-Gladys sends **UP / DOWN** by default. If the AirSend app drives your shutter
-and Gladys does not, tick **Drive shutters with Open/Close** in the
-configuration: orders then go out as OPEN / CLOSE. Stop is spelled the same
-either way and is not concerned.
-
-The log line says it on every order: `-> CLOSE (radio DOWN)` becomes
-`-> CLOSE (radio CLOSE)` once the setting is changed — enough to check at a
-glance what actually went on the air.
-
-The setting is global, but a house is rarely all one protocol: a shutter that
-disagrees with the others carries its own, without changing its neighbours'.
-
-```json
-{
-  "devices": {
-    "Bay window": { "type": 4098, "pid": 25455, "addr": 8295, "orders": "open_close" },
-    "Gate": { "type": 4098, "pid": 1368, "addr": 542, "orders": "up_down" }
-  }
-}
-```
 
 ### Gladys does not mistake itself for the remote
 
@@ -851,7 +800,6 @@ provides: link your Gladys Plus account and paste your Open API key in the
 | `Built-in service unavailable`     | The integration logs: the service logs its own startup there                           |
 | The box answers by hand, not here  | The `rhost=` IPv4 must be reachable **from the container**, not just from your desktop |
 | You have to click several times    | Raise **Command repeats** to `2` or `3`, or the device's own `repeat`                  |
-| The order goes out, nothing moves  | **Drive shutters with Open/Close**: the protocol does not use UP/DOWN                  |
 | An order takes a second to leave   | `gw=1` in the connection string: turn **Internet gateway** off on airsend.cloud        |
 | A shutter shows no position        | Time it: `travel_up` / `travel_down`, then open or close it fully once                 |
 | The position drifts over time      | Re-time the travel, and open the shutter fully once a day to resynchronize it          |
