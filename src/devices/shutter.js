@@ -31,6 +31,7 @@ import {
   COMMANDS,
   levelNote,
   READINGS,
+  shutterStates,
   stateNote,
   STATE_VALUES,
 } from '../devmel/notes.js';
@@ -131,8 +132,9 @@ export const shutter = {
     }
 
     const state = Number(value);
-    const note = stateNote(toRadioState(state, device.invert));
-    logger.info(`"${device.name}" -> ${describe(state)}`);
+    const radioState = toRadioState(state, device);
+    const note = stateNote(radioState);
+    logger.info(`"${device.name}" -> ${describe(state)} (radio ${nameOf(radioState)})`);
     await sendNotes(client, device, [note], { uid: feature.external_id, callbackUrl });
 
     if (state === SHUTTER_STATE.STOP) {
@@ -259,7 +261,7 @@ async function driveTo(gladys, device, ids, target, { client, callbackUrl, uid }
       ? `"${device.name}" -> ${destination} % (no reference yet: running to the end stop)`
       : `"${device.name}" -> ${destination} % (timed, from ${current} %)`,
   );
-  await sendNotes(client, device, [stateNote(toRadioState(state, device.invert))], {
+  await sendNotes(client, device, [stateNote(toRadioState(state, device))], {
     uid,
     callbackUrl,
   });
@@ -335,12 +337,33 @@ async function publishPosition(gladys, device, ids, position, createdAt) {
   await publishState(gladys, ids.feature(FEATURE.POSITION), position, createdAt);
 }
 
-function toRadioState(state, invert) {
+/**
+ * The radio state that carries a Gladys shutter state.
+ *
+ * Which pair it is drawn from — UP/DOWN or OPEN/CLOSE — belongs to the
+ * protocol, not to Gladys: see {@link shutterStates}. STOP is the same in both.
+ */
+function toRadioState(state, device) {
   if (state === SHUTTER_STATE.STOP) {
     return STATE_VALUES.STOP;
   }
+  const states = shutterStates(device.orders);
   const goingUp = state === SHUTTER_STATE.OPEN;
-  return (invert ? !goingUp : goingUp) ? STATE_VALUES.UP : STATE_VALUES.DOWN;
+  return (device.invert ? !goingUp : goingUp) ? states.up : states.down;
+}
+
+/**
+ * The name of a radio state, for the log line of an order.
+ *
+ * Worth printing: "-> CLOSE" says what Gladys was asked for, and the two ways
+ * of saying it on the air are exactly what tells a shutter that ignores Gladys
+ * from one that never got the order at all.
+ */
+function nameOf(radioState) {
+  return (
+    Object.keys(STATE_VALUES).find((label) => STATE_VALUES[label] === radioState) ??
+    String(radioState)
+  );
 }
 
 function toShutterState(position) {
