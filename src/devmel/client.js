@@ -16,8 +16,9 @@
 
 import { createHash } from 'node:crypto';
 import { createLogger, DEVICE_TRANSPORTS } from '@gladysassistant/integration-sdk';
-import { checkSpurl, MAX_COMMAND_REPEAT } from '../config.js';
-import { isRepeatable } from './notes.js';
+import { checkSpurl, DEVICE_TYPES, MAX_COMMAND_REPEAT } from '../config.js';
+import { isOrder, isRepeatable, queryNote, QUERY_TYPES } from './notes.js';
+import { describeEventType, explainFailure, isErrorEvent, isPermanentFailure } from './events.js';
 import { sentOrders } from './orders.js';
 
 const logger = createLogger({ name: 'airsend' });
@@ -45,13 +46,50 @@ const ATTEMPTS = 2;
 /** Extra emissions of an order when nothing says otherwise. */
 const DEFAULT_REPEAT = 1;
 
+/**
+ * Past this, the delay between the click and the order leaving is one the user
+ * saw. A local order is a few hundred milliseconds; a second and a half is
+ * already "it did not react", and the only thing worse than that delay is not
+ * knowing where it went.
+ */
+const SLOW_ORDER_MS = 1500;
+
+/**
+ * How long the box may be left untouched before the link to it is woken on
+ * purpose (see `keepWarm`).
+ *
+ * A box nobody has spoken to for hours does not answer the way one that was
+ * used a minute ago does: the session has to be built again before anything can
+ * be sent, and that wait lands on whoever clicked. Devmel's own integrations
+ * poll their boxes every five minutes, which is the same idea from the other
+ * end. Four minutes keeps this one under that.
+ *
+ * It is a starting point, not a fact: how long a box takes to go cold is
+ * nowhere in its documentation, and it is not the same over Wi-Fi as over the
+ * cloud gateway. So the box gets to say — see `keepWarm`.
+ */
+export const WARM_AFTER_MS = 4 * 60 * 1000;
+
+/** Never wake the link more often than this, whatever the box does. */
+const WARM_FLOOR_MS = 60 * 1000;
+
+/**
+ * A wake slower than this is a link that had already gone cold: the box was
+ * left alone for longer than it tolerates, and the interval above is too long
+ * for it. Answering a read of its own sensors is a fraction of a second on a
+ * link that is up.
+ */
+const COLD_LINK_MS = 1000;
+
 /** Thrown when a request reached the box but was refused. */
 export class AirSendError extends Error {
-  constructor(message, { status, transport } = {}) {
+  constructor(message, { status, transport, eventType } = {}) {
     super(message);
     this.name = 'AirSendError';
     this.status = status;
     this.transport = transport;
+    /** `type` of the AirSend event that reported it, when one did. */
+    this.eventType = eventType;
   }
 }
 
@@ -72,6 +110,12 @@ export class AirSendClient {
     this.sleep = sleep;
     this.now = now;
     this.orders = orders;
+    /**
+     * How long the box may be left alone before its link is woken. Shortened,
+     * never lengthened, by what the box actually does (see `keepWarm`), and
+     * back to its starting point on every configuration.
+     */
+    this.warmAfter = WARM_AFTER_MS;
     /** Tail of the radio queue: one operation at a time, in order. */
     this.queue = Promise.resolve();
     /** Radio operations queued or in flight: the box is not free while > 0. */
@@ -93,6 +137,10 @@ export class AirSendClient {
   /** Apply a new configuration (called on connection and on every config update). */
   configure(config) {
     this.config = config;
+    // A new configuration can be a new box, a new route to it, or the same box
+    // reached another way: what the old one taught us about going cold says
+    // nothing about this one.
+    this.warmAfter = WARM_AFTER_MS;
   }
 
   /**
@@ -156,17 +204,26 @@ export class AirSendClient {
     }
 
     const repeats = this.repeatsFor(device, notes, options);
+    // What the user is about to wait through, split where it can be acted on:
+    // the queue is ours, the box is not. Only the first emission is measured —
+    // the repeats trail behind the answer, and nobody waits for them.
+    const pace = { waited: 0, box: 0, attempts: 0 };
     let answer;
     try {
-      answer = await this.emit(device, notes, options);
+      answer = await this.emit(device, notes, options, pace);
     } catch (err) {
-      logger.warn(`Local transfer failed for "${device.name}": ${err.message}`);
+      logger.warn(
+        err.eventType === undefined
+          ? `Local transfer failed for "${device.name}": ${err.message}`
+          : `The box did not carry the order sent to "${device.name}". ${explainFailure(err.eventType)}`,
+      );
       this.rememberTransport(device, DEVICE_TRANSPORTS.UNREACHABLE);
       this.notifyTransmit();
       throw err;
     }
     this.rememberTransport(device, DEVICE_TRANSPORTS.LOCAL);
     this.notifyTransmit();
+    this.reportPace(device, notes, pace);
     this.repeat(device, notes, options, repeats);
     return { transport: DEVICE_TRANSPORTS.LOCAL, degraded: false, notes: answer?.notes ?? [] };
   }
@@ -217,11 +274,11 @@ export class AirSendClient {
    * retried: a connection string the box rejects and a channel it does not know
    * are answered exactly the same way the second time.
    */
-  async emit(device, notes, options) {
+  async emit(device, notes, options, pace = null) {
     let failure = null;
     for (let attempt = 1; attempt <= ATTEMPTS; attempt += 1) {
       try {
-        return await this.radio(() => this.transferLocal(device, notes, options));
+        return await this.radio(() => this.transferLocal(device, notes, options), pace);
       } catch (err) {
         failure = err;
         if (attempt >= ATTEMPTS || !isRetryable(err)) {
@@ -255,18 +312,29 @@ export class AirSendClient {
    * is what makes "the second click did nothing" impossible: orders reach the
    * box one at a time, in the order the user gave them.
    */
-  radio(operation) {
+  radio(operation, pace = null) {
     this.pending += 1;
+    const askedAt = this.now();
     const run = this.queue.then(async () => {
       try {
         const idle = this.lastRadioAt + RADIO_GAP_MS - this.now();
         if (idle > 0) {
           await this.sleep(idle);
         }
+        const startedAt = this.now();
+        if (pace) {
+          // Everything before the box was asked anything: the orders in front
+          // of this one, and the gap the box is given between two of them.
+          pace.waited += startedAt - askedAt;
+        }
         try {
           return await operation();
         } finally {
           this.lastRadioAt = this.now();
+          if (pace) {
+            pace.box += this.lastRadioAt - startedAt;
+            pace.attempts += 1;
+          }
         }
       } finally {
         this.pending -= 1;
@@ -279,6 +347,111 @@ export class AirSendClient {
       () => {},
     );
     return run;
+  }
+
+  /**
+   * Say how long the order took to leave, and where that time went.
+   *
+   * "It reacts, but only after a few seconds" is a complaint with two very
+   * different causes and no way to tell them apart from the sofa: the order can
+   * be queued behind the ones before it (ours, fixable here), or the box can
+   * take its time answering (not ours, and worth knowing). The split is the
+   * whole point of the line — a number without it sends the user to the wrong
+   * half.
+   */
+  reportPace(device, notes, pace) {
+    const total = pace.waited + pace.box;
+    const what = isOrder(notes)
+      ? `The order sent to "${device.name}" took ${seconds(total)} to reach the air`
+      : `Reading "${device.name}" took ${seconds(total)}`;
+    const split =
+      `${what}: ${seconds(pace.waited)} waiting for the radio, ${seconds(pace.box)} in the box` +
+      (pace.attempts > 1 ? `, over ${pace.attempts} attempts` : '');
+    if (total < SLOW_ORDER_MS) {
+      logger.debug(split);
+      return;
+    }
+    logger.info(
+      `${split}. ` +
+        (pace.box >= pace.waited
+          ? 'The time went into the box, not into the queue: a box left alone for a long while ' +
+            'has its link to wake before it can send anything, and one reached through Devmel ' +
+            'servers (gw=1 in the connection string) pays the trip every time. Check ' +
+            '"Internet gateway" is off on airsend.cloud, and that the box has a solid Wi-Fi ' +
+            'signal where it stands.'
+          : 'The time went into the queue, not into the box: the orders in front of this one ' +
+            'were still going out. Repeats are the usual reason there were several — lower ' +
+            '"Command repeats" if you raised it.'),
+    );
+  }
+
+  /**
+   * Touch the box, so the next order does not have to wake the link.
+   *
+   * A read of the box own sensors, which never goes on the air: it is the
+   * cheapest thing that reaches the box itself rather than the service in front
+   * of it. Skipped when the box was spoken to recently, or when it is busy —
+   * this is the least urgent request the integration makes, and it never takes
+   * a turn from an order somebody is waiting for.
+   *
+   * The answer is thrown away, errors included: a box with no sensor to read
+   * refuses the note, and refusing it took exactly the exchange this is for.
+   *
+   * @returns {Promise<boolean>} whether the box was actually touched
+   */
+  async keepWarm(device) {
+    if (!this.canUseLocal(device) || this.busy) {
+      return false;
+    }
+    const idleFor = this.now() - this.lastRadioAt;
+    if (idleFor < this.warmAfter) {
+      return false;
+    }
+    const startedAt = this.now();
+    try {
+      await this.radio(() =>
+        this.transferLocal(device, [queryNote(QUERY_TYPES.TEMPERATURE)], { wait: true }),
+      );
+    } catch (err) {
+      logger.debug(`Could not keep the link to "${device.name}" warm: ${err.message}`);
+    }
+    this.learnHowFastItGoesCold(device, idleFor, this.now() - startedAt);
+    // Whether it answered or refused, the box was addressed — and if that took
+    // it out of reception, listening has to be armed again. Cheaper to re-arm
+    // for nothing than to let a wall remote go unheard until the renewal.
+    this.notifyTransmit();
+    return true;
+  }
+
+  /**
+   * How long the box tolerates being left alone, learned from waking it.
+   *
+   * Nothing documents it, and it is not the same over Wi-Fi as through the
+   * cloud gateway. But a wake that took a second and a half says it plainly:
+   * the link had already gone cold, so the box was left alone longer than it
+   * tolerates. Halve the wait, down to a minute, and stop guessing.
+   *
+   * Only ever shortened. A wake that is fast proves the CURRENT interval works,
+   * never that a longer one would — and an interval that grew back on that
+   * reasoning would spend its life oscillating around the delay it is there to
+   * avoid.
+   */
+  learnHowFastItGoesCold(device, idleFor, took) {
+    if (took < COLD_LINK_MS) {
+      logger.debug(`Woke the link to "${device.name}" in ${seconds(took)}`);
+      return;
+    }
+    const shortened = Math.max(WARM_FLOOR_MS, Math.round(this.warmAfter / 2));
+    const learned = shortened !== this.warmAfter;
+    this.warmAfter = shortened;
+    logger.info(
+      `Waking the link to "${device.name}" took ${seconds(took)} after ${minutes(idleFor)} of ` +
+        'silence: it goes cold faster than it was being kept warm, which is the delay felt on ' +
+        'the first order of the evening. ' +
+        (learned
+          ? `Touching it every ${minutes(shortened)} from now on.`
+          : `Already touching it every ${minutes(shortened)}, which is as often as it goes.`),
+    );
   }
 
   /** Tell the integration the radio was used (see `afterTransmit`). */
@@ -300,7 +473,16 @@ export class AirSendClient {
     // can be pushed to the callback before the HTTP call even returns, and an
     // echo that arrives before it was remembered is an echo replayed as an
     // order (see src/devmel/orders.js).
-    this.orders?.remember(thingUid, device);
+    //
+    // Every device but the box itself. A box answers on channel 1 and answers
+    // for itself — reading its temperature puts nothing on the air, so there is
+    // no echo of it to recognize. Remembering it would file channel 1 as a
+    // voice of ours, and a generic 433 MHz frame heard with no address would
+    // then be taken for an order of Gladys coming back: a remote that stops
+    // working the day the box gets warmed or polled.
+    if (device.rtype !== DEVICE_TYPES.BOX) {
+      this.orders?.remember(thingUid, device);
+    }
     const body = {
       wait,
       channel: device.channel,
@@ -322,12 +504,22 @@ export class AirSendClient {
         transport: DEVICE_TRANSPORTS.LOCAL,
       });
     }
-    // With `wait: true` the box answers with the radio event itself: an event
-    // type >= 0x100 is an error (no answer, collision, unknown channel...).
-    if (wait && payload && Number(payload.type ?? 0) >= 0x100) {
-      throw new AirSendError(`No radio confirmation (event type ${payload.type})`, {
-        transport: DEVICE_TRANSPORTS.LOCAL,
-      });
+    // With `wait: true` the box answers with the radio event itself, and a type
+    // >= 0x100 is a failure that names itself (see events.js). Carrying that
+    // type on the error is what lets `isRetryable` tell a link that dropped —
+    // worth another go — from a connection string the box refuses, which will
+    // be refused just as fast the second time.
+    if (wait && payload && isErrorEvent(payload.type)) {
+      // Short here, explained where it is logged: this message travels back to
+      // Gladys as the failure of a command, and a paragraph is not what a user
+      // wants in a toast.
+      throw new AirSendError(
+        `The box did not carry the order: ${describeEventType(payload.type)}`,
+        {
+          transport: DEVICE_TRANSPORTS.LOCAL,
+          eventType: Number(payload.type),
+        },
+      );
     }
     return { notes: payload?.thingnotes?.notes ?? [] };
   }
@@ -449,11 +641,25 @@ export class AirSendClient {
  * connection string or the channel will refuse it exactly the same way.
  */
 function isRetryable(err) {
+  if (err?.eventType !== undefined) {
+    return !isPermanentFailure(err.eventType);
+  }
   const status = Number(err?.status);
   if (!Number.isFinite(status)) {
     return true;
   }
   return status >= 500;
+}
+
+/** A longer duration, as a log reads it. */
+function minutes(ms) {
+  const value = Math.max(0, ms) / 60000;
+  return value < 1 ? seconds(ms) : `${Number(value.toFixed(1))} min`;
+}
+
+/** A duration as a log reads it: tenths of a second, never raw milliseconds. */
+function seconds(ms) {
+  return `${(Math.max(0, ms) / 1000).toFixed(1)} s`;
 }
 
 /** First value of the list that is a usable number, or null. */

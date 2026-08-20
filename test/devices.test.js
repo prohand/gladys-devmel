@@ -19,6 +19,7 @@ import { ShutterTravel } from '../src/devmel/travel.js';
 import { createFakeGladys } from './helpers/fakeGladys.js';
 import { createFakeClient } from './helpers/fakeAirSend.js';
 import { createFakeClock } from './helpers/fakeClock.js';
+import { captureLogs } from './helpers/captureLogs.js';
 
 const DEVICES = JSON.stringify({
   devices: {
@@ -54,32 +55,6 @@ function deviceNamed(config, name) {
 function deviceExternalId(config, name) {
   const device = deviceNamed(config, name);
   return `${findBlueprintByType(device.rtype).key}:${device.platformId}`;
-}
-
-/**
- * Run something with the console captured, so a test can assert on what the
- * user will actually read in the logs of the integration.
- */
-function captureLogs(run, level = 'info') {
-  const written = [];
-  const original = { log: console.log, error: console.error, level: process.env.LOG_LEVEL };
-  console.log = (...args) => written.push(args.join(' '));
-  console.error = (...args) => written.push(args.join(' '));
-  process.env.LOG_LEVEL = level;
-  const restore = () => {
-    console.log = original.log;
-    console.error = original.error;
-    if (original.level === undefined) {
-      delete process.env.LOG_LEVEL;
-    } else {
-      process.env.LOG_LEVEL = original.level;
-    }
-  };
-  const result = run().finally(restore);
-  return {
-    result,
-    of: (kind) => written.filter((line) => line.includes(`[${kind}]`)),
-  };
 }
 
 function featureOf(gladys, config, name, key) {
@@ -935,7 +910,38 @@ test('an order the box could not transmit is said out loud, not swallowed', asyn
 
   assert.equal(await lines.result, 0);
   assert.equal(lines.of('INFO').length, 1);
-  assert.match(lines.of('INFO')[0], /could not transmit the order sent to "Timed shutter"/);
+  assert.match(lines.of('INFO')[0], /did not carry the order sent to "Timed shutter"/);
+  // NETWORK: the box was never reached, so nothing was transmitted — and that
+  // is a thing to go and check, not a number to read.
+  assert.match(lines.of('INFO')[0], /NETWORK \(event type 257\)/);
+  assert.match(lines.of('INFO')[0], /Nothing went out on the air/);
+});
+
+test('a failure the box reports is not answered with "raise Command repeats"', async (t) => {
+  // 258 is SYNCHRONIZATION: the link between the service and the box lost its
+  // thread. Sending the user to the repeats setting for it is sending them to
+  // the one setting that cannot help — and they arrive with it already at 3.
+  const { gladys, config } = setupTimed(t);
+  const orders = new SentOrders();
+  orders.remember('0xbeef', deviceNamed(config, 'Timed shutter'));
+
+  const lines = captureLogs(async () =>
+    applyEvents(
+      gladys,
+      config,
+      [ownEcho(config, 'Timed shutter', undefined, { uid: '0xbeef', type: 258 })],
+      new HeardChannels(),
+      orders,
+    ),
+  );
+
+  await lines.result;
+  const line = lines.of('INFO')[0];
+  assert.match(line, /SYNCHRONIZATION \(event type 258\)/);
+  // Nothing claims the shutter stayed put: a link that dropped mid-exchange
+  // says nothing about what did or did not reach the air.
+  assert.match(line, /Whether anything went out on the air, nothing says/);
+  assert.doesNotMatch(line, /raise "Command repeats"/);
 });
 
 test('a device reporting where it actually is, is believed even in an echo', async (t) => {

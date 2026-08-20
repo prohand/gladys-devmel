@@ -126,6 +126,15 @@ const REPEATABLE_STATES = new Set([
   STATE_VALUES.USERPOSITION,
 ]);
 
+/**
+ * Does this carry something to send, rather than a question to ask? A read and
+ * an order take the same route and are not the same event to a user reading the
+ * logs — one of them is what they are standing there waiting for.
+ */
+export function isOrder(notes) {
+  return (notes ?? []).some((note) => note?.method === NOTE_METHODS.SET);
+}
+
 /** Can this whole order be sent again without meaning something else? */
 export function isRepeatable(notes) {
   if (!Array.isArray(notes) || notes.length === 0) {

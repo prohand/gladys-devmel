@@ -73,6 +73,12 @@ const LISTEN_REFRESH_MS = 10 * 60 * 1000;
 let rebindTimer = null;
 const REBIND_AFTER_COMMAND_MS = 2000;
 
+// Keeps the link to the box from going cold. Nothing here is on a schedule: it
+// only looks at how long the box has been left alone, which is why it ticks
+// much more often than it does anything (see `client.keepWarm`).
+let warmTimer = null;
+const WARM_CHECK_MS = 60 * 1000;
+
 // The protocol table of the AirSend Web Service, read once per configuration:
 // it says which channel decodes which protocol, hence what to bind.
 let channelTable = new Map();
@@ -220,6 +226,7 @@ gladys.on('connected', async () => {
 
 gladys.on('disconnected', () => {
   stopListening();
+  stopKeepingWarm();
 });
 
 /**
@@ -274,6 +281,7 @@ async function initialize(rawConfig) {
   await startListening();
 
   await publishDeviceTransports();
+  startKeepingWarm();
 
   // Application-level status, shown in the Configuration screen: distinct from
   // the container state machine, an integration can be RUNNING and still unable
@@ -477,6 +485,42 @@ function stopListening() {
 }
 
 /**
+ * Keep the link to each box awake.
+ *
+ * The delay a user notices is almost never the second order — it is the first
+ * one after a long quiet evening, which pays for waking a link nothing has used
+ * since. Polling already does this for a box declared with `sensors: true`, and
+ * renewing the listening subscription does it for a box that listens; a box
+ * that only carries the connection string has neither, and is exactly the one
+ * left alone for hours.
+ *
+ * So: nothing periodic against the box, only a periodic LOOK at how long it has
+ * been since anything spoke to it. An installation being used stays warm on its
+ * own traffic and this never sends a thing.
+ */
+function startKeepingWarm() {
+  stopKeepingWarm();
+  if (boxDevices(config).length === 0) {
+    return;
+  }
+  warmTimer = setInterval(() => {
+    for (const box of boxDevices(config)) {
+      client.keepWarm(box).catch((err) => logger.debug(`Could not warm the link: ${err.message}`));
+    }
+  }, WARM_CHECK_MS);
+  // Never a reason to hold the process open.
+  warmTimer.unref?.();
+  logger.debug(`Keeping the link to the box warm (after ${client.warmAfter / 60000} min idle)`);
+}
+
+function stopKeepingWarm() {
+  if (warmTimer) {
+    clearInterval(warmTimer);
+    warmTimer = null;
+  }
+}
+
+/**
  * Publish the effective transport of every device ('local' | 'unreachable'),
  * rendered as a badge in the Gladys UI.
  */
@@ -510,6 +554,7 @@ function parseWebhookBody(request) {
 gladys.handleShutdown(async (signal) => {
   logger.info(`Received ${signal} -> graceful shutdown`);
   stopListening();
+  stopKeepingWarm();
   stopDeviceTracking();
   await callbackServer.stop();
   // The AirSend Web Service daemonizes: nothing would reap it for us.

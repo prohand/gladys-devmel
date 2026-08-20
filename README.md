@@ -63,6 +63,15 @@ comes back — the answer to the transfer, and the box hearing itself —
 as a fresh order: that is what used to send a shutter being positioned at 40 %
 all the way to the top.
 
+A box nobody has spoken to for hours answers slower than one used a minute ago:
+the link has to be woken first, and that wait lands on whoever clicked. So the
+integration touches an idle box every four minutes (a read of its own sensors,
+which never goes on the air) — halving that wait, down to a minute, whenever
+waking the link turns out to have been slow, because how fast a box goes cold is
+documented nowhere and only the box can say. An order that still takes more than a second
+and a half to leave is logged with the split that says whose fault it is — time
+spent waiting for the radio, time spent in the box.
+
 The box is bound to a listening channel, and every radio frame it hears — a
 wall remote pressed by hand, a weather sensor waking up — comes back to the
 integration. It is the _service_ that calls back, from the machine it runs on
