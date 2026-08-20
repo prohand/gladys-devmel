@@ -1,6 +1,6 @@
 {
   "name": "gladys-devmel",
-  "version": "1.0.17",
+  "version": "1.0.18",
   "private": true,
   "description": "Gladys Assistant external integration for Devmel AirSend radio gateways (433 and 868 MHz).",
   "type": "module",
