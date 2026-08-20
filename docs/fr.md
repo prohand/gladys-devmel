@@ -286,6 +286,40 @@ la radio, attend maintenant que la file soit vide au lieu de se glisser entre
 deux ordres. C'est ce qui faisait qu'un « Fermer » cliqué juste après un
 « Ouvrir » mettait quelques secondes à partir.
 
+### Le premier ordre après une longue pause
+
+Un ordre qui part en une fraction de seconde d'habitude, et met plusieurs
+secondes après une soirée calme, ce n'est pas la radio : c'est le **lien avec le
+boîtier** qui a refroidi. Plus rien ne lui avait parlé depuis des heures, la
+session a donc dû être refaite avant de pouvoir envoyer quoi que ce soit, et
+cette attente est tombée sur celui qui venait de cliquer.
+
+L'intégration l'évite : quand le boîtier est resté seul quatre minutes, elle lit
+ses capteurs internes — une requête qui atteint le boîtier et ne part jamais sur
+l'air. Une installation dont on se sert reste chaude avec son propre trafic, et
+rien de plus n'est envoyé. Ça coûte une petite requête par boîtier inactif, et
+c'est ce que le relevé faisait déjà pour un boîtier déclaré avec
+`sensors: true` ; un boîtier qui ne porte que la chaîne de connexion, lui,
+n'avait rien.
+
+Quand un ordre met tout de même plus d'une seconde et demie à partir, les
+journaux le disent, et disent **où le temps est passé** :
+
+```
+The order sent to "Volet cuisine" took 4.2 s to reach the air: 0.1 s waiting
+for the radio, 4.1 s in the box. The time went into the box, not into the
+queue: …
+```
+
+- **in the box** — c'est le boîtier qui a été lent à répondre. Deux raisons
+  habituelles : la chaîne de connexion porte `gw=1`, donc chaque ordre fait
+  l'aller-retour par les serveurs Devmel (coupez **Passerelle internet** sur
+  airsend.cloud et donnez à la chaîne l'IPv4 du boîtier avec `rhost=`), ou le
+  boîtier est posé là où son Wi-Fi est faible ;
+- **waiting for the radio** — les ordres devant celui-ci étaient encore en train
+  de partir. Les répétitions sont la raison habituelle qu'il y en ait eu
+  plusieurs : baissez **Répétitions des commandes** si vous l'aviez montée.
+
 ### Gladys ne se prend pas pour la télécommande
 
 Tout ce que l'intégration émet lui revient : le boîtier répond à l'ordre, et
@@ -864,25 +898,26 @@ votre clé Open API dans le bloc **Webhooks** de l'écran de configuration.
 
 ## En cas de problème
 
-| Symptôme                               | À vérifier                                                                                          |
-| -------------------------------------- | --------------------------------------------------------------------------------------------------- |
-| `Invalid connection string`            | L'URL `sp://`, et que son mot de passe correspond au boîtier                                        |
-| `Invalid input`                        | Le `channel` de l'appareil (`id`/`pid` et `source`/`addr`)                                          |
-| `no radio channel` (logs)              | L'entrée n'a pas de canal : il lui faut `channel.id`, ou le couple `pid`/`addr`                     |
-| `no radio confirmation`                | Normal sans retour d'état : laissez `wait: false`                                                   |
-| Aucun appareil dans « Découverte »     | **Tester la connexion** : la liste n'a sans doute pas été lue                                       |
-| Le boîtier est injoignable             | La partie `?gw=0&rhost=<IPv4>` de la chaîne de connexion                                            |
-| `Service AirSend intégré indisponible` | Les logs de l'intégration : le service y journalise son démarrage                                   |
-| Le boîtier répond à la main, pas ici   | L'IPv4 `rhost=` doit être joignable **depuis le conteneur**, pas seulement de votre PC              |
-| Il faut cliquer plusieurs fois         | Montez **Répétitions des commandes** à `2` ou `3`, ou le `repeat` de l'appareil                     |
-| Un ordre met une seconde à partir      | `gw=1` dans la chaîne : coupez **Passerelle internet** sur airsend.cloud                            |
-| Un volet n'affiche pas de position     | Chronométrez-le : `travel_up` / `travel_down`, puis ouvrez-le ou fermez-le à fond une fois          |
-| La position dérive avec le temps       | Rechronométrez la course, et ouvrez le volet à fond une fois par jour pour le recaler               |
-| Aucune trame d'une télécommande 868    | **Tester la connexion** : le canal `1` est du 433 MHz. Déclarez l'appareil, ou son `pid`            |
-| Télécommande rattachée, rien ne bouge  | **Tester la connexion**, ligne _Entendu_ : elle dit si les trames portent un ordre                  |
-| `unreliable, graded N` (logs)          | Trame notée trop bas : **Accepter les trames peu fiables**, ou rapprochez le boîtier                |
-| `did not carry the order` (logs)       | Le nom que cette ligne donne à l'échec — voir [Quand le boîtier dit non](#quand-le-boîtier-dit-non) |
-| Une trame avec un `pid` et sans `addr` | Le protocole n'est pas décodé : mettez ce `pid` dans **Canal d'écoute**                             |
+| Symptôme                                 | À vérifier                                                                                                                           |
+| ---------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
+| `Invalid connection string`              | L'URL `sp://`, et que son mot de passe correspond au boîtier                                                                         |
+| `Invalid input`                          | Le `channel` de l'appareil (`id`/`pid` et `source`/`addr`)                                                                           |
+| `no radio channel` (logs)                | L'entrée n'a pas de canal : il lui faut `channel.id`, ou le couple `pid`/`addr`                                                      |
+| `no radio confirmation`                  | Normal sans retour d'état : laissez `wait: false`                                                                                    |
+| Aucun appareil dans « Découverte »       | **Tester la connexion** : la liste n'a sans doute pas été lue                                                                        |
+| Le boîtier est injoignable               | La partie `?gw=0&rhost=<IPv4>` de la chaîne de connexion                                                                             |
+| `Service AirSend intégré indisponible`   | Les logs de l'intégration : le service y journalise son démarrage                                                                    |
+| Le boîtier répond à la main, pas ici     | L'IPv4 `rhost=` doit être joignable **depuis le conteneur**, pas seulement de votre PC                                               |
+| Il faut cliquer plusieurs fois           | Montez **Répétitions des commandes** à `2` ou `3`, ou le `repeat` de l'appareil                                                      |
+| Un ordre met une seconde à partir        | `gw=1` dans la chaîne : coupez **Passerelle internet** sur airsend.cloud                                                             |
+| Un ordre est lent après une longue pause | Les journaux disent où le temps est passé — voir [Le premier ordre après une longue pause](#le-premier-ordre-après-une-longue-pause) |
+| Un volet n'affiche pas de position       | Chronométrez-le : `travel_up` / `travel_down`, puis ouvrez-le ou fermez-le à fond une fois                                           |
+| La position dérive avec le temps         | Rechronométrez la course, et ouvrez le volet à fond une fois par jour pour le recaler                                                |
+| Aucune trame d'une télécommande 868      | **Tester la connexion** : le canal `1` est du 433 MHz. Déclarez l'appareil, ou son `pid`                                             |
+| Télécommande rattachée, rien ne bouge    | **Tester la connexion**, ligne _Entendu_ : elle dit si les trames portent un ordre                                                   |
+| `unreliable, graded N` (logs)            | Trame notée trop bas : **Accepter les trames peu fiables**, ou rapprochez le boîtier                                                 |
+| `did not carry the order` (logs)         | Le nom que cette ligne donne à l'échec — voir [Quand le boîtier dit non](#quand-le-boîtier-dit-non)                                  |
+| Une trame avec un `pid` et sans `addr`   | Le protocole n'est pas décodé : mettez ce `pid` dans **Canal d'écoute**                                                              |
 
 L'intégration journalise tout ce qu'elle fait : consultez les logs de
 l'intégration depuis l'interface de Gladys (ou `docker logs` sur l'hôte), et

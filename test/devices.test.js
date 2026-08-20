@@ -19,6 +19,7 @@ import { ShutterTravel } from '../src/devmel/travel.js';
 import { createFakeGladys } from './helpers/fakeGladys.js';
 import { createFakeClient } from './helpers/fakeAirSend.js';
 import { createFakeClock } from './helpers/fakeClock.js';
+import { captureLogs } from './helpers/captureLogs.js';
 
 const DEVICES = JSON.stringify({
   devices: {
@@ -54,32 +55,6 @@ function deviceNamed(config, name) {
 function deviceExternalId(config, name) {
   const device = deviceNamed(config, name);
   return `${findBlueprintByType(device.rtype).key}:${device.platformId}`;
-}
-
-/**
- * Run something with the console captured, so a test can assert on what the
- * user will actually read in the logs of the integration.
- */
-function captureLogs(run, level = 'info') {
-  const written = [];
-  const original = { log: console.log, error: console.error, level: process.env.LOG_LEVEL };
-  console.log = (...args) => written.push(args.join(' '));
-  console.error = (...args) => written.push(args.join(' '));
-  process.env.LOG_LEVEL = level;
-  const restore = () => {
-    console.log = original.log;
-    console.error = original.error;
-    if (original.level === undefined) {
-      delete process.env.LOG_LEVEL;
-    } else {
-      process.env.LOG_LEVEL = original.level;
-    }
-  };
-  const result = run().finally(restore);
-  return {
-    result,
-    of: (kind) => written.filter((line) => line.includes(`[${kind}]`)),
-  };
 }
 
 function featureOf(gladys, config, name, key) {

@@ -275,6 +275,38 @@ the answer — and re-arming the listener, which needs the radio too, now waits
 for the queue to empty instead of slipping between two orders. That is what made
 a "Close" clicked right after an "Open" take a few seconds to go out.
 
+### The first order after a long pause
+
+An order that leaves in a fraction of a second most of the time, and takes
+several after a quiet evening, is not the radio: it is the **link to the box**
+having gone cold. Nothing had spoken to it for hours, so the session had to be
+built again before anything could be sent, and that wait landed on whoever
+clicked.
+
+The integration keeps that from happening: when the box has been left alone for
+four minutes, it reads the box own sensors — a request that reaches the box and
+never goes on the air. An installation being used stays warm on its own traffic
+and nothing extra is sent. It costs one small request per idle box, and it is
+what polling already did for a box declared with `sensors: true`; a box that only
+carries the connection string had nothing.
+
+When an order still takes more than a second and a half to leave, the logs say
+so, and say **where the time went**:
+
+```
+The order sent to "Kitchen shutter" took 4.2 s to reach the air: 0.1 s waiting
+for the radio, 4.1 s in the box. The time went into the box, not into the
+queue: …
+```
+
+- **in the box** — the box itself was slow to answer. Two usual reasons: the
+  connection string carries `gw=1`, so every order travels to Devmel servers and
+  back (turn **Internet gateway** off on airsend.cloud and give the string the
+  box IPv4 with `rhost=`), or the box sits where its Wi-Fi is weak;
+- **waiting for the radio** — the orders in front of this one were still going
+  out. Repeats are the usual reason there were several: lower **Command
+  repeats** if you raised it.
+
 ### Gladys does not mistake itself for the remote
 
 Everything the integration transmits comes back to it: the box answers the
@@ -822,25 +854,26 @@ provides: link your Gladys Plus account and paste your Open API key in the
 
 ## Troubleshooting
 
-| Symptom                               | What to check                                                                            |
-| ------------------------------------- | ---------------------------------------------------------------------------------------- |
-| `Invalid connection string`           | **Test the connection**: it shows the `sp://` string, password removed                   |
-| `Invalid input`                       | The `channel` of the device (`id`/`pid` and `source`/`addr`)                             |
-| `no radio channel` in the logs        | The entry carries no channel: it needs `channel.id`, or the `pid`/`addr` pair            |
-| `no radio confirmation`               | Normal on equipment without feedback: set `wait: false`                                  |
-| No device in the Discovery tab        | **Test the connection**: the device list probably did not parse                          |
-| The box is unreachable                | The `?gw=0&rhost=<IPv4>` part of the connection string                                   |
-| `Built-in service unavailable`        | The integration logs: the service logs its own startup there                             |
-| The box answers by hand, not here     | The `rhost=` IPv4 must be reachable **from the container**, not just from your desktop   |
-| You have to click several times       | Raise **Command repeats** to `2` or `3`, or the device's own `repeat`                    |
-| An order takes a second to leave      | `gw=1` in the connection string: turn **Internet gateway** off on airsend.cloud          |
-| A shutter shows no position           | Time it: `travel_up` / `travel_down`, then open or close it fully once                   |
-| The position drifts over time         | Re-time the travel, and open the shutter fully once a day to resynchronize it            |
-| No frame from an 868 MHz remote       | **Test the connection**: channel `1` is 433 MHz. Declare the device, or its `pid`        |
-| Remote attached, nothing moves        | **Test the connection**, _Heard_ line: it says whether the frames carry an order         |
-| `unreliable, graded N` in the logs    | A frame graded too low: **Accept unreliable frames**, or move the box closer             |
-| `did not carry the order` in the logs | The name that line gives the failure — see [When the box says no](#when-the-box-says-no) |
-| A frame with a `pid` and no `addr`    | The protocol is not decoded: put that `pid` in **Listening channel**                     |
+| Symptom                               | What to check                                                                                                    |
+| ------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| `Invalid connection string`           | **Test the connection**: it shows the `sp://` string, password removed                                           |
+| `Invalid input`                       | The `channel` of the device (`id`/`pid` and `source`/`addr`)                                                     |
+| `no radio channel` in the logs        | The entry carries no channel: it needs `channel.id`, or the `pid`/`addr` pair                                    |
+| `no radio confirmation`               | Normal on equipment without feedback: set `wait: false`                                                          |
+| No device in the Discovery tab        | **Test the connection**: the device list probably did not parse                                                  |
+| The box is unreachable                | The `?gw=0&rhost=<IPv4>` part of the connection string                                                           |
+| `Built-in service unavailable`        | The integration logs: the service logs its own startup there                                                     |
+| The box answers by hand, not here     | The `rhost=` IPv4 must be reachable **from the container**, not just from your desktop                           |
+| You have to click several times       | Raise **Command repeats** to `2` or `3`, or the device's own `repeat`                                            |
+| An order takes a second to leave      | `gw=1` in the connection string: turn **Internet gateway** off on airsend.cloud                                  |
+| An order is slow after a long pause   | The logs say where the time went — see [The first order after a long pause](#the-first-order-after-a-long-pause) |
+| A shutter shows no position           | Time it: `travel_up` / `travel_down`, then open or close it fully once                                           |
+| The position drifts over time         | Re-time the travel, and open the shutter fully once a day to resynchronize it                                    |
+| No frame from an 868 MHz remote       | **Test the connection**: channel `1` is 433 MHz. Declare the device, or its `pid`                                |
+| Remote attached, nothing moves        | **Test the connection**, _Heard_ line: it says whether the frames carry an order                                 |
+| `unreliable, graded N` in the logs    | A frame graded too low: **Accept unreliable frames**, or move the box closer                                     |
+| `did not carry the order` in the logs | The name that line gives the failure — see [When the box says no](#when-the-box-says-no)                         |
+| A frame with a `pid` and no `addr`    | The protocol is not decoded: put that `pid` in **Listening channel**                                             |
 
 The integration logs everything it does: read the integration logs from the
 Gladys UI (or `docker logs` on the host), and tick **Detailed logs (debug)** in
