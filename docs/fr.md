@@ -306,9 +306,44 @@ Deux conséquences visibles :
 
 - une télécommande murale émet depuis une **autre adresse** : elle n'est jamais
   prise pour cet écho, et continue de piloter le volet dans Gladys ;
-- quand le boîtier répond qu'il n'a **pas pu émettre**, l'intégration l'écrit
-  dans ses journaux, en nommant l'appareil. C'est la seule trace d'un ordre parti
-  dans le vide, et elle vaut le coup d'œil si vous cliquez souvent deux fois.
+- quand le boîtier répond qu'il **n'a pas porté l'ordre**, l'intégration l'écrit
+  dans ses journaux, en nommant l'appareil et ce que le boîtier a dit. C'est la
+  seule trace d'un ordre parti dans le vide, et elle vaut le coup d'œil si vous
+  cliquez souvent deux fois.
+
+### Quand le boîtier dit non
+
+Tout ordre confié au boîtier reçoit une réponse, et cette réponse porte un
+numéro. En dessous de `256`, l'ordre est parti ; à partir de `256`, il n'est pas
+parti, et le numéro dit où il est mort. C'est ce que détaille la ligne des
+journaux :
+
+```
+The box did not carry the order sent to "Cuisine". SYNCHRONIZATION (event type
+258): the exchange between the AirSend Web Service and the box lost its thread —
+a link error, not a radio one…
+```
+
+| Nom (type)              | Ce que ça veut dire                         | À vérifier                                                                              |
+| ----------------------- | ------------------------------------------- | --------------------------------------------------------------------------------------- |
+| `UNKNOWN` (256)         | refusé sans dire pourquoi                   | Redémarrez le boîtier, puis l'intégration                                               |
+| `NETWORK` (257)         | le service n'a jamais joint le boîtier      | Le boîtier est allumé, sur le réseau, et toujours à l'adresse de la chaîne de connexion |
+| `SYNCHRONIZATION` (258) | le lien avec le boîtier a perdu le fil      | Que rien d'autre ne pilote le boîtier au même moment ; un lien Wi-Fi faible fait pareil |
+| `SECURITY` (259)        | la chaîne de connexion a été refusée        | Réexportez-la depuis airsend.cloud et recollez-la en entier                             |
+| `BUSY` (260)            | un autre client avait verrouillé le boîtier | Fermez l'application AirSend, ou sortez le boîtier de l'autre installation              |
+| `TIMEOUT` (261)         | le boîtier n'a pas répondu à temps          | Un boîtier occupé pour quelqu'un d'autre, ou posé là où son Wi-Fi est faible            |
+| `UNSUPPORTED` (262)     | le boîtier ne sait pas envoyer ça           | Le `type` et le canal de l'appareil, face à l'export airsend.cloud                      |
+| `INCOMPLETE` (263)      | il manquait quelque chose                   | Recollez le canal en entier, avec tout ce qui accompagnait `id`                         |
+| `FULL` (264)            | la requête était trop grosse                | Signalez-le : rien de ce qui part d'ici ne devrait être aussi long                      |
+
+**Les répétitions des commandes n'y répondent pour aucun.** Les répétitions
+servent contre une trame perdue dans le bruit — et une trame perdue dans le
+bruit, c'est précisément la panne que rien ne signale : rien n'accuse réception
+d'un ordre radio, donc un ordre que le boîtier dit avoir porté est la seule
+confirmation qui existera jamais. Quand c'est le boîtier lui-même qui signale
+l'échec, l'ordre n'est même pas arrivé jusqu'au bruit. Monter les répétitions ne
+fait alors que rapprocher les émissions, sur un boîtier qui a déjà du mal à
+suivre.
 
 ## La position d'un volet
 
@@ -829,24 +864,25 @@ votre clé Open API dans le bloc **Webhooks** de l'écran de configuration.
 
 ## En cas de problème
 
-| Symptôme                               | À vérifier                                                                                 |
-| -------------------------------------- | ------------------------------------------------------------------------------------------ |
-| `Invalid connection string`            | L'URL `sp://`, et que son mot de passe correspond au boîtier                               |
-| `Invalid input`                        | Le `channel` de l'appareil (`id`/`pid` et `source`/`addr`)                                 |
-| `no radio channel` (logs)              | L'entrée n'a pas de canal : il lui faut `channel.id`, ou le couple `pid`/`addr`            |
-| `no radio confirmation`                | Normal sans retour d'état : laissez `wait: false`                                          |
-| Aucun appareil dans « Découverte »     | **Tester la connexion** : la liste n'a sans doute pas été lue                              |
-| Le boîtier est injoignable             | La partie `?gw=0&rhost=<IPv4>` de la chaîne de connexion                                   |
-| `Service AirSend intégré indisponible` | Les logs de l'intégration : le service y journalise son démarrage                          |
-| Le boîtier répond à la main, pas ici   | L'IPv4 `rhost=` doit être joignable **depuis le conteneur**, pas seulement de votre PC     |
-| Il faut cliquer plusieurs fois         | Montez **Répétitions des commandes** à `2` ou `3`, ou le `repeat` de l'appareil            |
-| Un ordre met une seconde à partir      | `gw=1` dans la chaîne : coupez **Passerelle internet** sur airsend.cloud                   |
-| Un volet n'affiche pas de position     | Chronométrez-le : `travel_up` / `travel_down`, puis ouvrez-le ou fermez-le à fond une fois |
-| La position dérive avec le temps       | Rechronométrez la course, et ouvrez le volet à fond une fois par jour pour le recaler      |
-| Aucune trame d'une télécommande 868    | **Tester la connexion** : le canal `1` est du 433 MHz. Déclarez l'appareil, ou son `pid`   |
-| Télécommande rattachée, rien ne bouge  | **Tester la connexion**, ligne _Entendu_ : elle dit si les trames portent un ordre         |
-| `unreliable, graded N` (logs)          | Trame notée trop bas : **Accepter les trames peu fiables**, ou rapprochez le boîtier       |
-| Une trame avec un `pid` et sans `addr` | Le protocole n'est pas décodé : mettez ce `pid` dans **Canal d'écoute**                    |
+| Symptôme                               | À vérifier                                                                                          |
+| -------------------------------------- | --------------------------------------------------------------------------------------------------- |
+| `Invalid connection string`            | L'URL `sp://`, et que son mot de passe correspond au boîtier                                        |
+| `Invalid input`                        | Le `channel` de l'appareil (`id`/`pid` et `source`/`addr`)                                          |
+| `no radio channel` (logs)              | L'entrée n'a pas de canal : il lui faut `channel.id`, ou le couple `pid`/`addr`                     |
+| `no radio confirmation`                | Normal sans retour d'état : laissez `wait: false`                                                   |
+| Aucun appareil dans « Découverte »     | **Tester la connexion** : la liste n'a sans doute pas été lue                                       |
+| Le boîtier est injoignable             | La partie `?gw=0&rhost=<IPv4>` de la chaîne de connexion                                            |
+| `Service AirSend intégré indisponible` | Les logs de l'intégration : le service y journalise son démarrage                                   |
+| Le boîtier répond à la main, pas ici   | L'IPv4 `rhost=` doit être joignable **depuis le conteneur**, pas seulement de votre PC              |
+| Il faut cliquer plusieurs fois         | Montez **Répétitions des commandes** à `2` ou `3`, ou le `repeat` de l'appareil                     |
+| Un ordre met une seconde à partir      | `gw=1` dans la chaîne : coupez **Passerelle internet** sur airsend.cloud                            |
+| Un volet n'affiche pas de position     | Chronométrez-le : `travel_up` / `travel_down`, puis ouvrez-le ou fermez-le à fond une fois          |
+| La position dérive avec le temps       | Rechronométrez la course, et ouvrez le volet à fond une fois par jour pour le recaler               |
+| Aucune trame d'une télécommande 868    | **Tester la connexion** : le canal `1` est du 433 MHz. Déclarez l'appareil, ou son `pid`            |
+| Télécommande rattachée, rien ne bouge  | **Tester la connexion**, ligne _Entendu_ : elle dit si les trames portent un ordre                  |
+| `unreliable, graded N` (logs)          | Trame notée trop bas : **Accepter les trames peu fiables**, ou rapprochez le boîtier                |
+| `did not carry the order` (logs)       | Le nom que cette ligne donne à l'échec — voir [Quand le boîtier dit non](#quand-le-boîtier-dit-non) |
+| Une trame avec un `pid` et sans `addr` | Le protocole n'est pas décodé : mettez ce `pid` dans **Canal d'écoute**                             |
 
 L'intégration journalise tout ce qu'elle fait : consultez les logs de
 l'intégration depuis l'interface de Gladys (ou `docker logs` sur l'hôte), et

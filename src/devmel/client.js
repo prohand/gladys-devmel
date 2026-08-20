@@ -18,6 +18,7 @@ import { createHash } from 'node:crypto';
 import { createLogger, DEVICE_TRANSPORTS } from '@gladysassistant/integration-sdk';
 import { checkSpurl, MAX_COMMAND_REPEAT } from '../config.js';
 import { isRepeatable } from './notes.js';
+import { describeEventType, explainFailure, isErrorEvent, isPermanentFailure } from './events.js';
 import { sentOrders } from './orders.js';
 
 const logger = createLogger({ name: 'airsend' });
@@ -47,11 +48,13 @@ const DEFAULT_REPEAT = 1;
 
 /** Thrown when a request reached the box but was refused. */
 export class AirSendError extends Error {
-  constructor(message, { status, transport } = {}) {
+  constructor(message, { status, transport, eventType } = {}) {
     super(message);
     this.name = 'AirSendError';
     this.status = status;
     this.transport = transport;
+    /** `type` of the AirSend event that reported it, when one did. */
+    this.eventType = eventType;
   }
 }
 
@@ -160,7 +163,11 @@ export class AirSendClient {
     try {
       answer = await this.emit(device, notes, options);
     } catch (err) {
-      logger.warn(`Local transfer failed for "${device.name}": ${err.message}`);
+      logger.warn(
+        err.eventType === undefined
+          ? `Local transfer failed for "${device.name}": ${err.message}`
+          : `The box did not carry the order sent to "${device.name}". ${explainFailure(err.eventType)}`,
+      );
       this.rememberTransport(device, DEVICE_TRANSPORTS.UNREACHABLE);
       this.notifyTransmit();
       throw err;
@@ -322,12 +329,22 @@ export class AirSendClient {
         transport: DEVICE_TRANSPORTS.LOCAL,
       });
     }
-    // With `wait: true` the box answers with the radio event itself: an event
-    // type >= 0x100 is an error (no answer, collision, unknown channel...).
-    if (wait && payload && Number(payload.type ?? 0) >= 0x100) {
-      throw new AirSendError(`No radio confirmation (event type ${payload.type})`, {
-        transport: DEVICE_TRANSPORTS.LOCAL,
-      });
+    // With `wait: true` the box answers with the radio event itself, and a type
+    // >= 0x100 is a failure that names itself (see events.js). Carrying that
+    // type on the error is what lets `isRetryable` tell a link that dropped —
+    // worth another go — from a connection string the box refuses, which will
+    // be refused just as fast the second time.
+    if (wait && payload && isErrorEvent(payload.type)) {
+      // Short here, explained where it is logged: this message travels back to
+      // Gladys as the failure of a command, and a paragraph is not what a user
+      // wants in a toast.
+      throw new AirSendError(
+        `The box did not carry the order: ${describeEventType(payload.type)}`,
+        {
+          transport: DEVICE_TRANSPORTS.LOCAL,
+          eventType: Number(payload.type),
+        },
+      );
     }
     return { notes: payload?.thingnotes?.notes ?? [] };
   }
@@ -449,6 +466,9 @@ export class AirSendClient {
  * connection string or the channel will refuse it exactly the same way.
  */
 function isRetryable(err) {
+  if (err?.eventType !== undefined) {
+    return !isPermanentFailure(err.eventType);
+  }
   const status = Number(err?.status);
   if (!Number.isFinite(status)) {
     return true;

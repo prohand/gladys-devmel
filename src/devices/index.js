@@ -25,6 +25,7 @@ import { switchDevice } from './switchDevice.js';
 import { shutter } from './shutter.js';
 import { light } from './light.js';
 import { decodeNotes, describeReadings, isSameChannel } from '../devmel/notes.js';
+import { describeEventType, explainFailure, isErrorEvent } from '../devmel/events.js';
 import { heardChannels } from '../devmel/heard.js';
 import { sentOrders } from '../devmel/orders.js';
 import { idsFor } from './helpers.js';
@@ -366,11 +367,14 @@ export async function applyEvents(
  * @returns {Promise<number>} how many devices acted on the leftovers
  */
 async function applyOwnEcho(gladys, config, event, echo) {
-  if (Number(event?.type ?? 0) >= 0x100) {
+  if (isErrorEvent(event?.type)) {
+    // Named, not numbered. The box says WHERE the order died — refused
+    // connection string, link out of step, another client holding the radio —
+    // and each of those is a different thing to go and check. A line that
+    // called them all "could not transmit" sent every one of them to "Command
+    // repeats", which answers none.
     logger.info(
-      `The box could not transmit the order sent to "${echo.name}" (event type ${event.type}): ` +
-        'nothing moved. If it keeps happening, raise "Command repeats" in the configuration, and ' +
-        'check that the box is powered and in range of what it drives.',
+      `The box did not carry the order sent to "${echo.name}". ${explainFailure(event.type)}`,
     );
     return 0;
   }
@@ -491,10 +495,10 @@ function whyUnusable(event, config = null) {
   if (!event || typeof event !== 'object' || !event.channel) {
     return 'no channel';
   }
-  if (Number(event.type ?? 0) >= 0x100) {
+  if (isErrorEvent(event.type)) {
     // Never waived: this is not a frame the box heard badly, it is the box
     // reporting that an exchange failed. There is nothing in it to publish.
-    return `error event, type ${event.type}`;
+    return `error event, ${describeEventType(event.type)}`;
   }
   if (event.reliability === undefined) {
     return null;

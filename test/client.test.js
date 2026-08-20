@@ -109,8 +109,29 @@ test('an unanswered read is an error, not a silent success', async () => {
 
   await assert.rejects(
     () => client.transfer(DEVICE, [stateNote(STATE_VALUES.ON)], { wait: true }),
-    /No radio confirmation/,
+    /did not carry the order: NETWORK \(event type 257\)/,
   );
+});
+
+test('a failure the box names is retried only when a second go can change it', async () => {
+  // The box says WHERE the order died. A link that lost its thread may well
+  // hold the next one; a connection string it refuses is refused just as fast
+  // the second time, and trying again only makes the user wait for it.
+  const client = clientWith();
+
+  stubFetch(() => jsonResponse(200, { type: 258 }));
+  await assert.rejects(
+    () => client.transfer(DEVICE, [stateNote(STATE_VALUES.ON)], { wait: true }),
+    /SYNCHRONIZATION \(event type 258\)/,
+  );
+  assert.equal(calls.length, 2);
+
+  stubFetch(() => jsonResponse(200, { type: 259 }));
+  await assert.rejects(
+    () => client.transfer(DEVICE, [stateNote(STATE_VALUES.ON)], { wait: true }),
+    /SECURITY \(event type 259\)/,
+  );
+  assert.equal(calls.length, 1);
 });
 
 test('an unreachable box is reported as such, with no other channel to try', async () => {

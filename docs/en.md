@@ -295,9 +295,42 @@ Two visible consequences:
 
 - a wall remote emits from **another address**: it is never taken for that echo,
   and goes on driving the shutter in Gladys;
-- when the box answers that it **could not transmit**, the integration writes it
-  in its logs, naming the device. It is the only trace of an order that went
-  nowhere, and it is worth a look if you often click twice.
+- when the box answers that it **did not carry the order**, the integration
+  writes it in its logs, naming the device and what the box said. It is the only
+  trace of an order that went nowhere, and it is worth a look if you often click
+  twice.
+
+### When the box says no
+
+Every order handed to the box is answered, and that answer carries a number.
+Below `256` the order went out; from `256` up it did not, and the number says
+where it died. That is what the line in the logs spells out:
+
+```
+The box did not carry the order sent to "Kitchen". SYNCHRONIZATION (event type
+258): the exchange between the AirSend Web Service and the box lost its thread —
+a link error, not a radio one. Whether anything went out on the air, nothing
+says. Check nothing else drives the box at the same moment…
+```
+
+| Name (type)             | What it means                       | What to check                                                                         |
+| ----------------------- | ----------------------------------- | ------------------------------------------------------------------------------------- |
+| `UNKNOWN` (256)         | refused without saying why          | Restart the box, then the integration                                                 |
+| `NETWORK` (257)         | the service never reached the box   | The box is powered, on the network, and still at the address in the connection string |
+| `SYNCHRONIZATION` (258) | the link with the box lost the plot | Nothing else driving the box at that moment; a weak Wi-Fi link does it too            |
+| `SECURITY` (259)        | the connection string was refused   | Export it again from airsend.cloud and paste it whole                                 |
+| `BUSY` (260)            | another client had the box locked   | Close the AirSend app, or take the box out of the other installation                  |
+| `TIMEOUT` (261)         | the box did not answer in time      | A box busy for someone else, or standing where its Wi-Fi is weak                      |
+| `UNSUPPORTED` (262)     | the box cannot send this            | The `type` and the channel of the device, against the airsend.cloud export            |
+| `INCOMPLETE` (263)      | something was missing               | Paste the channel whole, with everything it came with next to `id`                    |
+| `FULL` (264)            | the request was too large           | Report it: nothing sent from here should ever be that long                            |
+
+**Command repeats answers none of these.** Repeats are for a frame lost in the
+noise — and a frame lost in the noise is precisely the failure nothing reports:
+nothing acknowledges a radio order, so an order the box says it carried is all
+the confirmation there will ever be. When the box itself reports the failure,
+the order never got as far as the noise. Raising the repeats then only sends
+orders out closer together, at a box already having trouble keeping up.
 
 ## The position of a shutter
 
@@ -789,24 +822,25 @@ provides: link your Gladys Plus account and paste your Open API key in the
 
 ## Troubleshooting
 
-| Symptom                            | What to check                                                                          |
-| ---------------------------------- | -------------------------------------------------------------------------------------- |
-| `Invalid connection string`        | **Test the connection**: it shows the `sp://` string, password removed                 |
-| `Invalid input`                    | The `channel` of the device (`id`/`pid` and `source`/`addr`)                           |
-| `no radio channel` in the logs     | The entry carries no channel: it needs `channel.id`, or the `pid`/`addr` pair          |
-| `no radio confirmation`            | Normal on equipment without feedback: set `wait: false`                                |
-| No device in the Discovery tab     | **Test the connection**: the device list probably did not parse                        |
-| The box is unreachable             | The `?gw=0&rhost=<IPv4>` part of the connection string                                 |
-| `Built-in service unavailable`     | The integration logs: the service logs its own startup there                           |
-| The box answers by hand, not here  | The `rhost=` IPv4 must be reachable **from the container**, not just from your desktop |
-| You have to click several times    | Raise **Command repeats** to `2` or `3`, or the device's own `repeat`                  |
-| An order takes a second to leave   | `gw=1` in the connection string: turn **Internet gateway** off on airsend.cloud        |
-| A shutter shows no position        | Time it: `travel_up` / `travel_down`, then open or close it fully once                 |
-| The position drifts over time      | Re-time the travel, and open the shutter fully once a day to resynchronize it          |
-| No frame from an 868 MHz remote    | **Test the connection**: channel `1` is 433 MHz. Declare the device, or its `pid`      |
-| Remote attached, nothing moves     | **Test the connection**, _Heard_ line: it says whether the frames carry an order       |
-| `unreliable, graded N` in the logs | A frame graded too low: **Accept unreliable frames**, or move the box closer           |
-| A frame with a `pid` and no `addr` | The protocol is not decoded: put that `pid` in **Listening channel**                   |
+| Symptom                               | What to check                                                                            |
+| ------------------------------------- | ---------------------------------------------------------------------------------------- |
+| `Invalid connection string`           | **Test the connection**: it shows the `sp://` string, password removed                   |
+| `Invalid input`                       | The `channel` of the device (`id`/`pid` and `source`/`addr`)                             |
+| `no radio channel` in the logs        | The entry carries no channel: it needs `channel.id`, or the `pid`/`addr` pair            |
+| `no radio confirmation`               | Normal on equipment without feedback: set `wait: false`                                  |
+| No device in the Discovery tab        | **Test the connection**: the device list probably did not parse                          |
+| The box is unreachable                | The `?gw=0&rhost=<IPv4>` part of the connection string                                   |
+| `Built-in service unavailable`        | The integration logs: the service logs its own startup there                             |
+| The box answers by hand, not here     | The `rhost=` IPv4 must be reachable **from the container**, not just from your desktop   |
+| You have to click several times       | Raise **Command repeats** to `2` or `3`, or the device's own `repeat`                    |
+| An order takes a second to leave      | `gw=1` in the connection string: turn **Internet gateway** off on airsend.cloud          |
+| A shutter shows no position           | Time it: `travel_up` / `travel_down`, then open or close it fully once                   |
+| The position drifts over time         | Re-time the travel, and open the shutter fully once a day to resynchronize it            |
+| No frame from an 868 MHz remote       | **Test the connection**: channel `1` is 433 MHz. Declare the device, or its `pid`        |
+| Remote attached, nothing moves        | **Test the connection**, _Heard_ line: it says whether the frames carry an order         |
+| `unreliable, graded N` in the logs    | A frame graded too low: **Accept unreliable frames**, or move the box closer             |
+| `did not carry the order` in the logs | The name that line gives the failure — see [When the box says no](#when-the-box-says-no) |
+| A frame with a `pid` and no `addr`    | The protocol is not decoded: put that `pid` in **Listening channel**                     |
 
 The integration logs everything it does: read the integration logs from the
 Gladys UI (or `docker logs` on the host), and tick **Detailed logs (debug)** in

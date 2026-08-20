@@ -935,7 +935,38 @@ test('an order the box could not transmit is said out loud, not swallowed', asyn
 
   assert.equal(await lines.result, 0);
   assert.equal(lines.of('INFO').length, 1);
-  assert.match(lines.of('INFO')[0], /could not transmit the order sent to "Timed shutter"/);
+  assert.match(lines.of('INFO')[0], /did not carry the order sent to "Timed shutter"/);
+  // NETWORK: the box was never reached, so nothing was transmitted — and that
+  // is a thing to go and check, not a number to read.
+  assert.match(lines.of('INFO')[0], /NETWORK \(event type 257\)/);
+  assert.match(lines.of('INFO')[0], /Nothing went out on the air/);
+});
+
+test('a failure the box reports is not answered with "raise Command repeats"', async (t) => {
+  // 258 is SYNCHRONIZATION: the link between the service and the box lost its
+  // thread. Sending the user to the repeats setting for it is sending them to
+  // the one setting that cannot help — and they arrive with it already at 3.
+  const { gladys, config } = setupTimed(t);
+  const orders = new SentOrders();
+  orders.remember('0xbeef', deviceNamed(config, 'Timed shutter'));
+
+  const lines = captureLogs(async () =>
+    applyEvents(
+      gladys,
+      config,
+      [ownEcho(config, 'Timed shutter', undefined, { uid: '0xbeef', type: 258 })],
+      new HeardChannels(),
+      orders,
+    ),
+  );
+
+  await lines.result;
+  const line = lines.of('INFO')[0];
+  assert.match(line, /SYNCHRONIZATION \(event type 258\)/);
+  // Nothing claims the shutter stayed put: a link that dropped mid-exchange
+  // says nothing about what did or did not reach the air.
+  assert.match(line, /Whether anything went out on the air, nothing says/);
+  assert.doesNotMatch(line, /raise "Command repeats"/);
 });
 
 test('a device reporting where it actually is, is believed even in an echo', async (t) => {
