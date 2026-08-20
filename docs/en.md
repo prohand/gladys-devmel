@@ -290,6 +290,20 @@ and nothing extra is sent. It costs one small request per idle box, and it is
 what polling already did for a box declared with `sensors: true`; a box that only
 carries the connection string had nothing.
 
+Four minutes is where it starts, not a fact: how long a box tolerates being left
+alone is documented nowhere, and it is not the same over Wi-Fi as through the
+cloud gateway. So the box says. When waking it takes more than a second, the
+link had already gone cold, the integration halves the wait — down to one
+minute, never below — and writes the line:
+
+```
+Waking the link to "AirSend" took 2.6 s after 4 min of silence: it goes cold
+faster than it was being kept warm… Touching it every 2 min from now on.
+```
+
+It only ever shortens: a fast wake proves the interval it was made at works,
+never that a longer one would.
+
 When an order still takes more than a second and a half to leave, the logs say
 so, and say **where the time went**:
 

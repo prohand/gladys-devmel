@@ -508,3 +508,51 @@ test('reading the box own sensors does not file channel 1 as a voice of ours', a
 
   assert.equal(orders.match({ channel: { id: 1 } }), null);
 });
+
+test('a box that goes cold quickly is touched more often, down to a floor', async () => {
+  // Nothing documents how long an AirSend box tolerates being left alone, and
+  // it is not the same over Wi-Fi as through the cloud gateway. So the box
+  // says: a wake that took seconds is a link that had already gone cold.
+  const tick = { at: 0 };
+  const client = clientOnClock(tick);
+  const wake = (ms) => {
+    stubFetch(() => {
+      tick.at += ms;
+      return jsonResponse(200, { type: 3, thingnotes: { notes: [] } });
+    });
+    tick.at += client.warmAfter;
+    return client.keepWarm(BOX);
+  };
+
+  assert.equal(client.warmAfter, WARM_AFTER_MS);
+  await wake(3000);
+  assert.equal(client.warmAfter, WARM_AFTER_MS / 2);
+  await wake(3000);
+  assert.equal(client.warmAfter, WARM_AFTER_MS / 4);
+  // A minute is as often as it ever goes: past that the cure costs more than
+  // the delay it saves.
+  await wake(3000);
+  await wake(3000);
+  assert.equal(client.warmAfter, 60 * 1000);
+
+  // And a fast wake proves the interval it was made at works, never that a
+  // longer one would: it is never lengthened back.
+  await wake(50);
+  assert.equal(client.warmAfter, 60 * 1000);
+});
+
+test('a fresh configuration forgets what the old box taught us', async () => {
+  const tick = { at: 0 };
+  const client = clientOnClock(tick);
+  stubFetch(() => {
+    tick.at += 3000;
+    return jsonResponse(200, { type: 3, thingnotes: { notes: [] } });
+  });
+
+  tick.at += WARM_AFTER_MS;
+  await client.keepWarm(BOX);
+  assert.equal(client.warmAfter, WARM_AFTER_MS / 2);
+
+  client.configure(normalizeConfig({ spurl: 'sp://pass@[fe80::2]?rhost=192.168.1.51' }));
+  assert.equal(client.warmAfter, WARM_AFTER_MS);
+});

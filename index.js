@@ -17,7 +17,7 @@
 import { GladysIntegration, logger } from '@gladysassistant/integration-sdk';
 import { normalizeConfig } from './src/config.js';
 import { applyLogLevel } from './src/logging.js';
-import { AirSendClient, WARM_AFTER_MS } from './src/devmel/client.js';
+import { AirSendClient } from './src/devmel/client.js';
 import {
   applyEvents,
   buildDiscoveredDevices,
@@ -510,7 +510,7 @@ function startKeepingWarm() {
   }, WARM_CHECK_MS);
   // Never a reason to hold the process open.
   warmTimer.unref?.();
-  logger.debug(`Keeping the link to the box warm (idle for ${WARM_AFTER_MS / 60000} min)`);
+  logger.debug(`Keeping the link to the box warm (after ${client.warmAfter / 60000} min idle)`);
 }
 
 function stopKeepingWarm() {

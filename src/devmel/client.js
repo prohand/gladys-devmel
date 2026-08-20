@@ -63,8 +63,23 @@ const SLOW_ORDER_MS = 1500;
  * be sent, and that wait lands on whoever clicked. Devmel's own integrations
  * poll their boxes every five minutes, which is the same idea from the other
  * end. Four minutes keeps this one under that.
+ *
+ * It is a starting point, not a fact: how long a box takes to go cold is
+ * nowhere in its documentation, and it is not the same over Wi-Fi as over the
+ * cloud gateway. So the box gets to say — see `keepWarm`.
  */
 export const WARM_AFTER_MS = 4 * 60 * 1000;
+
+/** Never wake the link more often than this, whatever the box does. */
+const WARM_FLOOR_MS = 60 * 1000;
+
+/**
+ * A wake slower than this is a link that had already gone cold: the box was
+ * left alone for longer than it tolerates, and the interval above is too long
+ * for it. Answering a read of its own sensors is a fraction of a second on a
+ * link that is up.
+ */
+const COLD_LINK_MS = 1000;
 
 /** Thrown when a request reached the box but was refused. */
 export class AirSendError extends Error {
@@ -95,6 +110,12 @@ export class AirSendClient {
     this.sleep = sleep;
     this.now = now;
     this.orders = orders;
+    /**
+     * How long the box may be left alone before its link is woken. Shortened,
+     * never lengthened, by what the box actually does (see `keepWarm`), and
+     * back to its starting point on every configuration.
+     */
+    this.warmAfter = WARM_AFTER_MS;
     /** Tail of the radio queue: one operation at a time, in order. */
     this.queue = Promise.resolve();
     /** Radio operations queued or in flight: the box is not free while > 0. */
@@ -116,6 +137,10 @@ export class AirSendClient {
   /** Apply a new configuration (called on connection and on every config update). */
   configure(config) {
     this.config = config;
+    // A new configuration can be a new box, a new route to it, or the same box
+    // reached another way: what the old one taught us about going cold says
+    // nothing about this one.
+    this.warmAfter = WARM_AFTER_MS;
   }
 
   /**
@@ -378,22 +403,55 @@ export class AirSendClient {
     if (!this.canUseLocal(device) || this.busy) {
       return false;
     }
-    if (this.now() - this.lastRadioAt < WARM_AFTER_MS) {
+    const idleFor = this.now() - this.lastRadioAt;
+    if (idleFor < this.warmAfter) {
       return false;
     }
+    const startedAt = this.now();
     try {
       await this.radio(() =>
         this.transferLocal(device, [queryNote(QUERY_TYPES.TEMPERATURE)], { wait: true }),
       );
-      logger.debug(`Kept the link to "${device.name}" warm`);
     } catch (err) {
       logger.debug(`Could not keep the link to "${device.name}" warm: ${err.message}`);
     }
+    this.learnHowFastItGoesCold(device, idleFor, this.now() - startedAt);
     // Whether it answered or refused, the box was addressed — and if that took
     // it out of reception, listening has to be armed again. Cheaper to re-arm
     // for nothing than to let a wall remote go unheard until the renewal.
     this.notifyTransmit();
     return true;
+  }
+
+  /**
+   * How long the box tolerates being left alone, learned from waking it.
+   *
+   * Nothing documents it, and it is not the same over Wi-Fi as through the
+   * cloud gateway. But a wake that took a second and a half says it plainly:
+   * the link had already gone cold, so the box was left alone longer than it
+   * tolerates. Halve the wait, down to a minute, and stop guessing.
+   *
+   * Only ever shortened. A wake that is fast proves the CURRENT interval works,
+   * never that a longer one would — and an interval that grew back on that
+   * reasoning would spend its life oscillating around the delay it is there to
+   * avoid.
+   */
+  learnHowFastItGoesCold(device, idleFor, took) {
+    if (took < COLD_LINK_MS) {
+      logger.debug(`Woke the link to "${device.name}" in ${seconds(took)}`);
+      return;
+    }
+    const shortened = Math.max(WARM_FLOOR_MS, Math.round(this.warmAfter / 2));
+    const learned = shortened !== this.warmAfter;
+    this.warmAfter = shortened;
+    logger.info(
+      `Waking the link to "${device.name}" took ${seconds(took)} after ${minutes(idleFor)} of ` +
+        'silence: it goes cold faster than it was being kept warm, which is the delay felt on ' +
+        'the first order of the evening. ' +
+        (learned
+          ? `Touching it every ${minutes(shortened)} from now on.`
+          : `Already touching it every ${minutes(shortened)}, which is as often as it goes.`),
+    );
   }
 
   /** Tell the integration the radio was used (see `afterTransmit`). */
@@ -591,6 +649,12 @@ function isRetryable(err) {
     return true;
   }
   return status >= 500;
+}
+
+/** A longer duration, as a log reads it. */
+function minutes(ms) {
+  const value = Math.max(0, ms) / 60000;
+  return value < 1 ? seconds(ms) : `${Number(value.toFixed(1))} min`;
 }
 
 /** A duration as a log reads it: tenths of a second, never raw milliseconds. */

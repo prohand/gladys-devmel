@@ -302,6 +302,21 @@ c'est ce que le relevé faisait déjà pour un boîtier déclaré avec
 `sensors: true` ; un boîtier qui ne porte que la chaîne de connexion, lui,
 n'avait rien.
 
+Quatre minutes, c'est le point de départ, pas une vérité : combien de temps un
+boîtier supporte d'être laissé seul n'est documenté nulle part, et ce n'est pas
+la même chose en Wi-Fi et par la passerelle cloud. C'est donc le boîtier qui le
+dit. Quand le réveiller prend plus d'une seconde, c'est que le lien avait déjà
+refroidi : l'intégration divise l'attente par deux — jusqu'à une minute, jamais
+en dessous — et écrit la ligne :
+
+```
+Waking the link to "AirSend" took 2.6 s after 4 min of silence: it goes cold
+faster than it was being kept warm… Touching it every 2 min from now on.
+```
+
+Elle ne fait que raccourcir : un réveil rapide prouve que l'intervalle où il a
+eu lieu fonctionne, jamais qu'un plus long fonctionnerait.
+
 Quand un ordre met tout de même plus d'une seconde et demie à partir, les
 journaux le disent, et disent **où le temps est passé** :
 

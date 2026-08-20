@@ -66,7 +66,9 @@ all the way to the top.
 A box nobody has spoken to for hours answers slower than one used a minute ago:
 the link has to be woken first, and that wait lands on whoever clicked. So the
 integration touches an idle box every four minutes (a read of its own sensors,
-which never goes on the air), and an order that still takes more than a second
+which never goes on the air) — halving that wait, down to a minute, whenever
+waking the link turns out to have been slow, because how fast a box goes cold is
+documented nowhere and only the box can say. An order that still takes more than a second
 and a half to leave is logged with the split that says whose fault it is — time
 spent waiting for the radio, time spent in the box.
 
