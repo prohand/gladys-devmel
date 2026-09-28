@@ -491,7 +491,7 @@ function describeHeardEmitter(config, entry, now, language, table) {
  * the one worth a whole line of its own — it is an attached remote that moves
  * nothing, and it looks exactly like a remote that was never attached.
  */
-function describeFate(config, entry, language) {
+export function describeFate(config, entry, language) {
   // No address at all: the box picked the protocol up without decoding it, so
   // there is nothing to attach and nothing to publish. The fix is upstream —
   // listen to that protocol's own decoder — and it is the only advice that

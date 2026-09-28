@@ -8,6 +8,8 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { DEFAULT_CONFIG, normalizeConfig } from '../src/config.js';
+import { REMOTE_ORDERS, SCENE_ACTIONS, SCENE_TRIGGERS } from '../src/capabilities/scenes.js';
+import { RADIO_WIDGET } from '../src/capabilities/widget.js';
 
 const manifest = JSON.parse(
   await readFile(new URL('../gladys-assistant-integration.json', import.meta.url), 'utf8'),
@@ -52,6 +54,9 @@ test('every field uses a type the store accepts', () => {
   const allFields = [
     ...manifest.config_schema,
     ...(manifest.actions ?? []).flatMap((a) => a.fields ?? []),
+    ...(manifest.widgets ?? []).flatMap((w) => w.settings ?? []),
+    ...(manifest.scene_triggers ?? []).flatMap((t) => t.fields ?? []),
+    ...(manifest.scene_actions ?? []).flatMap((a) => a.fields ?? []),
   ];
   for (const field of allFields) {
     assert.ok(
@@ -196,9 +201,40 @@ test('the categories stay inside the vocabulary the store indexes', () => {
   for (const category of categories) {
     assert.ok(CATEGORIES.includes(category), `unknown category "${category}"`);
   }
-  // Older cores reject a manifest field they do not know: declaring
-  // `categories` is what makes 4.86 the floor.
-  assert.match(manifest.gladys_version, /^>=4\.(8[6-9]|9\d|\d{3,})/);
+});
+
+test('the Gladys floor covers every field the manifest declares', () => {
+  // Older cores reject a manifest field they do not know: `categories` needs
+  // 4.86, and the widgets and scene declarations need 5.1.
+  const [major, minor] = manifest.gladys_version.replace(/^>=/, '').split('.').map(Number);
+  assert.ok(major > 5 || (major === 5 && minor >= 1), `got ${manifest.gladys_version}`);
+});
+
+test('every widget and scene action is handled in index.js', () => {
+  for (const widget of manifest.widgets ?? []) {
+    assert.match(indexSource, /onWidgetGet\(RADIO_WIDGET/, `widget "${widget.key}"`);
+    assert.equal(widget.key, RADIO_WIDGET);
+  }
+  const actions = Object.values(SCENE_ACTIONS);
+  assert.deepEqual(
+    (manifest.scene_actions ?? []).map((action) => action.key).sort(),
+    [...actions].sort(),
+  );
+  for (const key of Object.keys(SCENE_ACTIONS)) {
+    assert.match(indexSource, new RegExp(`onSceneAction\\(SCENE_ACTIONS\\.${key}`));
+  }
+});
+
+test('the scene triggers the code fires are the ones the manifest declares', () => {
+  assert.deepEqual(
+    (manifest.scene_triggers ?? []).map((trigger) => trigger.key).sort(),
+    Object.values(SCENE_TRIGGERS).sort(),
+  );
+  const orders = manifest.scene_triggers
+    .find((trigger) => trigger.key === SCENE_TRIGGERS.REMOTE_PRESSED)
+    .fields.find((field) => field.key === 'order')
+    .options.map((option) => option.value);
+  assert.deepEqual(orders.sort(), Object.values(REMOTE_ORDERS).sort());
 });
 
 test('the manifest declares the local transport and a label in both languages', () => {

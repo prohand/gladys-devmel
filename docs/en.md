@@ -853,6 +853,46 @@ provides: link your Gladys Plus account and paste your Open API key in the
 - **Identify a device** — pick a device and it is sent a PING. Not every piece
   of 433 MHz equipment reacts to it.
 
+## Scenes and dashboard (Gladys 5.1+)
+
+These need **Gladys 5.1 or later**; an older Gladys keeps the previous version
+of the integration.
+
+### Scene triggers
+
+In the scene editor, under **Integrations**:
+
+- **A radio remote is pressed** — a wall remote, a keyfob or a radio button
+  declared on a device was heard (the `remotes` of a device, a type `1` remote,
+  a spare remote attached to a type `4096` button). Filter on the device it
+  drives and on the order (`up`, `down`, `stop`, `favorite`, `on`, `off`,
+  `toggle`). The scene can read `device_name`, `order`, `pid` and `addr`.
+  Gladys' own orders never fire it, so a scene cannot loop on itself. A remote
+  held down is one press, not one event per frame.
+- **A radio order failed** — the box did not carry an order Gladys gave:
+  unreachable, connection string refused, box busy… The scene can read
+  `device_name`, `reason` (`NETWORK`, `SECURITY`, `BUSY`, `HTTP_401`,
+  `UNREACHABLE`…) and `message`. One event per device and reason per minute:
+  made for a notification.
+
+### Scene actions
+
+- **Set the known position of a shutter** — tells the integration where a
+  timed shutter really is (0-100 %), **without moving it**: after a power cut, a
+  crank turned by hand, a motor stopped by an obstacle.
+- **Re-arm radio listening** — subscribes the box again, now. Useful right
+  after the box has been powered back on (it forgets its subscription). Gives
+  the channel listened to as `channel`.
+
+### The "AirSend radio" widget
+
+Add it to a dashboard: the state of the AirSend service, the protocol the box
+listens to, the last frame heard, the echoes of Gladys' orders, the frames
+dropped, the box temperature and light when it has `sensors: true`, and the
+last emitters heard with what became of them (followed, unknown, dropped…). Its
+**Re-arm listening** button does the same as the scene action. The
+**Emitters shown** setting (0 to 8) sets the length of the list.
+
 ## Good to know
 
 - 433 MHz is a **one-way** protocol for most equipment: nothing confirms an

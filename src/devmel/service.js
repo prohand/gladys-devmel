@@ -90,6 +90,13 @@ export class AirSendService {
     /** Set while a start is in flight, so concurrent callers share it. */
     this.starting = null;
     this.watchdog = null;
+    /**
+     * Called once the watchdog has brought a dead daemon back. A new daemon
+     * knows nothing of the listening subscription the old one held, and the box
+     * stays deaf until someone binds it again.
+     * @type {(() => void) | null}
+     */
+    this.onRestarted = null;
   }
 
   /**
@@ -339,10 +346,18 @@ export class AirSendService {
     logger.warn('The AirSend Web Service stopped answering, restarting it');
     this.running = false;
     this.pid = null;
-    await this.start().catch((err) => {
+    const restarted = await this.start().catch((err) => {
       this.error = err.message;
       logger.error(`Could not restart the AirSend Web Service: ${err.message}`);
+      return false;
     });
+    if (restarted && typeof this.onRestarted === 'function') {
+      try {
+        this.onRestarted();
+      } catch (err) {
+        logger.debug(`Could not signal the restart of the service: ${err.message}`);
+      }
+    }
   }
 }
 

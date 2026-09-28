@@ -93,10 +93,17 @@ test('a daemon that died is started again by the watchdog', async () => {
   // stop() disarms the watchdog; check() is what it would have run.
   service.wanted = true;
 
+  let restarted = 0;
+  service.onRestarted = () => {
+    restarted += 1;
+  };
+
   await service.check();
 
   assert.equal(service.status().running, true);
   assert.notEqual(service.pid, firstPid);
+  // A new daemon holds no subscription: the integration is told, to bind again.
+  assert.equal(restarted, 1);
   await service.stop();
 });
 

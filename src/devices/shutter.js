@@ -184,6 +184,27 @@ export const shutter = {
   async identify(_gladys, { device, client, callbackUrl }) {
     await sendNotes(client, device, [stateNote(STATE_VALUES.PING)], { callbackUrl });
   },
+
+  /**
+   * Tell the travel where the shutter really is, without moving it: after a
+   * power cut, a crank turned by hand, a motor stopped by an obstacle. The
+   * `set_known_position` scene action, the same idea as the "set known
+   * position" of the time-based covers of Home Assistant.
+   */
+  async setKnownPosition(gladys, { device, position }) {
+    if (!hasPosition(device)) {
+      throw new Error(
+        `"${device.name}" has no position: give it travel_up / travel_down, or declare it as type 4099`,
+      );
+    }
+    const ids = idsFor(gladys, KEY, device);
+    const known = clampLevel(position);
+    shutter.travel.set(device, known);
+    logger.info(`"${device.name}" is known to be at ${known} %`);
+    await publishState(gladys, ids.feature(FEATURE.STATE), toShutterState(known));
+    await publishPosition(gladys, device, ids, known);
+    return known;
+  },
 };
 
 /** A shutter shows a position when its motor has one, or when it was timed. */

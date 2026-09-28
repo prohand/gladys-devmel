@@ -295,6 +295,30 @@ test('the repeats keep their place in front of the next command', async () => {
   );
 });
 
+test('a newer order to the same device drops the repeats of the older one', async () => {
+  // Past the first repeat, the repeats join the queue one at a time: without
+  // this, an UP repeated behind the STOP that followed it set the shutter off
+  // again.
+  stubFetch(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    return jsonResponse(200, { type: 3 });
+  });
+  const client = clientWith({ command_repeat: 2 });
+
+  await client.transfer(DEVICE, [stateNote(STATE_VALUES.UP)]);
+  await client.transfer(DEVICE, [stateNote(STATE_VALUES.STOP)]);
+  await client.idle();
+  await client.idle();
+
+  const sent = calls.map((call) => JSON.parse(call.options.body).thingnotes.notes[0].value);
+  assert.equal(sent.at(-1), STATE_VALUES.STOP);
+  assert.deepEqual(sent.slice(sent.indexOf(STATE_VALUES.STOP)), [
+    STATE_VALUES.STOP,
+    STATE_VALUES.STOP,
+    STATE_VALUES.STOP,
+  ]);
+});
+
 test('a repeat that fails changes nothing: the order did go out', async () => {
   let answered = 0;
   stubFetch(() => {

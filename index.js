@@ -25,6 +25,7 @@ import {
   findDeviceByExternalId,
   identifyDevice,
   restoreDeviceStates,
+  setKnownPosition,
   stopDeviceTracking,
 } from './src/devices/index.js';
 import { boxDevices, describeConnection, testConnection } from './src/devmel/connection.js';
@@ -34,6 +35,8 @@ import { indexChannels, planListening } from './src/devmel/listening.js';
 import { heardChannels } from './src/devmel/heard.js';
 import { attachHeardRemote } from './src/devmel/remotes.js';
 import { findProtocol } from './src/devmel/protocols.js';
+import { failureReason, SCENE_ACTIONS, sceneEvents } from './src/capabilities/scenes.js';
+import { buildRadioWidget, RADIO_WIDGET, WIDGET_ACTIONS } from './src/capabilities/widget.js';
 
 const gladys = new GladysIntegration();
 const client = new AirSendClient();
@@ -44,6 +47,9 @@ client.afterTransmit = () => scheduleRebind();
 // The AirSend Web Service, running in this very container unless the user
 // pointed the configuration at one of their own.
 const service = new AirSendService();
+// A daemon brought back by the watchdog starts with no subscription: without a
+// bind, the box would stay deaf until the next ten-minute renewal.
+service.onRestarted = () => scheduleRebind();
 
 // Where that service posts the radio frames it hears: a loopback HTTP server in
 // this same container. It is the service — not the box — that calls back, so
@@ -79,6 +85,12 @@ const REBIND_AFTER_COMMAND_MS = 2000;
 let warmTimer = null;
 const WARM_CHECK_MS = 60 * 1000;
 
+// Asks the dashboard widget to pull its content again once frames came in.
+// Coalesced: the core accepts one nudge per 10 s per widget anyway, and a
+// remote held down sends two frames a second.
+let widgetRefreshTimer = null;
+const WIDGET_REFRESH_MS = 10 * 1000;
+
 // The protocol table of the AirSend Web Service, read once per configuration:
 // it says which channel decodes which protocol, hence what to bind.
 let channelTable = new Map();
@@ -101,15 +113,32 @@ gladys.onSetValue(async (device, feature, value) => {
     // Throw: the SDK sends a success:false acknowledgement to Gladys.
     throw new Error(`No command handler for ${device.external_id}`);
   }
-  await found.blueprint.onSetValue(gladys, {
-    device: found.device,
-    feature,
-    value,
-    client,
-    callbackUrl: radioCallbackUrl(),
-    config,
-  });
-  await publishDeviceTransports();
+  try {
+    await found.blueprint.onSetValue(gladys, {
+      device: found.device,
+      feature,
+      value,
+      client,
+      callbackUrl: radioCallbackUrl(),
+      config,
+    });
+  } catch (err) {
+    // The one failure of a radio order anything can report: a scene may want
+    // to know (a notification, a retry later).
+    await sceneEvents.orderFailed(gladys, {
+      externalId: device.external_id,
+      name: found.device.name,
+      reason: failureReason(err),
+      message: err.message,
+    });
+    throw err;
+  } finally {
+    // A failed order is exactly when the badge has something new to say: the
+    // device just became unreachable.
+    await publishDeviceTransports().catch((err) =>
+      logger.debug(`Could not publish the transports: ${err.message}`),
+    );
+  }
 });
 
 // --- Polling: Gladys asks to refresh a device --------------------------------
@@ -137,6 +166,7 @@ gladys.onPoll(async (device) => {
 async function handleRadioEvents(events, route) {
   const applied = await applyEvents(gladys, config, events);
   logger.debug(`${route}: ${events?.length ?? 0} event(s), ${applied} device(s) updated`);
+  refreshWidget();
 }
 
 // `fire_and_forget` mode: the caller only awaits an acknowledgement.
@@ -199,6 +229,42 @@ gladys.onAction('identify', async (fields) => {
     client,
     callbackUrl: radioCallbackUrl(),
   });
+});
+
+// --- Dashboard widget (Gladys 5.1+) ------------------------------------------
+gladys.onWidgetGet(RADIO_WIDGET, async ({ settings }) =>
+  buildRadioWidget({
+    gladys,
+    config,
+    service,
+    listen: listenState,
+    heard: heardChannels,
+    table: await knownChannels(),
+    settings,
+  }),
+);
+
+gladys.onWidgetAction(RADIO_WIDGET, async (actionKey) => {
+  logger.info(`Widget action ${actionKey}`);
+  if (actionKey !== WIDGET_ACTIONS.REARM) {
+    throw new Error(`Unknown widget action ${actionKey}`);
+  }
+  const channel = await rearmListening();
+  return {
+    en: `Listening re-armed on channel ${channel}.`,
+    fr: `Écoute réarmée sur le canal ${channel}.`,
+  };
+});
+
+// --- Scene actions (Gladys 5.1+) ---------------------------------------------
+gladys.onSceneAction(SCENE_ACTIONS.SET_KNOWN_POSITION, async (fields) => {
+  logger.info(`Scene action set_known_position <- ${fields.device} = ${fields.position}`);
+  await setKnownPosition(gladys, config, fields.device, fields.position);
+});
+
+gladys.onSceneAction(SCENE_ACTIONS.REARM_LISTENING, async () => {
+  logger.info('Scene action rearm_listening');
+  return { channel: await rearmListening() };
 });
 
 // --- Configuration updated by the user ---------------------------------------
@@ -473,6 +539,44 @@ function rebindNow() {
   );
 }
 
+/**
+ * Bind the box again, now, and say whether it took: the widget button and the
+ * scene action both need an answer, not a fire-and-forget.
+ *
+ * @returns {Promise<number>} the channel listened to
+ */
+async function rearmListening() {
+  await startListening();
+  const plan = listenState.plan;
+  if (!plan?.enabled) {
+    throw new Error('Listening is turned off (listening channel set to 0)');
+  }
+  if (listenState.error) {
+    throw new Error(`The box refused the subscription: ${listenState.error}`);
+  }
+  if (!listenState.url) {
+    throw new Error('No route for the radio frames: nothing to bind');
+  }
+  refreshWidget();
+  return plan.channel;
+}
+
+/** Nudge the dashboard widget, at most once per window. */
+function refreshWidget() {
+  if (widgetRefreshTimer) {
+    return;
+  }
+  widgetRefreshTimer = setTimeout(() => {
+    widgetRefreshTimer = null;
+    try {
+      gladys.requestWidgetRefresh(RADIO_WIDGET);
+    } catch (err) {
+      logger.debug(`Could not refresh the widget: ${err.message}`);
+    }
+  }, WIDGET_REFRESH_MS);
+  widgetRefreshTimer.unref?.();
+}
+
 function stopListening() {
   if (listenTimer) {
     clearInterval(listenTimer);
@@ -556,6 +660,10 @@ gladys.handleShutdown(async (signal) => {
   stopListening();
   stopKeepingWarm();
   stopDeviceTracking();
+  if (widgetRefreshTimer) {
+    clearTimeout(widgetRefreshTimer);
+    widgetRefreshTimer = null;
+  }
   await callbackServer.stop();
   // The AirSend Web Service daemonizes: nothing would reap it for us.
   await service.stop();
