@@ -249,3 +249,42 @@ test('no device picked, no line: the action says what it needs', () => {
 
   assert.match(message.fr, /Choisissez l’appareil/);
 });
+
+test('a frame caught without its address gives way to the same remote, decoded', () => {
+  const config = configOf(EXPORT);
+  const heard = new HeardChannels({ now: () => 1_000_000 });
+  heard.record({ id: 14177, source: 2755547649 }, { timestamp: 990_000 });
+  heard.record({ id: 14177 }, { timestamp: 1_000_000 });
+
+  const message = attachHeardRemote({ config, device: config.devmelDevices[0], heard });
+
+  assert.match(message.fr, /"remotes":\[\{"pid":14177,"addr":2755547649\}\]/);
+  assert.doesNotMatch(message.fr, /aucune adresse/);
+});
+
+test('no address on a protocol the box decodes addresses on: no line, press again', () => {
+  // Another remote of the house is declared on 14177 WITH its address: a bare
+  // `{pid: 14177}` would make this shutter follow that remote too.
+  const config = configOf(
+    JSON.stringify({
+      devices: [
+        {
+          name: 'Cuisine',
+          type: 4098,
+          pid: 25455,
+          addr: 229479,
+          remotes: [{ pid: 14177, addr: 9 }],
+        },
+        { name: 'Chambre Kelyan', type: 4098, pid: 25455, addr: 65639 },
+      ],
+    }),
+  );
+  const heard = new HeardChannels({ now: () => 1_000_000 });
+  heard.record({ id: 14177 }, { timestamp: 1_000_000 });
+
+  const message = attachHeardRemote({ config, device: config.devmelDevices[1], heard });
+
+  assert.match(message.fr, /mais pas son adresse/);
+  assert.match(message.fr, /Rien n'a été rattaché/);
+  assert.doesNotMatch(message.fr, /"remotes"/);
+});
