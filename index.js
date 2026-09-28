@@ -14,9 +14,9 @@
 // The SDK reads them automatically: `new GladysIntegration()` is enough.
 // -----------------------------------------------------------------------------
 
-import { GladysIntegration, logger } from '@gladysassistant/integration-sdk';
+import { GladysIntegration } from '@gladysassistant/integration-sdk';
 import { normalizeConfig } from './src/config.js';
-import { applyLogLevel } from './src/logging.js';
+import { applyLogLevel, applyLogTimeZone, createLogger } from './src/logging.js';
 import { AirSendClient } from './src/devmel/client.js';
 import {
   applyEvents,
@@ -38,7 +38,10 @@ import { findProtocol } from './src/devmel/protocols.js';
 import { failureReason, SCENE_ACTIONS, sceneEvents } from './src/capabilities/scenes.js';
 import { buildRadioWidget, RADIO_WIDGET, WIDGET_ACTIONS } from './src/capabilities/widget.js';
 
-const gladys = new GladysIntegration();
+// Every line stamped in the time zone of the Configuration screen, the SDK's
+// own connection logs included (see src/logging.js).
+const logger = createLogger();
+const gladys = new GladysIntegration({ logger: createLogger({ name: 'gladys-sdk' }) });
 const client = new AirSendClient();
 // Transmitting takes the box out of reception: every exchange is a reason to
 // make sure it is still listening (see `scheduleRebind`).
@@ -305,6 +308,7 @@ async function initialize(rawConfig) {
   // First, so that everything this initialization logs already obeys the level
   // the user just asked for — the frames of a freshly armed listener included.
   applyLogLevel(config);
+  applyLogTimeZone(config);
   // A configuration is changed because something did not work, and the frames
   // that would say whether it works now belong to emitters the logs have
   // already had their say about. Re-arm those once-only lines: the next press

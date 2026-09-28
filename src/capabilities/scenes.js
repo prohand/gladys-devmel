@@ -21,7 +21,7 @@
 // be delivered must never cost the radio path the frame it came from.
 // -----------------------------------------------------------------------------
 
-import { createLogger } from '@gladysassistant/integration-sdk';
+import { createLogger } from '../logging.js';
 import { COMMANDS, READINGS } from '../devmel/notes.js';
 import { describeFailure } from '../devmel/events.js';
 

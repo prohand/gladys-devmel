@@ -6,11 +6,8 @@
 // push button rather than a switch.
 // -----------------------------------------------------------------------------
 
-import {
-  createLogger,
-  DEVICE_FEATURE_CATEGORIES,
-  DEVICE_FEATURE_TYPES,
-} from '@gladysassistant/integration-sdk';
+import { DEVICE_FEATURE_CATEGORIES, DEVICE_FEATURE_TYPES } from '@gladysassistant/integration-sdk';
+import { createLogger } from '../logging.js';
 import { DEVICE_TYPES } from '../config.js';
 import { stateNote, STATE_VALUES } from '../devmel/notes.js';
 import { idsFor, sendNotes } from './helpers.js';

@@ -13,9 +13,10 @@
 // fields, plus the remote — and the user pastes it back.
 // -----------------------------------------------------------------------------
 
-import { channelOfEntry, parseDeviceEntries } from '../config.js';
+import { channelOfEntry, parseDeviceEntries, parseDevices } from '../config.js';
 import { isSameChannel } from './notes.js';
 import { describeEmitter } from './heard.js';
+import { channelName, decoderOf, planListening } from './listening.js';
 import { hearsChannel } from '../devices/index.js';
 
 /**
@@ -147,21 +148,13 @@ export function attachHeardRemote({ config, device, heard, now = Date.now(), tab
     line,
   ];
 
-  // The box has one radio: a remote on another protocol than the device it
-  // drives is heard INSTEAD of it, never as well. Said here, where the user is
-  // about to create exactly that situation.
-  if (Number(remote.id) !== Number(device.channel?.id)) {
-    en.push(
-      `That remote speaks another protocol (pid ${remote.id}) than "${device.name}" ` +
-        `(pid ${device.channel?.id}), and the box listens to one protocol at a time. Run "Test ` +
-        'the connection" afterwards: the Listening line says which one is heard.',
-    );
-    fr.push(
-      `Elle émet sur un autre protocole (pid ${remote.id}) que « ${device.name} » ` +
-        `(pid ${device.channel?.id}), et le boîtier n'écoute qu'un protocole à la fois. Lancez ` +
-        '« Tester la connexion » ensuite : la ligne Écoute dit lequel est entendu.',
-    );
-  }
+  // The box has one radio: a remote on another protocol than the one listened
+  // to is heard INSTEAD of it, never as well. What matters is not the protocol
+  // of the device it drives — a shutter never speaks — but what the box will
+  // listen to once the line is pasted, so that is what is worked out and said.
+  const listening = describeListeningAfter(config, line, remote, table);
+  en.push(listening.en);
+  fr.push(listening.fr);
 
   // The box heard the protocol and nothing else. The line above is still worth
   // pasting — it is the only way those frames reach a device — but what it
@@ -196,18 +189,74 @@ export function attachHeardRemote({ config, device, heard, now = Date.now(), tab
     );
   }
 
+  // The rest of the neighbourhood, briefly: a few lines of the most recent
+  // ones, not every doorbell heard in the last five hours.
   const others = candidates.slice(1);
   if (others.length > 0) {
-    const listed = others.map((entry) => describeEmitter(entry, now, 'en', table)).join('; ');
-    en.push(`Other emitters heard, left out: ${listed}.`);
+    const shown = others.slice(0, OTHERS_SHOWN);
+    const more = others.length - shown.length;
+    en.push(
+      `Other emitters heard, left out: ${shown
+        .map((entry) => describeEmitter(entry, now, 'en', table))
+        .join('; ')}${more > 0 ? `; and ${more} more` : ''}.`,
+    );
     fr.push(
-      `Autres émetteurs entendus, non rattachés : ${others
+      `Autres émetteurs entendus, non rattachés : ${shown
         .map((entry) => describeEmitter(entry, now, 'fr', table))
-        .join(' ; ')}.`,
+        .join(' ; ')}${more > 0 ? ` ; et ${more} autre${more > 1 ? 's' : ''}` : ''}.`,
     );
   }
 
   return { en: en.join('\n'), fr: fr.join('\n') };
+}
+
+/** How many of the other emitters heard the answer names. */
+const OTHERS_SHOWN = 3;
+
+/**
+ * Will the box hear this remote once the line is pasted? The listening plan is
+ * worked out on the new list, exactly as the next configuration will: a
+ * deduced channel may well move to the remote's protocol because of it.
+ */
+function describeListeningAfter(config, line, remote, table) {
+  const after = planListening({ ...config, devmelDevices: parseDevices(line, config) }, table);
+  const wanted = decoderOf(remote.id, table);
+  if (!after.enabled) {
+    return {
+      en:
+        'Listening is turned off (Listening channel set to 0): the box will not hear this ' +
+        `remote. Put ${wanted} in that field, or empty it, to hear it.`,
+      fr:
+        "L'écoute est désactivée (Canal d'écoute à 0) : le boîtier n'entendra pas cette " +
+        `télécommande. Mettez ${wanted} dans ce champ, ou videz-le, pour l'entendre.`,
+    };
+  }
+  const listened = named(after.channel, table);
+  if (Number(after.channel) === wanted) {
+    return {
+      en: `Once saved, the box listens to ${listened}: this remote will be heard.`,
+      fr: `Une fois enregistré, le boîtier écoute le ${listened} : cette télécommande sera entendue.`,
+    };
+  }
+  const why = after.deduced
+    ? { en: 'deduced from your devices', fr: 'déduit de vos appareils' }
+    : { en: 'the Listening channel field', fr: "le champ Canal d'écoute" };
+  return {
+    en:
+      `Warning: once saved, the box listens to ${listened} (${why.en}), not to ` +
+      `${named(wanted, table)} of this remote: it will not be heard. The box listens to one ` +
+      `protocol at a time — put ${wanted} in the Listening channel field.`,
+    fr:
+      `Attention : une fois enregistré, le boîtier écoute le ${listened} (${why.fr}), pas le ` +
+      `${named(wanted, table)} de cette télécommande : elle ne sera pas entendue. Le boîtier ` +
+      `n'écoute qu'un protocole à la fois — mettez ${wanted} dans le champ Canal d'écoute.`,
+  };
+}
+
+/** `pid 14177 "X2D868"`, or the bare pid when the service did not name it. */
+function named(channel, table) {
+  const name = channelName(channel, table);
+  return name ? `pid ${channel} "${name}"` : `pid ${channel}`;
 }
 
 function nothingHeard() {

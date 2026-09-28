@@ -5,11 +5,8 @@
 // The command is one STATE note (ON / OFF).
 // -----------------------------------------------------------------------------
 
-import {
-  createLogger,
-  DEVICE_FEATURE_CATEGORIES,
-  DEVICE_FEATURE_TYPES,
-} from '@gladysassistant/integration-sdk';
+import { DEVICE_FEATURE_CATEGORIES, DEVICE_FEATURE_TYPES } from '@gladysassistant/integration-sdk';
+import { createLogger } from '../logging.js';
 import { DEVICE_TYPES } from '../config.js';
 import { READINGS, stateNote, STATE_VALUES } from '../devmel/notes.js';
 import { idsFor, isOn, publishState, sendNotes } from './helpers.js';

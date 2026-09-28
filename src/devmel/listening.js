@@ -164,34 +164,39 @@ function listenableDevices(config) {
 }
 
 /**
- * The protocol shared by the most declared devices — one radio, one protocol,
- * so the majority is the best a single bind can do.
+ * The protocol worth hearing: the one the most EMITTERS speak — radio sensors,
+ * and the wall remotes declared in `remotes`.
  *
- * A tie is settled by what actually emits on each channel: between the protocol
- * of a shutter, which will only ever echo Gladys back, and the protocol of the
- * wall remote declared next to it, the remote is the one worth hearing. That is
- * the whole reason `remotes` was written down. Ties that no emitter settles fall
- * back to the lowest channel, which keeps the choice stable across restarts, and
- * a configuration with no radio device at all falls back to generic 433 MHz: it
+ * The equipment they drive does not vote. A shutter is talked to and never
+ * answers: all the box ever hears on its protocol is the echo of Gladys' own
+ * orders, which the driver throws away (see orders.js). Counting it made six
+ * shutters on one protocol outvote five wall remotes on another, and bound the
+ * box to the one protocol where nothing in the house would ever say anything —
+ * while the remotes the user had just attached went unheard.
+ *
+ * Only a configuration where nothing emits falls back to the majority of the
+ * devices themselves: an echo is still proof the route back works. Ties go to
+ * the lowest channel, which keeps the choice stable across restarts, and a
+ * configuration with no radio device at all falls back to generic 433 MHz: it
  * is the only useful thing to listen to before anything is declared.
  */
 function deduceChannel(devices, table) {
-  const counts = new Map();
-  for (const device of devices) {
-    for (const channel of channelsOf(device)) {
-      const decoder = decoderOf(channel.id, table);
-      counts.set(decoder, (counts.get(decoder) ?? 0) + 1);
-    }
-  }
+  const emitting = countDecoders(devices.flatMap(emitterChannelsOf), table);
+  const counts = emitting.size > 0 ? emitting : countDecoders(devices.flatMap(channelsOf), table);
   if (counts.size === 0) {
     return GENERIC_433_CHANNEL;
   }
-  const emitting = new Set(
-    [...counts.keys()].filter((channel) => emitsOn(channel, devices, table)),
-  );
-  return [...counts.entries()].sort(
-    (a, b) => b[1] - a[1] || Number(emitting.has(b[0])) - Number(emitting.has(a[0])) || a[0] - b[0],
-  )[0][0];
+  return [...counts.entries()].sort((a, b) => b[1] - a[1] || a[0] - b[0])[0][0];
+}
+
+/** How many of these channels each decoder covers. */
+function countDecoders(channels, table) {
+  const counts = new Map();
+  for (const channel of channels) {
+    const decoder = decoderOf(channel.id, table);
+    counts.set(decoder, (counts.get(decoder) ?? 0) + 1);
+  }
+  return counts;
 }
 
 /**

@@ -541,8 +541,9 @@ the one covering generic 433 MHz protocols. Listening on 868 MHz therefore means
 1. **declare the device** in the **Devices** list (the airsend.cloud export
    carries its `pid`): the deduction does the rest and the **Listening channel**
    field stays empty. This is what works nine times out of ten;
-2. **attach its remote** (`remotes`): a remote actually emits, so on a tie the
-   deduction keeps its protocol rather than the shutter's, which never speaks;
+2. **attach its remote** (`remotes`): a remote actually emits, so the deduction
+   keeps its protocol rather than the shutter's, which never speaks — however
+   many shutters share it;
 3. **force the `pid`** in **Listening channel** when the protocol is not
    declared yet. To find it, the **Find a radio protocol** action asks the
    AirSend service and searches by brand or by `pid`:
@@ -828,6 +829,12 @@ the password replaced by its length alone (see "Never retype it").
 If you would rather use the container environment variable, `LOG_LEVEL` still
 works and still wins: the switch raises the level to debug while it is on, then
 hands your `LOG_LEVEL` back when you turn it off.
+
+The log lines are stamped in the **Time zone of the logs** field (default
+`Europe/Paris`), so they show the same hour as the dashboard widget:
+`[2026-09-28T14:02:05.123+02:00] [INFO] …`. Any IANA name works
+(`America/Montreal`, `Europe/Brussels`…); left empty, the container's `TZ` is
+used, or UTC.
 
 ### If you run the AirSend service elsewhere
 

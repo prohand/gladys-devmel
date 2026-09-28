@@ -26,7 +26,7 @@
 // -----------------------------------------------------------------------------
 
 import { createServer } from 'node:http';
-import { createLogger } from '@gladysassistant/integration-sdk';
+import { createLogger } from '../logging.js';
 
 const logger = createLogger({ name: 'airsend-callback' });
 

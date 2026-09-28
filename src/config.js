@@ -12,7 +12,7 @@
 // -----------------------------------------------------------------------------
 
 import { isIPv6 } from 'node:net';
-import { createLogger } from '@gladysassistant/integration-sdk';
+import { createLogger } from './logging.js';
 import { SERVICE_URL as EMBEDDED_SERVICE_URL } from './devmel/service.js';
 
 const logger = createLogger({ name: 'config' });
@@ -31,6 +31,7 @@ export const DEFAULT_CONFIG = {
   accept_unreliable: false, // use the frames the box itself grades as doubtful
   poll_frequency: 300, // seconds between two sensor reads
   debug_logs: false, // raise the log level to debug, from the Configuration screen
+  log_timezone: 'Europe/Paris', // time zone of the log lines; empty = the container's TZ, or UTC
 };
 
 /**
@@ -77,6 +78,7 @@ export function normalizeConfig(raw = {}) {
     use_embedded_service: raw.use_embedded_service !== false,
     accept_unreliable: toBoolean(raw.accept_unreliable, DEFAULT_CONFIG.accept_unreliable),
     debug_logs: toBoolean(raw.debug_logs, DEFAULT_CONFIG.debug_logs),
+    log_timezone: String(raw.log_timezone ?? DEFAULT_CONFIG.log_timezone).trim(),
   };
 
   // Who serves the local channel. A URL typed by the user wins: someone who
