@@ -122,6 +122,12 @@ export class AirSendClient {
     this.pending = 0;
     /** Emissions still going out behind an order already answered. */
     this.trailing = Promise.resolve();
+    /**
+     * The last order given to each device, by platform id. A repeat is the
+     * previous order said again: once the device has been told something
+     * newer, saying the old one again is saying it WRONG (see `repeat`).
+     */
+    this.latestOrders = new Map();
     /** When the box last had the radio to itself. */
     this.lastRadioAt = 0;
     /**
@@ -204,6 +210,8 @@ export class AirSendClient {
     }
 
     const repeats = this.repeatsFor(device, notes, options);
+    const order = {};
+    this.latestOrders.set(device.platformId, order);
     // What the user is about to wait through, split where it can be acted on:
     // the queue is ours, the box is not. Only the first emission is measured —
     // the repeats trail behind the answer, and nobody waits for them.
@@ -224,7 +232,7 @@ export class AirSendClient {
     this.rememberTransport(device, DEVICE_TRANSPORTS.LOCAL);
     this.notifyTransmit();
     this.reportPace(device, notes, pace);
-    this.repeat(device, notes, options, repeats);
+    this.repeat(device, notes, options, repeats, order);
     return { transport: DEVICE_TRANSPORTS.LOCAL, degraded: false, notes: answer?.notes ?? [] };
   }
 
@@ -235,13 +243,22 @@ export class AirSendClient {
    * does next — the radio order stays the same, only the waiting moved. A
    * repeat that fails is dropped in silence: the order did go out, and failing
    * to say it a second time changes nothing anyone can see.
+   *
+   * Only the first repeat is sure to be queued before the next order: the
+   * following ones join the queue one at a time. So a repeat checks, before it
+   * goes out, that its order is still the last one this device was given — or
+   * an UP repeated behind a STOP sets the shutter off again.
    */
-  repeat(device, notes, options, times) {
+  repeat(device, notes, options, times, order = null) {
     if (times <= 0) {
       return;
     }
     this.trailing = this.trailing.then(async () => {
       for (let emission = 0; emission < times; emission += 1) {
+        if (order && this.latestOrders.get(device.platformId) !== order) {
+          logger.debug(`Dropped the repeats of an older order to "${device.name}"`);
+          return;
+        }
         try {
           await this.emit(device, notes, options);
         } catch (err) {

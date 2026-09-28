@@ -30,6 +30,12 @@ from Gladys orders and from the ones heard on the radio alike — and
 resynchronized on every end stop. See
 [the user documentation](./docs/en.md#the-position-of-a-shutter).
 
+Since Gladys 5.1 it also extends the scene editor and the dashboard
+(`src/capabilities/`): a **remote pressed** and an **order failed** trigger, a
+**set the known position of a shutter** and a **re-arm listening** action, and
+an **AirSend radio** widget. See
+[the user documentation](./docs/en.md#scenes-and-dashboard-gladys-51).
+
 Devices are not discovered over the air: they are the ones the user paired in
 the AirSend app and exported from airsend.cloud (Import/Export → Export JSON),
 pasted as is in the configuration.
@@ -103,6 +109,9 @@ them.
 ├─ src/
 │  ├─ config.js                      # config defaults + the airsend.cloud device list parser
 │  ├─ logging.js                     # the log level, switchable from the Configuration screen
+│  ├─ capabilities/                  # Gladys 5.1: scenes and dashboard
+│  │  ├─ scenes.js                   #   scene triggers (remote pressed, order failed)
+│  │  └─ widget.js                   #   the "AirSend radio" dashboard widget
 │  ├─ devmel/                        # the AirSend driver
 │  │  ├─ client.js                   #   the local transport and the transport badge
 │  │  ├─ service.js                  #   the bundled AirSend Web Service (start, watch, stop)

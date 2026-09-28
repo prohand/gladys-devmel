@@ -896,6 +896,47 @@ votre clé Open API dans le bloc **Webhooks** de l'écran de configuration.
 - **Identifier un appareil** — choisissez un appareil, un PING lui est envoyé.
   Tous les équipements 433 MHz n'y réagissent pas.
 
+## Scènes et tableau de bord (Gladys 5.1+)
+
+Il faut **Gladys 5.1 ou plus récent** ; un Gladys plus ancien garde la version
+précédente de l'intégration.
+
+### Déclencheurs de scène
+
+Dans l'éditeur de scènes, rubrique **Intégrations** :
+
+- **Une télécommande radio est actionnée** — une télécommande murale, un
+  porte-clés ou un bouton radio déclaré sur un appareil a été entendu (les
+  `remotes` d'un appareil, une télécommande de type `1`, une télécommande de
+  rechange rattachée à un bouton de type `4096`). Filtrez sur l'appareil piloté
+  et sur l'ordre (`up`, `down`, `stop`, `favorite`, `on`, `off`, `toggle`). La
+  scène peut lire `device_name`, `order`, `pid` et `addr`. Les ordres de Gladys
+  ne le déclenchent jamais : une scène ne peut pas boucler sur elle-même. Une
+  télécommande tenue appuyée compte pour un seul appui.
+- **Un ordre radio a échoué** — le boîtier n'a pas porté un ordre donné par
+  Gladys : injoignable, chaîne de connexion refusée, boîtier occupé… La scène
+  peut lire `device_name`, `reason` (`NETWORK`, `SECURITY`, `BUSY`, `HTTP_401`,
+  `UNREACHABLE`…) et `message`. Un seul événement par appareil et par raison
+  et par minute : fait pour une notification.
+
+### Actions de scène
+
+- **Recaler la position d'un volet** — indique à l'intégration où est vraiment
+  un volet minuté (0-100 %), **sans le faire bouger** : après une coupure de
+  courant, une manivelle tournée à la main, un moteur arrêté par un obstacle.
+- **Réarmer l'écoute radio** — réabonne le boîtier, tout de suite. Utile juste
+  après la remise sous tension du boîtier (il oublie son abonnement). Renvoie le
+  canal écouté dans `channel`.
+
+### Le widget « Radio AirSend »
+
+Ajoutez-le à un tableau de bord : l'état du service AirSend, le protocole
+écouté, la dernière trame entendue, les échos des ordres de Gladys, les trames
+écartées, la température et la luminosité du boîtier s'il a `sensors: true`, et
+les derniers émetteurs entendus avec ce qu'ils sont devenus (suivi, inconnu,
+écarté…). Son bouton **Réarmer l'écoute** fait la même chose que l'action de
+scène. Le réglage **Émetteurs affichés** (0 à 8) règle la longueur de la liste.
+
 ## Bon à savoir
 
 - Le 433 MHz est un protocole **unidirectionnel** pour la plupart des

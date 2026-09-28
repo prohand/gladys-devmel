@@ -8,7 +8,7 @@
   },
   "version": "1.0.18",
   "docker_image": "ghcr.io/prohand/gladys-devmel:1.0.18",
-  "gladys_version": ">=4.86.0",
+  "gladys_version": ">=5.1.0",
   "cover_image": "https://raw.githubusercontent.com/prohand/gladys-devmel/main/cover.png",
   "categories": ["protocols", "lighting"],
   "transports": ["local"],
@@ -287,6 +287,265 @@
             "fr": "Appareil"
           },
           "required": true
+        }
+      ]
+    }
+  ],
+  "widgets": [
+    {
+      "key": "radio",
+      "label": {
+        "en": "AirSend radio",
+        "fr": "Radio AirSend"
+      },
+      "description": {
+        "en": "Service, listening protocol and the last emitters heard.",
+        "fr": "Service, protocole écouté et derniers émetteurs entendus."
+      },
+      "icon": "radio",
+      "settings": [
+        {
+          "key": "emitters",
+          "type": "number",
+          "label": {
+            "en": "Emitters shown",
+            "fr": "Émetteurs affichés"
+          },
+          "description": {
+            "en": "How many of the last emitters heard are listed (0 to 8).",
+            "fr": "Nombre de derniers émetteurs entendus à lister (0 à 8)."
+          },
+          "required": false,
+          "default": 5,
+          "min": 0,
+          "max": 8
+        }
+      ],
+      "action_timeout_seconds": 30
+    }
+  ],
+  "scene_triggers": [
+    {
+      "key": "remote_pressed",
+      "label": {
+        "en": "A radio remote is pressed",
+        "fr": "Une télécommande radio est actionnée"
+      },
+      "description": {
+        "en": "A wall remote, keyfob or radio button declared on a device was heard. Gladys own orders never fire it.",
+        "fr": "Une télécommande murale, un porte-clés ou un bouton radio déclaré sur un appareil a été entendu. Les ordres de Gladys ne le déclenchent jamais."
+      },
+      "fields": [
+        {
+          "key": "device",
+          "type": "select",
+          "source": "devices",
+          "label": {
+            "en": "Device it drives",
+            "fr": "Appareil piloté"
+          },
+          "required": false
+        },
+        {
+          "key": "order",
+          "type": "multi_select",
+          "label": {
+            "en": "Order",
+            "fr": "Ordre"
+          },
+          "options": [
+            {
+              "value": "up",
+              "label": {
+                "en": "Up / open",
+                "fr": "Monter / ouvrir"
+              }
+            },
+            {
+              "value": "down",
+              "label": {
+                "en": "Down / close",
+                "fr": "Descendre / fermer"
+              }
+            },
+            {
+              "value": "stop",
+              "label": {
+                "en": "Stop",
+                "fr": "Stop"
+              }
+            },
+            {
+              "value": "favorite",
+              "label": {
+                "en": "Favourite position (my)",
+                "fr": "Position favorite (my)"
+              }
+            },
+            {
+              "value": "on",
+              "label": {
+                "en": "On",
+                "fr": "Allumer"
+              }
+            },
+            {
+              "value": "off",
+              "label": {
+                "en": "Off",
+                "fr": "Éteindre"
+              }
+            },
+            {
+              "value": "toggle",
+              "label": {
+                "en": "Toggle",
+                "fr": "Inverser"
+              }
+            }
+          ]
+        }
+      ],
+      "variables": [
+        {
+          "key": "device_name",
+          "type": "string",
+          "label": {
+            "en": "Device name",
+            "fr": "Nom de l'appareil"
+          }
+        },
+        {
+          "key": "order",
+          "type": "string",
+          "label": {
+            "en": "Order",
+            "fr": "Ordre"
+          }
+        },
+        {
+          "key": "pid",
+          "type": "number",
+          "label": {
+            "en": "Remote protocol (pid)",
+            "fr": "Protocole de la télécommande (pid)"
+          }
+        },
+        {
+          "key": "addr",
+          "type": "number",
+          "label": {
+            "en": "Remote address (addr)",
+            "fr": "Adresse de la télécommande (addr)"
+          }
+        }
+      ]
+    },
+    {
+      "key": "order_failed",
+      "label": {
+        "en": "A radio order failed",
+        "fr": "Un ordre radio a échoué"
+      },
+      "description": {
+        "en": "The box did not carry an order Gladys gave: unreachable, refused connection string, busy…",
+        "fr": "Le boîtier n'a pas porté un ordre donné par Gladys : injoignable, chaîne de connexion refusée, occupé…"
+      },
+      "fields": [
+        {
+          "key": "device",
+          "type": "select",
+          "source": "devices",
+          "label": {
+            "en": "Device",
+            "fr": "Appareil"
+          },
+          "required": false
+        }
+      ],
+      "variables": [
+        {
+          "key": "device_name",
+          "type": "string",
+          "label": {
+            "en": "Device name",
+            "fr": "Nom de l'appareil"
+          }
+        },
+        {
+          "key": "reason",
+          "type": "string",
+          "label": {
+            "en": "Reason (code)",
+            "fr": "Raison (code)"
+          }
+        },
+        {
+          "key": "message",
+          "type": "string",
+          "label": {
+            "en": "Message",
+            "fr": "Message"
+          }
+        }
+      ]
+    }
+  ],
+  "scene_actions": [
+    {
+      "key": "set_known_position",
+      "label": {
+        "en": "Set the known position of a shutter",
+        "fr": "Recaler la position d'un volet"
+      },
+      "description": {
+        "en": "Tell the integration where a timed shutter really is, without moving it.",
+        "fr": "Indique à l'intégration où est vraiment un volet minuté, sans le faire bouger."
+      },
+      "timeout_seconds": 10,
+      "fields": [
+        {
+          "key": "device",
+          "type": "select",
+          "source": "devices",
+          "label": {
+            "en": "Shutter",
+            "fr": "Volet"
+          },
+          "required": true
+        },
+        {
+          "key": "position",
+          "type": "number",
+          "label": {
+            "en": "Position (%)",
+            "fr": "Position (%)"
+          },
+          "required": true,
+          "min": 0,
+          "max": 100
+        }
+      ]
+    },
+    {
+      "key": "rearm_listening",
+      "label": {
+        "en": "Re-arm radio listening",
+        "fr": "Réarmer l'écoute radio"
+      },
+      "description": {
+        "en": "Subscribe the box again, e.g. after it was powered back on.",
+        "fr": "Réabonne le boîtier, par exemple après sa remise sous tension."
+      },
+      "timeout_seconds": 30,
+      "outputs": [
+        {
+          "key": "channel",
+          "type": "number",
+          "label": {
+            "en": "Channel listened to",
+            "fr": "Canal écouté"
+          }
         }
       ]
     }

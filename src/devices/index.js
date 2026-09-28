@@ -29,6 +29,8 @@ import { describeEventType, explainFailure, isErrorEvent } from '../devmel/event
 import { heardChannels } from '../devmel/heard.js';
 import { sentOrders } from '../devmel/orders.js';
 import { idsFor } from './helpers.js';
+import { DEVICE_TYPES } from '../config.js';
+import { eventReason, ordersOf, sceneEvents } from '../capabilities/scenes.js';
 
 const logger = createLogger({ name: 'devices' });
 
@@ -158,6 +160,28 @@ export async function identifyDevice(gladys, externalId, context) {
 }
 
 /**
+ * Handler of the `set_known_position` scene action: say where a shutter is,
+ * without sending it anything. Throws when the device has no position to set —
+ * the scene then logs the failure of that one action and carries on.
+ *
+ * @returns {Promise<number>} the position now known
+ */
+export async function setKnownPosition(gladys, config, externalId, position) {
+  const found = findDeviceByExternalId(gladys, config, externalId);
+  if (!found) {
+    throw new Error(`No Devmel device ${externalId} in the configuration`);
+  }
+  if (typeof found.blueprint.setKnownPosition !== 'function') {
+    throw new Error(`"${found.device.name}" is not a shutter`);
+  }
+  const number = Number(position);
+  if (position === null || position === undefined || position === '' || !Number.isFinite(number)) {
+    throw new Error(`Not a position: ${position}`);
+  }
+  return found.blueprint.setKnownPosition(gladys, { device: found.device, position: number });
+}
+
+/**
  * Publish the states carried by the radio events the box pushed to the webhook.
  *
  * An event is routed by its channel: every device sharing that channel gets the
@@ -176,6 +200,7 @@ export async function identifyDevice(gladys, externalId, context) {
  * @param {object} [registry] where the frames are remembered, injectable so the
  *   tests do not share the registry of the running integration
  * @param {object} [orders] the orders we sent, same reason
+ * @param {object} [scenes] where the scene triggers are fired, same reason
  * @returns {Promise<number>} how many devices acted on a frame
  */
 export async function applyEvents(
@@ -184,6 +209,7 @@ export async function applyEvents(
   events,
   registry = heardChannels,
   orders = sentOrders,
+  scenes = sceneEvents,
 ) {
   if (!Array.isArray(events)) {
     return 0;
@@ -199,7 +225,7 @@ export async function applyEvents(
       // route back into the integration, which is half of "my remote does not
       // show up" answered before anyone touches a configuration screen.
       registry.received({ own: true });
-      applied += await applyOwnEcho(gladys, config, event, echo);
+      applied += await applyOwnEcho(gladys, config, event, echo, scenes);
       continue;
     }
 
@@ -293,7 +319,12 @@ export async function applyEvents(
       continue;
     }
     const createdAt = toDate(event.timestamp);
+    const pressed = ordersOf(readings);
     for (const device of listeners) {
+      // Someone pressed a remote: whatever the device makes of it below, a
+      // scene may want to know. A plain BUTTON publishes nothing, and a spare
+      // remote attached to one is exactly a scene trigger.
+      await firePresses(gladys, scenes, device, pressed, event.channel);
       const blueprint = findBlueprintByType(device.rtype);
       if (!blueprint || typeof blueprint.applyReadings !== 'function') {
         // A push-only device type (a plain BUTTON) has nothing to publish when
@@ -366,7 +397,7 @@ export async function applyEvents(
  *
  * @returns {Promise<number>} how many devices acted on the leftovers
  */
-async function applyOwnEcho(gladys, config, event, echo) {
+async function applyOwnEcho(gladys, config, event, echo, scenes = null) {
   if (isErrorEvent(event?.type)) {
     // Named, not numbered. The box says WHERE the order died — refused
     // connection string, link out of step, another client holding the radio —
@@ -376,6 +407,18 @@ async function applyOwnEcho(gladys, config, event, echo) {
     logger.info(
       `The box did not carry the order sent to "${echo.name}". ${explainFailure(event.type)}`,
     );
+    const device = config.devmelDevices.find(
+      (candidate) => candidate.platformId === echo.platformId,
+    );
+    const blueprint = device && findBlueprintByType(device.rtype);
+    if (blueprint && scenes) {
+      await scenes.orderFailed(gladys, {
+        externalId: idsFor(gladys, blueprint.key, device).device,
+        name: device.name,
+        reason: eventReason(event.type),
+        message: explainFailure(event.type),
+      });
+    }
     return 0;
   }
 
@@ -405,6 +448,18 @@ async function applyOwnEcho(gladys, config, event, echo) {
     }
   }
   return applied;
+}
+
+/** Fire the `remote_pressed` trigger for each order a frame gave a device. */
+async function firePresses(gladys, scenes, device, pressed, channel) {
+  const blueprint = scenes && pressed.length > 0 ? findBlueprintByType(device.rtype) : null;
+  if (!blueprint) {
+    return;
+  }
+  const externalId = idsFor(gladys, blueprint.key, device).device;
+  for (const order of pressed) {
+    await scenes.remotePressed(gladys, { externalId, name: device.name, order, channel });
+  }
 }
 
 /**
@@ -462,8 +517,17 @@ function describeChannel(channel) {
  * Does a frame heard on `channel` belong to this device? Its own channel is the
  * obvious one; the emitters declared in `remotes` are the wall remote, the
  * keyfob or the second AirSend driving the same equipment from another address.
+ *
+ * Never the box itself. Its "channel" is the 1 it answers reads on, and its
+ * sensors are read inline (`wait: true`), never pushed: what arrives on pid 1
+ * with no address is a generic 433 MHz frame from somebody else. Letting the box
+ * claim it published a neighbour's thermometer on the box, and hid the frame
+ * from "Attach a remote".
  */
 export function hearsChannel(device, channel) {
+  if (device.rtype === DEVICE_TYPES.BOX) {
+    return false;
+  }
   if (isSameChannel(channel, device.channel)) {
     return true;
   }
