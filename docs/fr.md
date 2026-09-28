@@ -565,9 +565,9 @@ Trois chemins, du plus simple au dernier recours :
 1. **déclarez l'appareil** dans la liste **Appareils** (l'export airsend.cloud
    contient son `pid`) : la déduction s'en charge, le champ **Canal d'écoute**
    reste vide. C'est ce qui marche dans neuf cas sur dix ;
-2. **rattachez sa télécommande** (`remotes`) : elle émet pour de bon, et en cas
-   d'égalité c'est son protocole que la déduction retient — pas celui du volet,
-   qui ne parle jamais ;
+2. **rattachez sa télécommande** (`remotes`) : elle émet pour de bon, et c'est
+   son protocole que la déduction retient — pas celui du volet, qui ne parle
+   jamais, quel que soit le nombre de volets qui le partagent ;
 3. **forcez le `pid`** dans **Canal d'écoute** quand le protocole n'est pas
    encore déclaré. Pour le trouver, l'action **Chercher un protocole radio**
    interroge le service AirSend et cherche par marque ou par `pid` :
@@ -869,6 +869,12 @@ journalisé, quel que soit le niveau : le reste de la chaîne — l'adresse, `gw
 Si vous préférez la variable d'environnement du conteneur, `LOG_LEVEL` marche
 toujours et reste prioritaire : l'interrupteur monte le niveau à debug tant
 qu'il est activé, puis rend la main à votre `LOG_LEVEL` quand vous le coupez.
+
+Les lignes des journaux sont horodatées dans le **Fuseau horaire des journaux**
+(par défaut `Europe/Paris`), pour afficher la même heure que le widget du
+tableau de bord : `[2026-09-28T14:02:05.123+02:00] [INFO] …`. Tout nom IANA
+convient (`America/Montreal`, `Europe/Brussels`…) ; laissé vide, c'est le `TZ`
+du conteneur, ou UTC.
 
 ### Si vous faites tourner le service AirSend ailleurs
 

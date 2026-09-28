@@ -8,11 +8,11 @@
 // -----------------------------------------------------------------------------
 
 import {
-  createLogger,
   DEVICE_FEATURE_CATEGORIES,
   DEVICE_FEATURE_TYPES,
   DEVICE_FEATURE_UNITS,
 } from '@gladysassistant/integration-sdk';
+import { createLogger } from '../logging.js';
 import { DEVICE_TYPES } from '../config.js';
 import { clampLevel, levelNote, READINGS, stateNote, STATE_VALUES } from '../devmel/notes.js';
 import { idsFor, isOn, publishState, sendNotes } from './helpers.js';

@@ -15,7 +15,8 @@
 // -----------------------------------------------------------------------------
 
 import { createHash } from 'node:crypto';
-import { createLogger, DEVICE_TRANSPORTS } from '@gladysassistant/integration-sdk';
+import { DEVICE_TRANSPORTS } from '@gladysassistant/integration-sdk';
+import { createLogger } from '../logging.js';
 import { checkSpurl, DEVICE_TYPES, MAX_COMMAND_REPEAT } from '../config.js';
 import { isOrder, isRepeatable, queryNote, QUERY_TYPES } from './notes.js';
 import { describeEventType, explainFailure, isErrorEvent, isPermanentFailure } from './events.js';

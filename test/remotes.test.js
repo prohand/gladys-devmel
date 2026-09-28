@@ -149,10 +149,56 @@ test('the action writes the line for the emitter heard last', () => {
   assert.match(message.fr, /level 100 \(up\)/);
   assert.match(message.fr, /« Baie vitree »/);
   assert.match(message.fr, /"remotes":\[\{"pid":14177,"addr":3359265281\}\]/);
-  // Another protocol than the device: the box listens to one at a time, and
-  // that is worth knowing before pasting the line, not after.
-  assert.match(message.fr, /n'écoute qu'un protocole à la fois/);
+  // Another protocol than the shutter, but the shutter never speaks: once the
+  // line is pasted, the deduction listens to the remote, and that is what is
+  // said — not a warning about a protocol nobody will listen to.
+  assert.match(message.fr, /le boîtier écoute le pid 14177 : cette télécommande sera entendue/);
+  assert.doesNotMatch(message.fr, /Attention/);
   assert.match(message.en, /Attached to "Baie vitree"/);
+});
+
+test('a listening channel forced elsewhere is named, with the pid to put in it', () => {
+  const config = normalizeConfig({ devices: EXPORT, listen_channel: '25455' });
+  const heard = heardRemote({ id: 14177, source: 3359265281 });
+
+  const message = attachHeardRemote({ config, device: config.devmelDevices[0], heard });
+
+  assert.match(message.fr, /Attention : une fois enregistré, le boîtier écoute le pid 25455/);
+  assert.match(message.fr, /\(le champ Canal d'écoute\)/);
+  assert.match(message.fr, /mettez 14177 dans le champ Canal d'écoute/);
+});
+
+test('listening turned off is said, rather than promising the remote is heard', () => {
+  const config = normalizeConfig({ devices: EXPORT, listen_channel: '0' });
+  const heard = heardRemote({ id: 14177, source: 3359265281 });
+
+  const message = attachHeardRemote({ config, device: config.devmelDevices[0], heard });
+
+  assert.match(message.fr, /L'écoute est désactivée/);
+});
+
+test('the other emitters heard are summed up, not all listed', () => {
+  const config = configOf(EXPORT);
+  const heard = new HeardChannels({ now: () => 1_000_000 });
+  for (let addr = 6; addr >= 1; addr -= 1) {
+    heard.record({ id: 4875, source: addr }, { timestamp: 1_000_000 - addr * 1000 });
+  }
+  heard.record({ id: 14177, source: 3359265281 }, { timestamp: 1_000_000 });
+
+  const message = attachHeardRemote({
+    config,
+    device: config.devmelDevices[0],
+    heard,
+    now: 1_000_000,
+  });
+
+  assert.match(
+    message.fr,
+    /Autres émetteurs entendus, non rattachés : .*addr 1 .*addr 2 .*addr 3 /,
+  );
+  assert.doesNotMatch(message.fr, /addr 4 /);
+  assert.match(message.fr, / ; et 3 autres\.$/);
+  assert.match(message.en, /; and 3 more\.$/);
 });
 
 test('a remote on the protocol of its device gets no listening warning', () => {

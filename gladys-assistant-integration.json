@@ -192,6 +192,24 @@
       },
       "required": false,
       "default": false
+    },
+    {
+      "key": "log_timezone",
+      "type": "string",
+      "label": {
+        "en": "Time zone of the logs",
+        "fr": "Fuseau horaire des journaux"
+      },
+      "description": {
+        "en": "The time zone the log lines are stamped in, so they show the same hour as the dashboard widget. An IANA name such as Europe/Paris or America/Montreal. Left empty: the TZ of the container, or UTC.",
+        "fr": "Le fuseau horaire des heures écrites dans les journaux, pour qu'ils affichent la même heure que le widget du tableau de bord. Un nom IANA comme Europe/Paris ou America/Montreal. Laissé vide : le TZ du conteneur, ou UTC."
+      },
+      "placeholder": {
+        "en": "Europe/Paris",
+        "fr": "Europe/Paris"
+      },
+      "required": false,
+      "default": "Europe/Paris"
     }
   ],
   "actions": [

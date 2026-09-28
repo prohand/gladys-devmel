@@ -110,7 +110,10 @@ test('a tie between a device and a remote goes to the one that emits', () => {
   );
 });
 
-test('a majority still wins over a lone remote, and says what it costs', () => {
+test('shutters do not outvote the remotes that drive them', () => {
+  // Two shutters and one wall remote: counted head by head, the shutters' own
+  // protocol won — and the box then heard nothing but the echo of Gladys. What
+  // emits is what decides; the equipment it drives never answers.
   const config = configWith([
     { ...SHUTTER, remotes: [{ pid: 14177, addr: 3359265281 }] },
     OTHER_SHUTTER,
@@ -118,10 +121,36 @@ test('a majority still wins over a lone remote, and says what it costs', () => {
 
   const plan = planListening(config, TABLE);
 
-  assert.equal(plan.channel, 25455);
+  assert.equal(plan.channel, 14177);
+  assert.equal(plan.echoOnly, false);
+  assert.deepEqual(plan.unheardRemotes, []);
+});
+
+test('six shutters on one protocol, five remotes on another: the remotes are heard', () => {
+  const shutters = [8295, 94311, 229479, 57447, 106599, 65639].map((addr, index) => ({
+    name: `Volet ${index}`,
+    type: 4098,
+    pid: 25455,
+    addr,
+    ...(index < 5 ? { remotes: [{ pid: 14177, addr: 1000 + index }] } : {}),
+  }));
+
+  assert.equal(planListening(configWith(shutters), TABLE).channel, 14177);
+});
+
+test('the emitters vote among themselves, the majority of them wins', () => {
+  const config = configWith([
+    { ...SHUTTER, remotes: [{ pid: 14177, addr: 1 }] },
+    { ...OTHER_SHUTTER, remotes: [{ pid: 14177, addr: 2 }] },
+    { ...LIGHT, remotes: [{ pid: 26848, addr: 3 }] },
+  ]);
+
+  const plan = planListening(config, TABLE);
+
+  assert.equal(plan.channel, 14177);
   assert.deepEqual(
     plan.unheardRemotes.map(({ remote }) => remote.id),
-    [14177],
+    [26848],
   );
 });
 
@@ -156,13 +185,14 @@ test('a wall remote declared on a device is heard like the device itself', () =>
 });
 
 test('a remote on another protocol than the one listened to is named', () => {
-  // Two shutters carry the protocol vote, so the wall remote of the first one
-  // loses it: declared, correct, and never heard. The device itself is heard,
-  // so nothing in `covered`/`uncovered` shows it — hence this list.
-  const config = configWith([
-    { ...SHUTTER, remotes: [{ pid: 14177, addr: 3359265281 }] },
-    OTHER_SHUTTER,
-  ]);
+  // The listening channel is forced to the shutters' protocol, so the wall
+  // remote of the first one is declared, correct, and never heard. The device
+  // itself is heard, so nothing in `covered`/`uncovered` shows it — hence this
+  // list.
+  const config = configWith(
+    [{ ...SHUTTER, remotes: [{ pid: 14177, addr: 3359265281 }] }, OTHER_SHUTTER],
+    { listen_channel: '25455' },
+  );
 
   const plan = planListening(config, TABLE);
 

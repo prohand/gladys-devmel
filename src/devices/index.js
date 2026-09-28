@@ -17,7 +17,7 @@
 //   - identify(gladys, {...})        (optional): make the device signal itself
 // -----------------------------------------------------------------------------
 
-import { createLogger } from '@gladysassistant/integration-sdk';
+import { createLogger } from '../logging.js';
 import { gateway } from './gateway.js';
 import { sensor } from './sensor.js';
 import { button } from './button.js';

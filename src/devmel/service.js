@@ -29,7 +29,7 @@ import { access, mkdir, readFile, rm } from 'node:fs/promises';
 import { constants } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { createLogger } from '@gladysassistant/integration-sdk';
+import { createLogger } from '../logging.js';
 
 const logger = createLogger({ name: 'airsend-service' });
 
