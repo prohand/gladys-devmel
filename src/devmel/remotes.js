@@ -123,7 +123,10 @@ export function attachHeardRemote({ config, device, heard, now = Date.now(), tab
     return heard.list().length === 0 ? nothingHeard() : everythingClaimed(config);
   }
 
-  const remote = candidates[0];
+  const remote = pickRemote(candidates);
+  if (!hasAddress(remote) && protocolHasAddresses(config, heard, remote)) {
+    return pressAgain(remote, now, table);
+  }
   const line = attachRemote(config.devices, device, remote);
   if (!line) {
     return {
@@ -191,7 +194,7 @@ export function attachHeardRemote({ config, device, heard, now = Date.now(), tab
 
   // The rest of the neighbourhood, briefly: a few lines of the most recent
   // ones, not every doorbell heard in the last five hours.
-  const others = candidates.slice(1);
+  const others = candidates.filter((entry) => entry !== remote);
   if (others.length > 0) {
     const shown = others.slice(0, OTHERS_SHOWN);
     const more = others.length - shown.length;
@@ -208,6 +211,57 @@ export function attachHeardRemote({ config, device, heard, now = Date.now(), tab
   }
 
   return { en: en.join('\n'), fr: fr.join('\n') };
+}
+
+/**
+ * The emitter to attach: the one heard last — unless the box only caught its
+ * protocol that time. A frame whose address was not decoded is, more often
+ * than not, a bad take of a remote the box HAS decoded a moment earlier (a
+ * short press, a frame half lost): the addressed one on the same protocol is
+ * then the remote the user pressed.
+ */
+function pickRemote(candidates) {
+  const last = candidates[0];
+  if (hasAddress(last)) {
+    return last;
+  }
+  return (
+    candidates.find((entry) => hasAddress(entry) && Number(entry.id) === Number(last.id)) ?? last
+  );
+}
+
+/**
+ * Does the box decode addresses on this protocol? It does as soon as one of its
+ * remotes is declared, or heard, with an address. A `{pid}` line alone is then
+ * never the right answer: it would make the device follow every half-decoded
+ * frame of that protocol — the other remotes of the house included.
+ */
+function protocolHasAddresses(config, heard, remote) {
+  const id = Number(remote.id);
+  const declared = config.devmelDevices.some((device) =>
+    [device.channel, ...(device.remotes ?? [])].some(
+      (channel) => Number(channel?.id) === id && hasAddress(channel),
+    ),
+  );
+  return declared || heard.list().some((entry) => Number(entry.id) === id && hasAddress(entry));
+}
+
+/** The box caught the protocol, not the remote: no line, one more press. */
+function pressAgain(remote, now, table) {
+  return {
+    en:
+      `Heard ${describeEmitter(remote, now, 'en', table)}. The box caught the protocol of that ` +
+      'frame but not its address, while it does decode addresses on this protocol for your ' +
+      'other remotes: a line without the address would make the device follow all of them. ' +
+      'Nothing was attached. Press the remote again — a normal press, near the box — then run ' +
+      'this action again.',
+    fr:
+      `Télécommande entendue : ${describeEmitter(remote, now, 'fr', table)}. Le boîtier a capté ` +
+      "le protocole de cette trame mais pas son adresse, alors qu'il décode bien les adresses " +
+      'de ce protocole pour vos autres télécommandes : une ligne sans adresse ferait suivre ' +
+      "à l'appareil toutes celles-ci. Rien n'a été rattaché. Appuyez de nouveau sur la " +
+      'télécommande — un appui normal, près du boîtier — puis relancez cette action.',
+  };
 }
 
 /** How many of the other emitters heard the answer names. */
