@@ -33,6 +33,8 @@ export const button = {
           external_id: ids.feature(FEATURE.PUSH),
           category: DEVICE_FEATURE_CATEGORIES.BUTTON,
           type: DEVICE_FEATURE_TYPES.BUTTON.PUSH,
+          min: 0,
+          max: 1,
           read_only: false,
           has_feedback: false,
           keep_history: false,

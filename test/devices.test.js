@@ -83,6 +83,16 @@ test('every configured device becomes a Gladys device, except a box with no sens
   assert.equal(new Set(externalIds).size, externalIds.length);
 });
 
+test('every feature carries a min and a max, which Gladys refuses to store as null', () => {
+  const { gladys, config } = setup();
+  for (const device of buildDiscoveredDevices(gladys, config)) {
+    for (const feature of device.features) {
+      assert.equal(typeof feature.min, 'number', `${device.name} / ${feature.name}: min`);
+      assert.equal(typeof feature.max, 'number', `${device.name} / ${feature.name}: max`);
+    }
+  }
+});
+
 test('only the positionable shutter exposes a position', () => {
   const { gladys, config } = setup();
   const devices = buildDiscoveredDevices(gladys, config);
