@@ -32,6 +32,8 @@ export const switchDevice = {
           external_id: ids.feature(FEATURE.ON_OFF),
           category: DEVICE_FEATURE_CATEGORIES.SWITCH,
           type: DEVICE_FEATURE_TYPES.SWITCH.BINARY,
+          min: 0,
+          max: 1,
           read_only: false,
           // 433 MHz is a one-way protocol: nothing confirms the order was
           // received. States pushed by a bound box refresh the value later.
