@@ -638,7 +638,9 @@ Ignored a radio frame (unreliable, graded 2): pid 25455, addr 94311, carrying le
 **A frame with an address, graded too low** (second line): the box decoded both
 the emitter and the order, it is simply not confident — a remote at the edge of
 its range, a crowded band. Turn on **Accept unreliable frames**: they are then
-used anyway, at the price of the occasional false trigger.
+used anyway, at the price of the occasional false trigger. A wall remote
+declared in `remotes` by its `pid` **and** `addr` needs none of that: its frames
+are followed whatever their grade, since an exact address is no noise.
 
 **A frame with no address** (first line, a `pid` and nothing else): the box
 picked the protocol up **without decoding it**. There is no emitter to name and
