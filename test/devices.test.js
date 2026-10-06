@@ -1114,17 +1114,18 @@ test('a frame the box graded badly says what it carried, and what to do about it
   assert.equal(again.of('DEBUG').length, 1);
 });
 
-test('accepting unreliable frames lets a badly graded remote through', async () => {
+test('accepting unreliable frames lets a badly graded frame through', async () => {
   const gladys = createFakeGladys();
   const devices = JSON.stringify({
     devices: {
       'Living room shutter': { type: 4098, channel: { id: 300, source: 3 }, remotes: [42] },
     },
   });
+  // Heard on the channel of the device itself, not from a declared remote.
   const frame = {
     type: 3,
     reliability: 0x2,
-    channel: { id: 300, source: 42 },
+    channel: { id: 300, source: 3 },
     thingnotes: { notes: [{ type: NOTE_TYPES.STATE, value: STATE_VALUES.UP }] },
   };
 
@@ -1143,6 +1144,49 @@ test('accepting unreliable frames lets a badly graded remote through', async () 
     1,
   );
   assert.deepEqual(gladys.statesOf('shutter:300-3:state'), [1]);
+  shutter.travel.clear();
+});
+
+test('a declared wall remote is followed whatever grade the box gives it', async () => {
+  // Seen in the field: the remote of a shutter, its exact address, a plain UP,
+  // graded 71 — one past the window. Dropped, the shutter went up and Gladys
+  // kept it closed. Its full pid/addr pair is declared: that is no noise.
+  const gladys = createFakeGladys();
+  const config = normalizeConfig({
+    devices: JSON.stringify({
+      devices: {
+        'Chambre parents': {
+          type: 4098,
+          channel: { id: 25455, source: 57447 },
+          remotes: [{ pid: 14177, addr: 3359265281 }],
+        },
+      },
+    }),
+  });
+  const frame = (source, reliability) => ({
+    type: 3,
+    reliability,
+    channel: { id: 14177, source },
+    thingnotes: { notes: [{ type: NOTE_TYPES.STATE, value: STATE_VALUES.UP }] },
+  });
+
+  assert.equal(
+    await applyEvents(
+      gladys,
+      config,
+      [frame(3359265281, 71), frame(3359265281, 0)],
+      new HeardChannels(),
+      new SentOrders(),
+    ),
+    2,
+  );
+  // Another address on the same protocol stays noise until it is declared.
+  assert.equal(
+    await applyEvents(gladys, config, [frame(1234, 71)], new HeardChannels(), new SentOrders()),
+    0,
+  );
+  assert.deepEqual(gladys.statesOf('shutter:25455-57447:state'), [1, 1]);
+  shutter.travel.clear();
 });
 
 test('a remote declared by its protocol alone follows the frames nobody can attribute', async () => {

@@ -569,9 +569,35 @@ function whyUnusable(event, config = null) {
   }
   const reliability = Number(event.reliability);
   if (!(reliability > 0x6 && reliability < 0x47)) {
-    return config?.accept_unreliable ? null : `unreliable, graded ${event.reliability}`;
+    if (config?.accept_unreliable || isDeclaredRemote(event.channel, config)) {
+      return null;
+    }
+    return `unreliable, graded ${event.reliability}`;
   }
   return null;
+}
+
+/**
+ * Does this frame come from a wall remote the user declared in `remotes`, by
+ * its full protocol AND address?
+ *
+ * The grading window filters the noise of the neighbourhood: half-decoded
+ * frames, a neighbour's gate. A frame that decodes to the exact address of a
+ * wall remote the user attached is none of those — and dropping it is a press
+ * Gladys never hears, a shutter that moved while Gladys shows it where it was.
+ * The box grades a remote held a little too close or too long at the very edge
+ * of the window (71), and that is the remote on the wall, not noise.
+ *
+ * Only with an address: a remote declared by its protocol alone would let
+ * every badly graded frame of that protocol through.
+ */
+function isDeclaredRemote(channel, config) {
+  if (channel?.source === undefined || channel?.source === null) {
+    return false;
+  }
+  return (config?.devmelDevices ?? []).some((device) =>
+    (device.remotes ?? []).some((remote) => isSameChannel(channel, remote)),
+  );
 }
 
 function toDate(timestampMs) {

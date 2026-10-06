@@ -667,7 +667,9 @@ Ignored a radio frame (unreliable, graded 2): pid 25455, addr 94311, carrying le
 décodé l'émetteur et l'ordre, il n'est simplement pas sûr de lui — une
 télécommande en limite de portée, une bande encombrée. Activez **Accepter les
 trames peu fiables** : elles sont alors utilisées quand même, au prix d'une
-fausse détection de temps en temps.
+fausse détection de temps en temps. Une télécommande murale déclarée dans
+`remotes` avec son `pid` **et** son `addr` n'en a pas besoin : ses trames sont
+suivies quelle que soit leur note, une adresse exacte n'est pas du bruit.
 
 **Une trame sans adresse** (première ligne, `pid` seul) : le boîtier a capté le
 protocole **sans le décoder**. Il n'y a ni émetteur à nommer, ni ordre à
