@@ -164,8 +164,9 @@ gladys.onPoll(async (device) => {
 // Every frame the box hears on the listening channel — a wall remote pressed by
 // hand, a weather sensor waking up, the confirmation of an order we sent —
 // reaches this function, whichever route carried it: the loopback callback
-// above, or the `events` webhook relayed by Gladys Plus. States are dated with
-// the box timestamp, because relayed events can arrive out of order.
+// above, or the `events` webhook relayed by Gladys Plus. Sensor readings are
+// dated with the box timestamp, because relayed events can arrive out of
+// order; the state of what a remote drives is not (see helpers.js).
 async function handleRadioEvents(events, route) {
   const applied = await applyEvents(gladys, config, events);
   logger.debug(`${route}: ${events?.length ?? 0} event(s), ${applied} device(s) updated`);
