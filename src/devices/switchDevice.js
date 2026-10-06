@@ -54,18 +54,17 @@ export const switchDevice = {
     await publishState(gladys, feature.external_id, on ? 1 : 0);
   },
 
-  /** @returns {Promise<number>} how many readings this switch acted on. */
-  async applyReadings(gladys, { device, readings, createdAt }) {
+  /**
+   * Published at the time they are heard: see `LIVE_STATE` in helpers.js.
+   *
+   * @returns {Promise<number>} how many readings this switch acted on.
+   */
+  async applyReadings(gladys, { device, readings }) {
     const ids = idsFor(gladys, KEY, device);
     let handled = 0;
     for (const reading of readings) {
       if (reading.kind === READINGS.LEVEL) {
-        await publishState(
-          gladys,
-          ids.feature(FEATURE.ON_OFF),
-          reading.value > 0 ? 1 : 0,
-          createdAt,
-        );
+        await publishState(gladys, ids.feature(FEATURE.ON_OFF), reading.value > 0 ? 1 : 0);
         handled += 1;
       }
     }

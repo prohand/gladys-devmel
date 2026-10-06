@@ -97,8 +97,12 @@ export const light = {
     await publishState(gladys, ids.feature(FEATURE.BRIGHTNESS), on ? level : 0);
   },
 
-  /** @returns {Promise<number>} how many readings this light acted on. */
-  async applyReadings(gladys, { device, readings, createdAt }) {
+  /**
+   * Published at the time they are heard: see `LIVE_STATE` in helpers.js.
+   *
+   * @returns {Promise<number>} how many readings this light acted on.
+   */
+  async applyReadings(gladys, { device, readings }) {
     const ids = idsFor(gladys, KEY, device);
     let handled = 0;
     for (const reading of readings) {
@@ -109,8 +113,8 @@ export const light = {
       if (reading.value > 0) {
         lastBrightness.set(device.platformId, reading.value);
       }
-      await publishState(gladys, ids.feature(FEATURE.BRIGHTNESS), reading.value, createdAt);
-      await publishState(gladys, ids.feature(FEATURE.ON_OFF), reading.value > 0 ? 1 : 0, createdAt);
+      await publishState(gladys, ids.feature(FEATURE.BRIGHTNESS), reading.value);
+      await publishState(gladys, ids.feature(FEATURE.ON_OFF), reading.value > 0 ? 1 : 0);
     }
     return handled;
   },

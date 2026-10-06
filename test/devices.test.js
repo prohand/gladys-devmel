@@ -255,6 +255,45 @@ test('the wall remote of a shutter drives it like Gladys does', async () => {
   shutter.travel.clear();
 });
 
+test('what a wall remote does is published as the current state, not a past one', async () => {
+  // Gladys only makes a dated state the current value when it is newer than
+  // the one it holds — and that one was stamped by the Gladys host, through an
+  // order or a step of the travel. A box clock behind it filed every press of
+  // the wall remote in the history, and the shutter showed where it had been.
+  const gladys = createFakeGladys();
+  const config = normalizeConfig({
+    devices: JSON.stringify({
+      devices: {
+        'Living room shutter': { type: 4099, channel: { id: 300, source: 3 }, remotes: [42] },
+        Plug: { type: 4097, channel: { id: 500, source: 5 }, remotes: [43] },
+        Lamp: { type: 4100, channel: { id: 700, source: 7 }, remotes: [44] },
+      },
+    }),
+  });
+  // Dated 2023: a box clock far behind, so a dated state could never win.
+  const press = (id, source, value) => ({
+    type: 3,
+    reliability: 0x20,
+    timestamp: 1700000000000,
+    channel: { id, source },
+    thingnotes: { notes: [{ type: NOTE_TYPES.STATE, value }] },
+  });
+
+  const applied = await applyEvents(gladys, config, [
+    press(300, 42, STATE_VALUES.DOWN),
+    press(300, 42, STATE_VALUES.STOP),
+    press(500, 43, STATE_VALUES.ON),
+    press(700, 44, STATE_VALUES.ON),
+  ]);
+
+  assert.equal(applied, 4);
+  assert.ok(gladys.published.length > 0);
+  for (const { featureExternalId, state } of gladys.published) {
+    assert.equal(typeof state, 'number', `${featureExternalId} was published as a past state`);
+  }
+  shutter.travel.clear();
+});
+
 test('noisy and unknown radio frames are dropped', async () => {
   const { gladys, config } = setup();
   const applied = await applyEvents(gladys, config, [

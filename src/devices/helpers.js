@@ -37,7 +37,15 @@ export function isOn(value) {
  * Publish one feature state, dating it when it comes from a radio event.
  *
  * Events relayed by Gladys Plus can arrive late or out of order, so the box
- * timestamp — not the arrival time — is what the history must record.
+ * timestamp — not the arrival time — is what the history of a SENSOR records.
+ *
+ * LIVE_STATE: never what a shutter, a switch or a light publishes. Gladys
+ * files a dated state as a past one, and only makes it the current value when
+ * it is newer than the one it holds. Those devices are also published by the
+ * integration itself — an order from Gladys, every step of a shutter travel —
+ * stamped with the clock of the Gladys host. A box clock a few seconds behind
+ * it, or a frame relayed a bit late, and the press of the wall remote went to
+ * the history only: the shutter moved, Gladys kept showing where it was before.
  */
 export async function publishState(gladys, featureExternalId, value, createdAt) {
   await gladys.publishState(

@@ -150,29 +150,32 @@ export const shutter = {
    * echo of our own command) start the position tracking; only a reading with
    * no `command` is a position the hardware actually reported.
    *
+   * Published at the time they are heard, never dated with the box timestamp:
+   * see `LIVE_STATE` in helpers.js.
+   *
    * @returns {Promise<number>} how many readings this shutter acted on — zero
    *   means the frame was heard and understood by nobody, which is the one
    *   thing the user must be told (see `applyEvents`).
    */
-  async applyReadings(gladys, { device, readings, createdAt }) {
+  async applyReadings(gladys, { device, readings }) {
     const ids = idsFor(gladys, KEY, device);
     let handled = 0;
     for (const reading of readings) {
       if (reading.command === COMMANDS.STOP) {
-        await freeze(gladys, device, ids, createdAt);
+        await freeze(gladys, device, ids);
       } else if (reading.command === COMMANDS.FAVORITE) {
-        await goToFavorite(gladys, device, ids, createdAt);
+        await goToFavorite(gladys, device, ids);
       } else if (reading.command === COMMANDS.UP || reading.command === COMMANDS.DOWN) {
         // The reading is in radio coordinates, like every level here: a shutter
         // wired upside down opens by going down.
         const destination = device.invert ? 100 - reading.value : reading.value;
         const announced = toOrderedState(destination);
-        await publishState(gladys, ids.feature(FEATURE.STATE), announced, createdAt);
-        await goTo(gladys, device, ids, destination, { announced, createdAt });
+        await publishState(gladys, ids.feature(FEATURE.STATE), announced);
+        await goTo(gladys, device, ids, destination, { announced });
       } else if (reading.kind === READINGS.LEVEL) {
         const position = device.invert ? 100 - reading.value : reading.value;
         shutter.travel.set(device, position);
-        await publishPosition(gladys, device, ids, position, createdAt);
+        await publishPosition(gladys, device, ids, position);
       } else {
         continue;
       }
@@ -222,13 +225,7 @@ function hasPosition(device) {
  * open is "open" both before and after the travel; one told to go to 40 % ends
  * up stopped in between).
  */
-async function goTo(
-  gladys,
-  device,
-  ids,
-  destination,
-  { announced = null, createdAt, onArrival } = {},
-) {
+async function goTo(gladys, device, ids, destination, { announced = null, onArrival } = {}) {
   const direction = travelDirection(shutter.travel.positionOf(device), destination);
   const moving =
     direction !== null &&
@@ -253,7 +250,7 @@ async function goTo(
     return;
   }
   shutter.travel.set(device, destination);
-  await publishPosition(gladys, device, ids, destination, createdAt);
+  await publishPosition(gladys, device, ids, destination);
 }
 
 /**
@@ -321,12 +318,12 @@ function travelDirection(current, destination) {
  * shutter that was actually moving has a new position to report — stopping a
  * still one says nothing Gladys does not already show.
  */
-async function freeze(gladys, device, ids, createdAt) {
+async function freeze(gladys, device, ids) {
   const wasMoving = shutter.travel.isMoving(device);
   const position = shutter.travel.stop(device);
-  await publishState(gladys, ids.feature(FEATURE.STATE), SHUTTER_STATE.STOP, createdAt);
+  await publishState(gladys, ids.feature(FEATURE.STATE), SHUTTER_STATE.STOP);
   if (wasMoving && position !== null) {
-    await publishPosition(gladys, device, ids, position, createdAt);
+    await publishPosition(gladys, device, ids, position);
   }
 }
 
@@ -336,24 +333,24 @@ async function freeze(gladys, device, ids, createdAt) {
  * `favorite_position`, the shutter is somewhere in between and saying more
  * would be inventing it.
  */
-async function goToFavorite(gladys, device, ids, createdAt) {
+async function goToFavorite(gladys, device, ids) {
   const favorite = device.favoritePosition;
   if (favorite === null || favorite === undefined) {
     shutter.travel.set(device, null);
-    await publishState(gladys, ids.feature(FEATURE.STATE), SHUTTER_STATE.STOP, createdAt);
+    await publishState(gladys, ids.feature(FEATURE.STATE), SHUTTER_STATE.STOP);
     return;
   }
   shutter.travel.set(device, favorite);
-  await publishState(gladys, ids.feature(FEATURE.STATE), toShutterState(favorite), createdAt);
-  await publishPosition(gladys, device, ids, favorite, createdAt);
+  await publishState(gladys, ids.feature(FEATURE.STATE), toShutterState(favorite));
+  await publishPosition(gladys, device, ids, favorite);
 }
 
 /** Publish a position, on the shutters that expose one. */
-async function publishPosition(gladys, device, ids, position, createdAt) {
+async function publishPosition(gladys, device, ids, position) {
   if (!hasPosition(device)) {
     return;
   }
-  await publishState(gladys, ids.feature(FEATURE.POSITION), position, createdAt);
+  await publishState(gladys, ids.feature(FEATURE.POSITION), position);
 }
 
 function toRadioState(state, invert) {
