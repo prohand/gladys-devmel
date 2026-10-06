@@ -48,6 +48,26 @@ export const GENERIC_433_CHANNEL = 1;
 export const MAX_COMMAND_REPEAT = 5;
 
 /** AirSend device types, as numbered by airsend.cloud. */
+// Gladys stores a device `poll_frequency` as an ENUM of MILLISECONDS
+// (DEVICE_POLL_FREQUENCIES of the core) and rejects the WHOLE discovery batch
+// with "invalid poll frequency" for any other value. The slowest tick is one
+// minute: a longer `refresh` is honoured by the blueprint, which skips the
+// ticks that come too early.
+export const GLADYS_POLL_FREQUENCIES_MS = [1000, 2000, 10000, 15000, 30000, 60000];
+
+/**
+ * The Gladys tick a device is registered on: the slowest accepted value that is
+ * not slower than the wanted interval.
+ *
+ * @param {number} seconds wanted interval
+ * @returns {number} one of GLADYS_POLL_FREQUENCIES_MS
+ */
+export function gladysPollFrequency(seconds) {
+  const wanted = Number(seconds) * 1000;
+  const fitting = GLADYS_POLL_FREQUENCIES_MS.filter((ms) => ms <= wanted);
+  return fitting.length > 0 ? fitting[fitting.length - 1] : GLADYS_POLL_FREQUENCIES_MS[0];
+}
+
 export const DEVICE_TYPES = {
   BOX: 0,
   SENSOR: 1,

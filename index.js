@@ -14,6 +14,7 @@
 // The SDK reads them automatically: `new GladysIntegration()` is enough.
 // -----------------------------------------------------------------------------
 
+import { resetGatewayReads } from './src/devices/gateway.js';
 import { GladysIntegration } from '@gladysassistant/integration-sdk';
 import { normalizeConfig } from './src/config.js';
 import { applyLogLevel, applyLogTimeZone, createLogger } from './src/logging.js';
@@ -274,6 +275,8 @@ gladys.onSceneAction(SCENE_ACTIONS.REARM_LISTENING, async () => {
 // --- Configuration updated by the user ---------------------------------------
 gladys.onConfigUpdated(async (newConfig) => {
   logger.info('onConfigUpdated -> new configuration received');
+  // A new `refresh` applies from the next tick.
+  resetGatewayReads();
   await initialize(newConfig);
 });
 

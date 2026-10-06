@@ -11,6 +11,7 @@ import {
   restoreDeviceStates,
 } from '../src/devices/index.js';
 import { shutter } from '../src/devices/shutter.js';
+import { resetGatewayReads } from '../src/devices/gateway.js';
 import { NOTE_TYPES, STATE_VALUES } from '../src/devmel/notes.js';
 import { toThingUid } from '../src/devmel/client.js';
 import { HeardChannels } from '../src/devmel/heard.js';
@@ -175,7 +176,38 @@ test('switching a light on restores the last brightness', async () => {
   assert.deepEqual(gladys.statesOf(onOff.external_id), [1, 0, 1]);
 });
 
+test('the box is published with a poll frequency Gladys accepts', () => {
+  const { gladys, config } = setup();
+  const found = findDeviceByExternalId(gladys, config, 'gateway:airsend-box');
+  const device = found.blueprint.buildDevice(gladys, found.device);
+  // `refresh` defaults to 300 s: published as is, Gladys rejected the whole
+  // discovery batch.
+  assert.equal(device.poll_frequency, 60000);
+  assert.equal(device.should_poll, true);
+});
+
+test('the box polls inside the refresh interval read nothing', async () => {
+  resetGatewayReads();
+  const { gladys, config } = setup();
+  const client = createFakeClient({
+    config,
+    answers: [
+      [{ type: NOTE_TYPES.TEMPERATURE, value: 294.35 }],
+      [{ type: NOTE_TYPES.ILLUMINANCE, value: 320 }],
+      [{ type: NOTE_TYPES.TEMPERATURE, value: 295.35 }],
+      [{ type: NOTE_TYPES.ILLUMINANCE, value: 330 }],
+    ],
+  });
+  const found = findDeviceByExternalId(gladys, config, 'gateway:airsend-box');
+  await found.blueprint.onPoll(gladys, { device: found.device, client, now: 0 });
+  await found.blueprint.onPoll(gladys, { device: found.device, client, now: 60_000 });
+  assert.equal(client.sent.length, 2, 'one minute later: skipped');
+  await found.blueprint.onPoll(gladys, { device: found.device, client, now: 300_000 });
+  assert.equal(client.sent.length, 4, 'after the refresh interval: read again');
+});
+
 test('the box sensors are read by polling', async () => {
+  resetGatewayReads();
   const { gladys, config } = setup();
   const client = createFakeClient({
     config,

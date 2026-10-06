@@ -17,7 +17,7 @@ import {
   DEVICE_FEATURE_UNITS,
 } from '@gladysassistant/integration-sdk';
 import { createLogger } from '../logging.js';
-import { DEVICE_TYPES } from '../config.js';
+import { DEVICE_TYPES, gladysPollFrequency } from '../config.js';
 import {
   decodeNotes,
   queryNote,
@@ -31,6 +31,15 @@ import { idsFor, publishState, sendNotes } from './helpers.js';
 const KEY = 'gateway';
 
 const logger = createLogger({ name: KEY });
+
+// Last successful read of each box (platform id -> ms), to honour a `refresh`
+// longer than the one-minute Gladys tick.
+const lastReadAt = new Map();
+
+/** Forget the read times (tests, configuration change). */
+export function resetGatewayReads() {
+  lastReadAt.clear();
+}
 
 const FEATURE = {
   TEMPERATURE: 'temperature',
@@ -50,7 +59,11 @@ export const gateway = {
     return {
       name: device.name,
       external_id: ids.device,
-      poll_frequency: device.refresh,
+      // `refresh` is in seconds: Gladys wants one of its own ticks, in
+      // milliseconds (anything else rejects the whole discovery and empties
+      // the Discovery tab), and only polls a device carrying `should_poll`.
+      should_poll: true,
+      poll_frequency: gladysPollFrequency(device.refresh),
       features: [
         {
           name: 'Temperature',
@@ -80,10 +93,18 @@ export const gateway = {
     };
   },
 
-  async onPoll(gladys, { device, client }) {
+  async onPoll(gladys, { device, client, now = Date.now() }) {
     if (!device.sensors) {
       return;
     }
+    // Skip the Gladys ticks inside the configured interval, with half a tick
+    // of tolerance (the core's clock lands a few milliseconds short).
+    const last = lastReadAt.get(device.platformId);
+    const tolerance = gladysPollFrequency(device.refresh) / 2;
+    if (last !== undefined && now - last < device.refresh * 1000 - tolerance) {
+      return;
+    }
+    lastReadAt.set(device.platformId, now);
     const readings = [];
     for (const type of [QUERY_TYPES.TEMPERATURE, QUERY_TYPES.ILLUMINANCE]) {
       try {

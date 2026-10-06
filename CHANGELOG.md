@@ -16,6 +16,10 @@ All notable changes to this integration are documented here. The format follows
 
 - Development dependencies updated to their latest versions (ESLint 10.12, Prettier 3.9.9, globals 17.13).
 
+### Fixed
+
+- An AirSend box declared with `sensors: true` is published with a `poll_frequency` Gladys accepts (in milliseconds) and `should_poll: true`: its `refresh` in seconds made Gladys reject the whole discovery, leaving the Discovery tab empty for every device. The `refresh` interval is now enforced by the integration.
+
 ## [2.0.5] - 2026-10-06
 
 ### Fixed
