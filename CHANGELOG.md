@@ -1,0 +1,207 @@
+# Changelog
+
+All notable changes to this integration are documented here. The format follows
+[Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses
+[semantic versioning](https://semver.org/), bumped by the Release workflow.
+
+## [Unreleased]
+
+### Added
+
+- `SECURITY.md`: how to report a vulnerability.
+- `CHANGELOG.md`, rebuilt from the release history.
+- `CLAUDE.md`: guide for contributors and coding agents (commands, architecture, invariants).
+
+### Changed
+
+- Development dependencies updated to their latest versions (ESLint 10.12, Prettier 3.9.9, globals 17.13).
+
+## [2.0.5] - 2026-10-06
+
+### Fixed
+
+- Follow a declared wall remote whatever grade the box gives its frame
+
+## [2.0.4] - 2026-10-06
+
+### Fixed
+
+- A wall remote updates the current state of what it drives
+
+## [2.0.3] - 2026-10-02
+
+### Fixed
+
+- Give button, switch and light on/off features a min and max
+
+## [2.0.2] - 2026-09-28
+
+### Fixed
+
+- Never attach a remote by its protocol alone when the box decodes its address
+
+## [2.0.1] - 2026-09-28
+
+### Fixed
+
+- Log times match the widget, and attaching a remote says what the box will really hear
+
+## [2.0.0] - 2026-09-28
+
+### Added
+
+- Gladys 5.1 scenes and dashboard widget, and four radio fixes
+
+## [1.0.18] - 2026-08-20
+
+### Added
+
+- Name what the box refused, instead of blaming the radio
+- Keep the link to the box warm, and say where a slow order lost its time
+- Let the box say how fast its link goes cold
+
+## [1.0.17] - 2026-08-18
+
+- Maintenance release, no functional change.
+
+## [1.0.16] - 2026-08-18
+
+### Added
+
+- Say what is wrong with a connection string, instead of quoting the 401
+
+### Fixed
+
+- Stop asking for square brackets, and show the string that is refused
+
+## [1.0.15] - 2026-08-18
+
+### Added
+
+- Let a shutter be driven with the orders its protocol answers to
+
+## [1.0.14] - 2026-08-17
+
+### Added
+
+- Show which protocols the box can be asked to listen to
+- Name the protocol a pid stands for, wherever a pid is printed
+- Let the generic 433 MHz decoder be asked for by name
+
+### Fixed
+
+- Let the listening channel be left empty, since empty is the answer
+
+## [1.0.13] - 2026-08-17
+
+### Added
+
+- Recognize our own voice, and quote every button a remote presses
+
+## [1.0.12] - 2026-08-17
+
+### Added
+
+- Answer the order first, and say what the listener will never hear
+
+## [1.0.11] - 2026-08-16
+
+### Added
+
+- Say what a dropped frame carried, and how to make it usable
+
+## [1.0.10] - 2026-08-16
+
+### Added
+
+- Tell the three silences of a radio that hears nothing apart
+
+## [1.0.9] - 2026-08-16
+
+### Added
+
+- Get the order through, and stop hearing ourselves
+
+## [1.0.8] - 2026-08-16
+
+### Added
+
+- Say what the box heard, and what the devices made of it
+
+## [1.0.7] - 2026-08-15
+
+### Added
+
+- Write the wall-remote configuration line, and stop failing in silence
+
+## [1.0.6] - 2026-08-15
+
+### Added
+
+- Switch the detailed logs on from the Configuration screen
+
+## [1.0.5] - 2026-08-15
+
+### Changed
+
+- Drop the "environment" store category
+
+### Fixed
+
+- Surface the radio frames an 868 MHz remote actually sends
+
+## [1.0.4] - 2026-08-15
+
+### Fixed
+
+- Log a frame from an undeclared emitter whatever its notes say
+
+## [1.0.3] - 2026-08-15
+
+### Changed
+
+- Declare the store categories, on SDK 0.12 and Gladys 4.86
+
+### Fixed
+
+- Listen to the protocol of the declared devices, not to channel 1
+
+## [1.0.2] - 2026-08-14
+
+### Fixed
+
+- Receive the radio frames the box hears, without Gladys Plus
+
+## [1.0.1] - 2026-08-14
+
+First public release.
+
+### Added
+
+- Compute the position of a shutter from its travel time
+
+[Unreleased]: https://github.com/prohand/gladys-devmel/compare/v2.0.5...HEAD
+[2.0.5]: https://github.com/prohand/gladys-devmel/compare/v2.0.4...v2.0.5
+[2.0.4]: https://github.com/prohand/gladys-devmel/compare/v2.0.3...v2.0.4
+[2.0.3]: https://github.com/prohand/gladys-devmel/compare/v2.0.2...v2.0.3
+[2.0.2]: https://github.com/prohand/gladys-devmel/compare/v2.0.1...v2.0.2
+[2.0.1]: https://github.com/prohand/gladys-devmel/compare/v2.0.0...v2.0.1
+[2.0.0]: https://github.com/prohand/gladys-devmel/compare/v1.0.18...v2.0.0
+[1.0.18]: https://github.com/prohand/gladys-devmel/compare/v1.0.17...v1.0.18
+[1.0.17]: https://github.com/prohand/gladys-devmel/compare/v1.0.16...v1.0.17
+[1.0.16]: https://github.com/prohand/gladys-devmel/compare/v1.0.15...v1.0.16
+[1.0.15]: https://github.com/prohand/gladys-devmel/compare/v1.0.14...v1.0.15
+[1.0.14]: https://github.com/prohand/gladys-devmel/compare/v1.0.13...v1.0.14
+[1.0.13]: https://github.com/prohand/gladys-devmel/compare/v1.0.12...v1.0.13
+[1.0.12]: https://github.com/prohand/gladys-devmel/compare/v1.0.11...v1.0.12
+[1.0.11]: https://github.com/prohand/gladys-devmel/compare/v1.0.10...v1.0.11
+[1.0.10]: https://github.com/prohand/gladys-devmel/compare/v1.0.9...v1.0.10
+[1.0.9]: https://github.com/prohand/gladys-devmel/compare/v1.0.8...v1.0.9
+[1.0.8]: https://github.com/prohand/gladys-devmel/compare/v1.0.7...v1.0.8
+[1.0.7]: https://github.com/prohand/gladys-devmel/compare/v1.0.6...v1.0.7
+[1.0.6]: https://github.com/prohand/gladys-devmel/compare/v1.0.5...v1.0.6
+[1.0.5]: https://github.com/prohand/gladys-devmel/compare/v1.0.4...v1.0.5
+[1.0.4]: https://github.com/prohand/gladys-devmel/compare/v1.0.3...v1.0.4
+[1.0.3]: https://github.com/prohand/gladys-devmel/compare/v1.0.2...v1.0.3
+[1.0.2]: https://github.com/prohand/gladys-devmel/compare/v1.0.1...v1.0.2
+[1.0.1]: https://github.com/prohand/gladys-devmel/releases/tag/v1.0.1
