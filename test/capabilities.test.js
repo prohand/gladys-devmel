@@ -323,3 +323,43 @@ test('the radio widget says what is missing before anything can work', () => {
   assert.match(content.components[0].text.en, /sp:\/\//);
   assert.deepEqual(validateWidgetContent(content), []);
 });
+
+test('every scene event carries each filter and variable its trigger declares', async () => {
+  // A declared key missing from the data reads as null in a scene, and a filter
+  // on it never matches: the trigger would look broken with nothing in the logs.
+  const { readFile } = await import('node:fs/promises');
+  const manifest = JSON.parse(
+    await readFile(new URL('../gladys-assistant-integration.json', import.meta.url), 'utf8'),
+  );
+  const sent = [];
+  const gladys = { publishSceneEvent: async (key, data) => sent.push({ key, data }) };
+  const scenes = new SceneEvents();
+  await scenes.remotePressed(gladys, {
+    externalId: 'shutter:300-3',
+    name: 'Living room shutter',
+    order: 'down',
+    channel: { id: 300, source: 42 },
+  });
+  await scenes.orderFailed(gladys, {
+    externalId: 'switch:200-2',
+    name: 'Kitchen plug',
+    reason: 'SECURITY',
+    message: 'refused',
+  });
+
+  for (const trigger of manifest.scene_triggers) {
+    const event = sent.find((entry) => entry.key === trigger.key);
+    assert.ok(event, `${trigger.key} is fired by the code`);
+    const declared = [...(trigger.fields ?? []), ...(trigger.variables ?? [])].map((f) => f.key);
+    for (const key of declared) {
+      assert.ok(key in event.data, `${trigger.key} carries ${key}`);
+    }
+  }
+
+  const rearm = manifest.scene_actions.find((action) => action.key === 'rearm_listening');
+  assert.deepEqual(
+    rearm.outputs.map((output) => output.key),
+    ['channel'],
+    'index.js answers rearm_listening with { channel }',
+  );
+});
