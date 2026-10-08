@@ -23,6 +23,10 @@
 //     being invented. It becomes known again at the next end stop.
 // -----------------------------------------------------------------------------
 
+import { createLogger } from '../logging.js';
+
+const logger = createLogger({ name: 'travel' });
+
 /** How often a moving shutter publishes its position, in milliseconds. */
 export const DEFAULT_TICK_MS = 1000;
 
@@ -193,9 +197,9 @@ export class ShutterTravel {
     const remaining = state.move.endAt - this.now();
     const delay = Math.max(0, Math.min(this.tickMs, remaining));
     state.handle = this.timers.set(() => {
-      this.tick(device, state).catch(() => {
-        // The publication failed (Gladys unreachable): the movement keeps
-        // running, the next tick will carry the position.
+      this.tick(device, state).catch((error) => {
+        // Nothing above a timer callback can handle it: say it and move on.
+        logger.warn(`Position tracking of "${device.name ?? device.platformId}": ${error.message}`);
       });
     }, delay);
   }
@@ -211,18 +215,31 @@ export class ShutterTravel {
     if (done) {
       state.move = null;
       state.position = move.target;
+      // The arrival callback is what STOPS a shutter driven to a mid-course
+      // position: it runs whatever Gladys answers to the publication, and its
+      // failure goes to the caller of tick (logged above).
       await move.publish(move.target, { done: true });
       return;
     }
 
     // Mid-course: only a shutter whose starting point was known has an
-    // intermediate position worth publishing.
-    if (move.from !== null) {
-      await move.publish(positionAt(move, this.now()), { done: false });
-    }
-    // The movement may have been replaced while the publication was awaited.
-    if (state.move === move) {
-      this.schedule(device, state);
+    // intermediate position worth publishing. A failed publication (Gladys
+    // unreachable for a second) must NOT end the tracking: the next tick is
+    // what carries the arrival, and the arrival is what sends the STOP of a
+    // shutter driven to 40 % — skip it and the motor runs into its end stop.
+    try {
+      if (move.from !== null) {
+        await move.publish(positionAt(move, this.now()), { done: false });
+      }
+    } catch (error) {
+      logger.warn(
+        `Position of "${device.name ?? device.platformId}" not published: ${error.message}`,
+      );
+    } finally {
+      // The movement may have been replaced while the publication was awaited.
+      if (state.move === move) {
+        this.schedule(device, state);
+      }
     }
   }
 }

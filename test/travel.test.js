@@ -135,3 +135,24 @@ test('clear drops the timers of every shutter', async () => {
   await clock.advance(60000);
   assert.deepEqual(positions, []);
 });
+
+test('a failed publication does not stop the tracking before the arrival', async () => {
+  const { clock, travel } = setup();
+  travel.set(SHUTTER, 0);
+  const calls = [];
+  const publish = async (position, { done }) => {
+    calls.push(done ? `${position}!` : position);
+    if (!done) {
+      throw new Error('Gladys unreachable');
+    }
+  };
+
+  travel.move(SHUTTER, { direction: DIRECTIONS.UP, target: 40, publish });
+  await clock.advance(10000);
+
+  // Every intermediate publication failed, and the arrival still came: it is
+  // what stops a shutter driven to a mid-course position.
+  assert.equal(calls.at(-1), '40!');
+  assert.equal(travel.positionOf(SHUTTER), 40);
+  assert.equal(clock.armed, 0);
+});
