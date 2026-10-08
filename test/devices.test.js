@@ -8,6 +8,7 @@ import {
   findBlueprintByType,
   findDeviceByExternalId,
   identifyDevice,
+  replayDeviceStates,
   restoreDeviceStates,
 } from '../src/devices/index.js';
 import { shutter } from '../src/devices/shutter.js';
@@ -204,6 +205,56 @@ test('the box polls inside the refresh interval read nothing', async () => {
   assert.equal(client.sent.length, 2, 'one minute later: skipped');
   await found.blueprint.onPoll(gladys, { device: found.device, client, now: 300_000 });
   assert.equal(client.sent.length, 4, 'after the refresh interval: read again');
+});
+
+test('a box poll that read nothing is tried again at the next tick', async () => {
+  resetGatewayReads();
+  const { gladys, config } = setup();
+  const client = createFakeClient({ config });
+  let down = true;
+  const transfer = client.transfer;
+  client.transfer = async (...args) => {
+    if (down) {
+      client.sent.push({ failed: true });
+      throw new Error('box unreachable');
+    }
+    return transfer(...args);
+  };
+  const found = findDeviceByExternalId(gladys, config, 'gateway:airsend-box');
+
+  await found.blueprint.onPoll(gladys, { device: found.device, client, now: 0 });
+  assert.equal(client.sent.length, 2);
+
+  // The box is back a minute later: no need to wait for the whole interval.
+  down = false;
+  await found.blueprint.onPoll(gladys, { device: found.device, client, now: 60_000 });
+  assert.equal(client.sent.length, 4);
+
+  // And a successful read is the one the interval counts from.
+  await found.blueprint.onPoll(gladys, { device: found.device, client, now: 120_000 });
+  assert.equal(client.sent.length, 4);
+});
+
+test('a box created in Gladys is read at once, inside its refresh interval', async () => {
+  resetGatewayReads();
+  const { gladys, config } = setup();
+  const client = createFakeClient({
+    config,
+    answers: [
+      [{ type: NOTE_TYPES.TEMPERATURE, value: 294.35 }],
+      [{ type: NOTE_TYPES.ILLUMINANCE, value: 320 }],
+      [{ type: NOTE_TYPES.TEMPERATURE, value: 295.35 }],
+      [{ type: NOTE_TYPES.ILLUMINANCE, value: 330 }],
+    ],
+  });
+  const found = findDeviceByExternalId(gladys, config, 'gateway:airsend-box');
+  // Read before the device existed in Gladys: those states were dropped.
+  await found.blueprint.onPoll(gladys, { device: found.device, client });
+
+  await replayDeviceStates(gladys, { external_id: 'gateway:airsend-box' }, { config, client });
+
+  assert.equal(client.sent.length, 4);
+  assert.deepEqual(gladys.statesOf('gateway:airsend-box:illuminance'), [320, 330]);
 });
 
 test('the box sensors are read by polling', async () => {
@@ -795,6 +846,50 @@ test('the position of a shutter survives a restart of the integration', async (t
   assert.deepEqual(positionsOf('Timed shutter'), [50, 40]);
 });
 
+test('a shutter created in Gladys after the start gets the position already known', async (t) => {
+  const { gladys, config, client, clock, send, positionsOf, statesOf } = setupTimed(t);
+
+  // The shutter was used before the user added it: those states were dropped.
+  await send('Timed shutter', 'state', -1);
+  await clock.advance(10000);
+  gladys.published.length = 0;
+
+  const known = await replayDeviceStates(
+    gladys,
+    { external_id: deviceExternalId(config, 'Timed shutter'), features: [] },
+    { config, client },
+  );
+
+  assert.equal(known, true);
+  assert.deepEqual(positionsOf('Timed shutter'), [0]);
+  assert.deepEqual(statesOf('Timed shutter'), [-1]);
+});
+
+test('a shutter updated in Gladys picks its stored position back up', async (t) => {
+  const { gladys, config, client, positionsOf } = setupTimed(t);
+  const externalId = deviceExternalId(config, 'Timed shutter');
+
+  await replayDeviceStates(
+    gladys,
+    {
+      external_id: externalId,
+      features: [{ external_id: `${externalId}:position`, last_value: 35 }],
+    },
+    { config, client },
+  );
+
+  assert.deepEqual(positionsOf('Timed shutter'), [35]);
+});
+
+test('a device unknown to the configuration is not replayed', async (t) => {
+  const { gladys, config, client } = setupTimed(t);
+  assert.equal(
+    await replayDeviceStates(gladys, { external_id: 'shutter:nope' }, { config, client }),
+    false,
+  );
+  assert.equal(gladys.published.length, 0);
+});
+
 test('a timed shutter with no positionable motor is driven with a stopwatch', async (t) => {
   const { client, clock, send, positionsOf, statesOf } = setupTimed(t);
 
@@ -815,6 +910,51 @@ test('a timed shutter with no positionable motor is driven with a stopwatch', as
   assert.equal(positionsOf('Timed shutter').at(-1), 60);
   assert.equal(client.noteAt(2).value, STATE_VALUES.STOP);
   assert.deepEqual(statesOf('Timed shutter'), [-1, 1, 0]);
+});
+
+test('a timed shutter is still stopped when Gladys refuses its positions', async (t) => {
+  const { gladys, config, client, clock, send, positionsOf } = setupTimed(t);
+
+  await send('Timed shutter', 'state', -1);
+  await clock.advance(10000);
+  await send('Timed shutter', 'position', 40);
+
+  // Gladys goes away mid-course: every publication fails, during the travel
+  // AND at the arrival.
+  const publishState = gladys.publishState;
+  gladys.publishState = async () => {
+    throw new Error('Gladys unreachable');
+  };
+  await clock.advance(9000);
+
+  // The stopwatch kept running and the STOP went out at 40 %: the motor was
+  // not left to run into the top end stop.
+  assert.equal(client.sent.length, 3);
+  assert.equal(client.noteAt(2).value, STATE_VALUES.STOP);
+  assert.equal(shutter.travel.positionOf(deviceNamed(config, 'Timed shutter')), 40);
+
+  gladys.publishState = publishState;
+  assert.equal(positionsOf('Timed shutter').at(-1), 0);
+});
+
+test('a timed shutter is stopped before its arrival is published', async (t) => {
+  const { gladys, client, clock, send } = setupTimed(t);
+
+  await send('Timed shutter', 'state', -1);
+  await clock.advance(10000);
+  await send('Timed shutter', 'position', 40);
+  await clock.advance(7000);
+
+  // Only the arrival publication fails: the STOP must already be on the air.
+  const publishState = gladys.publishState;
+  gladys.publishState = async () => {
+    throw new Error('Gladys unreachable');
+  };
+  await clock.advance(2000);
+  gladys.publishState = publishState;
+
+  assert.equal(client.noteAt(2).value, STATE_VALUES.STOP);
+  assert.equal(client.sent.length, 3);
 });
 
 test('a timed shutter sent to an end stop lets the motor stop itself', async (t) => {
