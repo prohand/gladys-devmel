@@ -109,6 +109,33 @@ export async function restoreDeviceStates(gladys, config, gladysDevices) {
   return restored;
 }
 
+/**
+ * A device the user just created (or updated) in Gladys: publish what the
+ * integration already knows about it. Gladys drops the states sent before a
+ * device exists, so without this a shutter added after the start showed no
+ * position until the next order or the next restart, and a box no sensor value
+ * until the end of its `refresh` interval.
+ *
+ * @param {object} gladysDevice the device Gladys hands to onDeviceCreated /
+ *   onDeviceUpdated (its features carry the last values Gladys stored)
+ * @param {object} context `{ config, client, callbackUrl }`
+ * @returns {Promise<boolean>} whether the device belongs to the configuration
+ */
+export async function replayDeviceStates(gladys, gladysDevice, context) {
+  const found = findDeviceByExternalId(gladys, context.config, gladysDevice?.external_id);
+  if (!found) {
+    return false;
+  }
+  if (typeof found.blueprint.replayStates === 'function') {
+    await found.blueprint.replayStates(gladys, {
+      ...context,
+      device: found.device,
+      features: gladysDevice.features ?? [],
+    });
+  }
+  return true;
+}
+
 /** Drop every timer the device modules hold (integration shutdown). */
 export function stopDeviceTracking() {
   shutter.travel.clear();

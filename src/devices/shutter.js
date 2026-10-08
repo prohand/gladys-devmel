@@ -109,6 +109,29 @@ export const shutter = {
     }
   },
 
+  /**
+   * Publish the position the travel knows, for a device Gladys only just
+   * created: everything published before it existed was dropped. A device
+   * updated or re-created with a stored position is picked up from it when the
+   * travel knows nothing better.
+   */
+  async replayStates(gladys, { device, features }) {
+    if (!hasPosition(device)) {
+      return;
+    }
+    if (shutter.travel.positionOf(device) === null && !shutter.travel.isMoving(device)) {
+      shutter.restoreStates(gladys, { device, features });
+    }
+    // A moving shutter publishes its position on every tick anyway.
+    const position = shutter.travel.positionOf(device);
+    if (position === null || shutter.travel.isMoving(device)) {
+      return;
+    }
+    const ids = idsFor(gladys, KEY, device);
+    await publishState(gladys, ids.feature(FEATURE.STATE), toShutterState(position));
+    await publishPosition(gladys, device, ids, position);
+  },
+
   async onSetValue(gladys, { device, feature, value, client, callbackUrl }) {
     const ids = idsFor(gladys, KEY, device);
 
@@ -233,12 +256,20 @@ async function goTo(gladys, device, ids, destination, { announced = null, onArri
       direction,
       target: destination,
       publish: async (position, { done }) => {
-        await publishPosition(gladys, device, ids, position);
         if (!done) {
+          await publishPosition(gladys, device, ids, position);
           return;
         }
-        if (onArrival) {
-          await onArrival();
+        // The STOP of a shutter driven to a mid-course position goes out FIRST:
+        // a radio order is time-critical, a publication is not, and a Gladys
+        // that fails to take the position must not leave the motor running to
+        // its end stop.
+        try {
+          if (onArrival) {
+            await onArrival();
+          }
+        } finally {
+          await publishPosition(gladys, device, ids, position);
         }
         const arrived = toShutterState(position);
         if (arrived !== announced) {

@@ -61,6 +61,13 @@ const PROBE_INTERVAL_MS = 250;
 const WATCHDOG_INTERVAL_MS = 30000;
 const STOP_GRACE_MS = 5000;
 
+// A single probe that times out is not a dead daemon: a box exchange holding
+// the service, a loaded Raspberry Pi. Restarting on it used to spawn a second
+// daemon next to a first one still holding port 33863, so the new one could
+// never bind. Only this many failed watchdog rounds in a row (a minute and a
+// half) mean it is gone.
+const FAILED_PROBES_BEFORE_RESTART = 3;
+
 /**
  * Supervises the bundled AirSend Web Service: starts it, watches it, restarts
  * it when it dies, and reports in a shape the Configuration screen can show.
@@ -71,8 +78,12 @@ export class AirSendService {
     dataDir = process.env.DEVMEL_DATA_DIR || '/data',
     url = SERVICE_URL,
     argument = PORT_ARGUMENT,
+    stopGraceMs = STOP_GRACE_MS,
   } = {}) {
     this.serviceDir = serviceDir;
+    this.stopGraceMs = stopGraceMs;
+    /** Watchdog rounds in a row the service did not answer. */
+    this.failedProbes = 0;
     this.dataDir = dataDir;
     this.url = url;
     this.argument = argument;
@@ -144,6 +155,7 @@ export class AirSendService {
 
   async doStart() {
     this.error = null;
+    this.failedProbes = 0;
 
     // Already answering: a restarted integration finds the daemon of its
     // previous life still running (the container outlives our process on a
@@ -227,7 +239,7 @@ export class AirSendService {
     // Released port or dead process, whichever comes first: the pid can linger
     // as a zombie until the container's init reaps it, and that is not our
     // business — having let go of 33863 is.
-    const deadline = Date.now() + STOP_GRACE_MS;
+    const deadline = Date.now() + this.stopGraceMs;
     while (Date.now() < deadline && isAlive(pid) && (await this.probe())) {
       await sleep(PROBE_INTERVAL_MS);
     }
@@ -339,13 +351,25 @@ export class AirSendService {
       return;
     }
     if (await this.probe()) {
+      this.failedProbes = 0;
       this.running = true;
       this.error = null;
       return;
     }
+    this.failedProbes += 1;
+    if (this.failedProbes < FAILED_PROBES_BEFORE_RESTART) {
+      logger.warn(
+        `The AirSend Web Service did not answer (${this.failedProbes}/${FAILED_PROBES_BEFORE_RESTART})`,
+      );
+      return;
+    }
+    this.failedProbes = 0;
     logger.warn('The AirSend Web Service stopped answering, restarting it');
     this.running = false;
+    // A daemon that hangs still holds the port: a new one could not bind it.
+    const pid = this.pid ?? (await this.readPid());
     this.pid = null;
+    await this.terminate(pid);
     const restarted = await this.start().catch((err) => {
       this.error = err.message;
       logger.error(`Could not restart the AirSend Web Service: ${err.message}`);
@@ -356,6 +380,34 @@ export class AirSendService {
         this.onRestarted();
       } catch (err) {
         logger.debug(`Could not signal the restart of the service: ${err.message}`);
+      }
+    }
+  }
+
+  /**
+   * End a daemon that no longer answers: SIGTERM, then SIGKILL when it is
+   * still there after the grace period. Unlike `stop()`, it does not wait for
+   * the port to stop answering — it already does not — and keeps the watchdog.
+   */
+  async terminate(pid) {
+    if (!pid || !isAlive(pid)) {
+      return;
+    }
+    logger.info(`Terminating the unresponsive AirSend Web Service (pid ${pid})`);
+    try {
+      process.kill(pid, 'SIGTERM');
+    } catch {
+      return;
+    }
+    const deadline = Date.now() + this.stopGraceMs;
+    while (Date.now() < deadline && isAlive(pid)) {
+      await sleep(PROBE_INTERVAL_MS);
+    }
+    if (isAlive(pid)) {
+      try {
+        process.kill(pid, 'SIGKILL');
+      } catch {
+        /* already gone */
       }
     }
   }

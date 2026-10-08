@@ -25,6 +25,7 @@ import {
   buildTransportEntries,
   findDeviceByExternalId,
   identifyDevice,
+  replayDeviceStates,
   restoreDeviceStates,
   setKnownPosition,
   stopDeviceTracking,
@@ -33,6 +34,7 @@ import { boxDevices, describeConnection, testConnection } from './src/devmel/con
 import { AirSendService } from './src/devmel/service.js';
 import { CallbackServer } from './src/devmel/callback.js';
 import { indexChannels, planListening } from './src/devmel/listening.js';
+import { createListenLoop } from './src/devmel/listenLoop.js';
 import { heardChannels } from './src/devmel/heard.js';
 import { attachHeardRemote } from './src/devmel/remotes.js';
 import { findProtocol } from './src/devmel/protocols.js';
@@ -42,6 +44,18 @@ import { buildRadioWidget, RADIO_WIDGET, WIDGET_ACTIONS } from './src/capabiliti
 // Every line stamped in the time zone of the Configuration screen, the SDK's
 // own connection logs included (see src/logging.js).
 const logger = createLogger();
+
+// A promise rejected with nobody listening — a timer callback, a fire-and-forget
+// publication — would terminate Node (its default since v15) and with it every
+// shutter mid-travel and the bundled AirSend service supervision. Log it, keep
+// running: each of those paths already reports its own failures where it can.
+// Deliberately NOT an `uncaughtException` handler: a synchronous throw may
+// leave state broken, and the supervisor restarting the container is the
+// right answer to that.
+process.on('unhandledRejection', (reason) => {
+  logger.error('Unhandled promise rejection', reason);
+});
+
 const gladys = new GladysIntegration({ logger: createLogger({ name: 'gladys-sdk' }) });
 const client = new AirSendClient();
 // Transmitting takes the box out of reception: every exchange is a reason to
@@ -73,8 +87,16 @@ let eventsWebhookUrl = null;
 let localCallbackUrl = null;
 
 // Re-arms the box listening subscription (it forgets it when it restarts).
-let listenTimer = null;
+// One timer at a time, whoever asks for listening and however often: see
+// src/devmel/listenLoop.js.
 const LISTEN_REFRESH_MS = 10 * 60 * 1000;
+const listenLoop = createListenLoop({
+  intervalMs: LISTEN_REFRESH_MS,
+  renew: () =>
+    bindBoxes(radioCallbackUrl(), { renewal: true }).catch((err) =>
+      logger.error('Could not renew the radio listener', err),
+    ),
+});
 
 // And re-arms it shortly after the integration has used the radio itself: a box
 // has one radio, so it is not receiving while it transmits, and a subscription
@@ -160,6 +182,29 @@ gladys.onPoll(async (device) => {
   });
   await publishDeviceTransports();
 });
+
+// --- Device created / updated by the user ------------------------------------
+// Gladys drops the states published for a device that does not exist yet: a
+// shutter added after the start would show no position, and a box no sensor
+// value, until the next order or the next restart. Publish what is known now.
+async function onDeviceSaved(device, event) {
+  try {
+    const known = await replayDeviceStates(gladys, device, {
+      config,
+      client,
+      callbackUrl: radioCallbackUrl(),
+    });
+    if (known) {
+      logger.debug(`${event} <- ${device.external_id}: known states published`);
+      await publishDeviceTransports();
+    }
+  } catch (err) {
+    logger.warn(`Could not publish the states of ${device?.external_id}: ${err.message}`);
+  }
+}
+
+gladys.onDeviceCreated((device) => onDeviceSaved(device, 'onDeviceCreated'));
+gladys.onDeviceUpdated((device) => onDeviceSaved(device, 'onDeviceUpdated'));
 
 // --- Incoming radio frames ---------------------------------------------------
 // Every frame the box hears on the listening channel — a wall remote pressed by
@@ -391,7 +436,12 @@ function radioCallbackUrl() {
  * protocol is silent, and silence is what "listening does not work" looks like.
  */
 async function startListening() {
-  stopListening();
+  stopRebind();
+  await listenLoop.start(armListening);
+}
+
+/** @returns {Promise<boolean>} whether a subscription was made, worth renewing */
+async function armListening() {
   const callbackUrl = radioCallbackUrl();
   listenState.url = null;
   listenState.error = null;
@@ -399,11 +449,11 @@ async function startListening() {
 
   if (!listenState.plan.enabled) {
     logger.info('Listening disabled (listening channel set to 0)');
-    return;
+    return false;
   }
   if (!callbackUrl) {
     logger.info('No route for the radio frames -> sensors are refreshed by polling only');
-    return;
+    return false;
   }
   if (listenState.plan.fallback) {
     // Binding still happens: generic 433 MHz is the only useful guess before
@@ -419,13 +469,7 @@ async function startListening() {
 
   await bindBoxes(callbackUrl);
   announceBlindSpots(listenState.plan);
-  listenTimer = setInterval(() => {
-    bindBoxes(radioCallbackUrl(), { renewal: true }).catch((err) =>
-      logger.error('Could not renew the radio listener', err),
-    );
-  }, LISTEN_REFRESH_MS);
-  // Do not hold the event loop open just to renew a subscription.
-  listenTimer.unref?.();
+  return true;
 }
 
 /**
@@ -586,10 +630,11 @@ function refreshWidget() {
 }
 
 function stopListening() {
-  if (listenTimer) {
-    clearInterval(listenTimer);
-    listenTimer = null;
-  }
+  listenLoop.stop();
+  stopRebind();
+}
+
+function stopRebind() {
   if (rebindTimer) {
     clearTimeout(rebindTimer);
     rebindTimer = null;

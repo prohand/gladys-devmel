@@ -6,6 +6,24 @@ All notable changes to this integration are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- A timed shutter driven to a position (40 %, say) is stopped on time even when Gladys fails to take a position update: the STOP goes out before the position is published, and a failed publication no longer ends the position tracking (the shutter used to run into its end stop).
+- A push button TOGGLE (a gate) is no longer sent a second time after a failure that does not prove it never went out (box timeout, lost synchronization, "no radio confirmation", request timeout): the gate opened and then closed again. It is still retried when the service was unreachable or the box busy.
+- Listening requested twice at the same moment no longer leaves a renewal timer running that nothing stops, not even the disconnection or the shutdown.
+- The bundled AirSend Web Service is restarted only after three unanswered checks in a row, and the hung daemon is terminated (SIGTERM, then SIGKILL) first, so the new one can take the port.
+- A box sensor read that failed is tried again at the next Gladys tick instead of a whole `refresh` interval later.
+- A device created or updated in Gladys after the integration started gets its known states at once: the shutter position already known, a fresh read of the box sensors.
+- An unhandled promise rejection is logged instead of terminating the integration.
+
+### Security
+
+- The AirSend Web Service tarball is downloaded over HTTPS and checked against a pinned SHA-256 at build time.
+
+### Changed
+
+- Node.js 22 or later is required (`engines`); CI tests on Node 22 and 24 and builds the image on pull requests. Dependabot also watches the Docker base image.
+
 ## [2.2.0] - 2026-10-07
 
 - Maintenance release, no functional change.

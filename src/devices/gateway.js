@@ -104,17 +104,44 @@ export const gateway = {
     if (last !== undefined && now - last < device.refresh * 1000 - tolerance) {
       return;
     }
+    // Stamped BEFORE the read, so a tick arriving while the box is still
+    // answering does not read it a second time...
     lastReadAt.set(device.platformId, now);
+    const queries = [QUERY_TYPES.TEMPERATURE, QUERY_TYPES.ILLUMINANCE];
     const readings = [];
-    for (const type of [QUERY_TYPES.TEMPERATURE, QUERY_TYPES.ILLUMINANCE]) {
+    let failures = 0;
+    for (const type of queries) {
       try {
         const answer = await sendNotes(client, device, [queryNote(type)], { wait: true });
         readings.push(...decodeNotes(answer.notes));
       } catch (err) {
+        failures += 1;
         logger.warn(`Could not read ${type} on "${device.name}": ${err.message}`);
       }
     }
+    // ...and given back when nothing could be read, so the next tick tries
+    // again instead of leaving the sensors a whole `refresh` without a value.
+    if (failures === queries.length && lastReadAt.get(device.platformId) === now) {
+      if (last === undefined) {
+        lastReadAt.delete(device.platformId);
+      } else {
+        lastReadAt.set(device.platformId, last);
+      }
+    }
     await gateway.applyReadings(gladys, { device, readings });
+  },
+
+  /**
+   * A box Gladys only just created has no value yet (states published before
+   * it existed were dropped): read it now rather than at the end of its
+   * `refresh` interval.
+   */
+  async replayStates(gladys, { device, client }) {
+    if (!device.sensors) {
+      return;
+    }
+    lastReadAt.delete(device.platformId);
+    await gateway.onPoll(gladys, { device, client });
   },
 
   /**

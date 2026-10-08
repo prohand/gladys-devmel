@@ -251,7 +251,9 @@ Three things answer it, with nothing to set:
   order you gave them;
 - **an order the box could not carry is sent again.** A refusal is not: a
   rejected connection string and an unknown channel answer exactly the same way
-  the second time;
+  the second time. A push button TOGGLE is only sent again when it certainly
+  never went out (the service unreachable, the box busy): after a timeout it may
+  well have opened the gate, and a second one would close it;
 - **an order is repeated on the air**, the way a real remote repeats it for as
   long as the button is held. By default every order goes out twice.
 
@@ -430,7 +432,10 @@ Two more things worth knowing:
   shutter to the nearest end stop, which is exactly what establishes the
   reference;
 - the position is **remembered across restarts** of the integration: it starts
-  again from the value Gladys kept.
+  again from the value Gladys kept. A shutter you add in Gladys after the
+  integration started gets the position already known straight away;
+- a shutter driven to a position is **stopped on time even when Gladys is
+  briefly unreachable**: the STOP goes out before the position is published.
 
 ### The favourite position
 

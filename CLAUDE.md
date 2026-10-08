@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-A Gladys Assistant **external integration** (Node 20+, ESM, no build step, one runtime
+A Gladys Assistant **external integration** (Node 22+, ESM, no build step, one runtime
 dependency: `@gladysassistant/integration-sdk`) for a **Devmel AirSend / AirSend Duo** radio
 gateway and the 433/868 MHz equipment it drives: shutters (with or without position), switches,
 dimmable lights, gates, buttons, radio sensors and wall remotes (Somfy RTS, Chacon DiO, Nice,
@@ -44,6 +44,7 @@ src/devmel/orders.js    orders just sent, so their echo is not replayed as a new
 src/devmel/travel.js    shutter position computed from travel times
 src/devmel/callback.js  loopback HTTP endpoint the service posts heard frames to
 src/devmel/listening.js which protocol the box listens to (from GET /channels/)
+src/devmel/listenLoop.js one listening renewal timer at a time (requests queued)
 src/devmel/heard.js     emitters heard on the air, remembered
 src/devmel/remotes.js   "Attach a remote": writes the device list entry for a heard remote
 src/devmel/protocols.js pid <-> protocol names
