@@ -62,7 +62,8 @@ nothing did.
 
 Nothing acknowledges a radio order, so the driver does not send one and hope:
 orders queue up (one radio, one transmission at a time), a transmission the box
-could not carry is tried again, and an order that means the same thing twice is
+could not carry is tried again (a TOGGLE only when it provably never went out),
+and an order that means the same thing twice is
 repeated the way a real remote repeats it. And because everything transmitted
 comes back — the answer to the transfer, and the box hearing itself —
 `src/devmel/orders.js` remembers what was just sent so the echo is not replayed

@@ -261,7 +261,10 @@ Trois choses y répondent, sans rien à régler :
   seconde, dans l'ordre où vous les avez donnés ;
 - **un ordre que le boîtier n'a pas pu porter est renvoyé.** Un refus, lui, ne
   l'est pas : une chaîne de connexion rejetée et un canal inconnu répondront
-  exactement pareil la seconde fois ;
+  exactement pareil la seconde fois. Un TOGGLE de bouton poussoir n'est renvoyé
+  que s'il n'est certainement pas parti (service injoignable, boîtier occupé) :
+  après un délai dépassé, il a peut-être déjà ouvert le portail, et un second le
+  refermerait ;
 - **un ordre est répété sur l'air**, comme une vraie télécommande le répète tant
   qu'on garde le doigt appuyé. Par défaut, chaque ordre part deux fois.
 
@@ -449,7 +452,10 @@ Deux détails qui comptent :
   Demander une position avant cela envoie le volet à la butée la plus proche,
   ce qui est précisément ce qui établit la référence ;
 - la position **survit aux redémarrages** de l'intégration : elle repart de la
-  valeur conservée par Gladys.
+  valeur conservée par Gladys. Un volet ajouté dans Gladys après le démarrage de
+  l'intégration reçoit tout de suite la position déjà connue ;
+- un volet envoyé à une position est **arrêté à temps même si Gladys ne répond
+  plus un instant** : le STOP part avant que la position soit publiée.
 
 ### La position favorite
 
