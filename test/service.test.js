@@ -98,6 +98,10 @@ test('a daemon that died is started again by the watchdog', async () => {
     restarted += 1;
   };
 
+  // One unanswered probe is not a dead daemon: only a few in a row are.
+  await service.check();
+  await service.check();
+  assert.equal(restarted, 0);
   await service.check();
 
   assert.equal(service.status().running, true);
@@ -106,6 +110,54 @@ test('a daemon that died is started again by the watchdog', async () => {
   assert.equal(restarted, 1);
   await service.stop();
 });
+
+test('a daemon that hangs is killed before a new one is started', async () => {
+  const port = await freePort();
+  const { service } = await serviceWithFakeBinary(port, { stopGraceMs: 2000 });
+
+  await service.apply({ embeddedService: true });
+  service.disarmWatchdog();
+  const hungPid = service.pid;
+  assert.ok(isAlive(hungPid));
+
+  // The daemon still holds its port but stops answering in time.
+  const realProbe = service.probe.bind(service);
+  let unanswered = 3;
+  service.probe = async () => {
+    if (unanswered > 0) {
+      unanswered -= 1;
+      return false;
+    }
+    return realProbe();
+  };
+  let restarted = 0;
+  service.onRestarted = () => {
+    restarted += 1;
+  };
+
+  // A single slow answer changes nothing: the daemon is left alone.
+  await service.check();
+  assert.ok(isAlive(hungPid));
+  assert.equal(restarted, 0);
+
+  await service.check();
+  await service.check();
+
+  // The old daemon was ended before its port was asked of a new one.
+  assert.equal(isAlive(hungPid), false);
+  assert.equal(restarted, 1);
+  assert.equal(service.status().running, true);
+  assert.notEqual(service.pid, hungPid);
+});
+
+function isAlive(pid) {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 /** A port nothing listens on yet. */
 async function freePort() {
@@ -132,7 +184,7 @@ async function listenOn(port) {
  * HTTP server on the port it is given, writes its pid where the real daemon
  * does, and returns straight away.
  */
-async function serviceWithFakeBinary(port) {
+async function serviceWithFakeBinary(port, options = {}) {
   const serviceDir = await mkdtemp(join(tmpdir(), 'devmel-service-'));
   const workDir = await mkdtemp(join(tmpdir(), 'devmel-data-'));
 
@@ -160,6 +212,7 @@ async function serviceWithFakeBinary(port) {
     url: `http://127.0.0.1:${port}`,
     // The real binary takes `65536 + port`; the stand-in takes the port.
     argument: port,
+    ...options,
   });
   started.push(() => service.stop());
   return { service, workDir };
