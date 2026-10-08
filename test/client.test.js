@@ -373,6 +373,50 @@ test('a transmission the box could not carry is tried again', async () => {
   assert.equal(calls.length, 2);
 });
 
+test('a TOGGLE that may have gone out is not sent a second time', async () => {
+  // The gate opened on the first emission and the box timed out answering:
+  // a second TOGGLE would close it again.
+  const client = clientWith();
+  const toggle = [stateNote(STATE_VALUES.TOGGLE)];
+
+  stubFetch(() => jsonResponse(200, { type: 0x105 }));
+  await assert.rejects(() => client.transfer(DEVICE, toggle, { wait: true }), /TIMEOUT/);
+  assert.equal(calls.length, 1);
+
+  stubFetch(() => jsonResponse(200, { type: 0x102 }));
+  await assert.rejects(() => client.transfer(DEVICE, toggle, { wait: true }), /SYNCHRONIZATION/);
+  assert.equal(calls.length, 1);
+
+  stubFetch(() => jsonResponse(500));
+  await assert.rejects(() => client.transfer(DEVICE, toggle), /no radio confirmation/);
+  assert.equal(calls.length, 1);
+
+  stubFetch(() => {
+    throw Object.assign(new Error('The operation was aborted due to timeout'), {
+      name: 'TimeoutError',
+    });
+  });
+  await assert.rejects(() => client.transfer(DEVICE, toggle), /timeout/);
+  assert.equal(calls.length, 1);
+});
+
+test('a TOGGLE that provably never went out is tried again', async () => {
+  const client = clientWith();
+  const toggle = [stateNote(STATE_VALUES.TOGGLE)];
+
+  // BUSY: the box refused before transmitting anything.
+  stubFetch(() => jsonResponse(200, { type: 0x104 }));
+  await assert.rejects(() => client.transfer(DEVICE, toggle, { wait: true }), /BUSY/);
+  assert.equal(calls.length, 2);
+
+  // The service could not even be reached.
+  stubFetch(() => {
+    throw new TypeError('fetch failed', { cause: { code: 'ECONNREFUSED' } });
+  });
+  await assert.rejects(() => client.transfer(DEVICE, toggle), /fetch failed/);
+  assert.equal(calls.length, 2);
+});
+
 test('a refusal is not tried again: the answer would be the same', async () => {
   stubFetch(() => jsonResponse(405));
   const client = clientWith();

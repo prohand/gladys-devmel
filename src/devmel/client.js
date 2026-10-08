@@ -19,7 +19,13 @@ import { DEVICE_TRANSPORTS } from '@gladysassistant/integration-sdk';
 import { createLogger } from '../logging.js';
 import { checkSpurl, DEVICE_TYPES, MAX_COMMAND_REPEAT } from '../config.js';
 import { isOrder, isRepeatable, queryNote, QUERY_TYPES } from './notes.js';
-import { describeEventType, explainFailure, isErrorEvent, isPermanentFailure } from './events.js';
+import {
+  describeEventType,
+  describeFailure,
+  explainFailure,
+  isErrorEvent,
+  isPermanentFailure,
+} from './events.js';
 import { sentOrders } from './orders.js';
 
 const logger = createLogger({ name: 'airsend' });
@@ -299,7 +305,7 @@ export class AirSendClient {
         return await this.radio(() => this.transferLocal(device, notes, options), pace);
       } catch (err) {
         failure = err;
-        if (attempt >= ATTEMPTS || !isRetryable(err)) {
+        if (attempt >= ATTEMPTS || !isRetryable(err, notes)) {
           break;
         }
         logger.debug(`Sending the order to "${device.name}" again: ${err.message}`);
@@ -657,8 +663,25 @@ export class AirSendClient {
  * Is this failure worth another go? A box that answered nothing, timed out or
  * got no radio confirmation may well carry the next one; a box that refused the
  * connection string or the channel will refuse it exactly the same way.
+ *
+ * And a second go must not change what the order means. Most of those failures
+ * say nothing about whether the frame went out (a TIMEOUT, a lost SYNC, an HTTP
+ * 500 "no radio confirmation", a request cut after 8 s): the order may well
+ * have reached the motor. Sent again, an UP is still an UP — but a TOGGLE opens
+ * the gate and then closes it. So an order that is not repeatable is only tried
+ * again when it provably never reached the air.
  */
-function isRetryable(err) {
+function isRetryable(err, notes) {
+  if (!isTransient(err)) {
+    return false;
+  }
+  if (!isOrder(notes) || isRepeatable(notes)) {
+    return true;
+  }
+  return neverReachedTheAir(err);
+}
+
+function isTransient(err) {
   if (err?.eventType !== undefined) {
     return !isPermanentFailure(err.eventType);
   }
@@ -667,6 +690,29 @@ function isRetryable(err) {
     return true;
   }
   return status >= 500;
+}
+
+/**
+ * Network errors raised before the service received anything: the request
+ * never left this container, so the box cannot have transmitted it.
+ */
+const NOT_SENT_CODES = ['ECONNREFUSED', 'ENOTFOUND', 'EAI_AGAIN', 'EHOSTUNREACH', 'ENETUNREACH'];
+
+/** Is it CERTAIN the order never went out on the air? */
+function neverReachedTheAir(err) {
+  if (err?.eventType !== undefined) {
+    return describeFailure(err.eventType).carried === false;
+  }
+  if (err?.status !== undefined) {
+    // The service answered: whatever it says, the box may have transmitted.
+    return false;
+  }
+  const code = err?.cause?.code ?? err?.code;
+  if (code) {
+    return NOT_SENT_CODES.includes(code);
+  }
+  // Node's fetch names the cause; a bare message is matched as a last resort.
+  return NOT_SENT_CODES.some((name) => String(err?.message ?? '').includes(name));
 }
 
 /** A longer duration, as a log reads it. */
