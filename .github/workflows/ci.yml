@@ -8,7 +8,12 @@
 #   3. Tests     -> `node --test`, the built-in runner (no extra dependency).
 #
 # Runs on Node 24, the version the Docker image ships with (see the Dockerfile),
-# so the check exercises the exact runtime the integration runs on.
+# so the check exercises the exact runtime the integration runs on, and on
+# Node 22, the oldest one `engines` accepts.
+#
+# Pull requests also build the image (amd64, not pushed): a Dockerfile change,
+# such as the pinned AirSend Web Service checksum, would otherwise only fail at
+# release time.
 # -----------------------------------------------------------------------------
 name: CI
 
@@ -21,7 +26,11 @@ on:
 jobs:
   quality:
     runs-on: ubuntu-latest
-    name: Lint & test
+    name: Lint & test (Node ${{ matrix.node }})
+    strategy:
+      fail-fast: false
+      matrix:
+        node: [22, 24]
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -29,7 +38,7 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v7
         with:
-          node-version: 24
+          node-version: ${{ matrix.node }}
           cache: npm
 
       - name: Install dependencies
@@ -62,3 +71,22 @@ jobs:
 
       - name: Validate like the store indexer
         run: npx --yes github:GladysAssistant/integration-store .
+
+  docker:
+    # Build the image the way build.yml does, without pushing it.
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    name: Docker build
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Build (amd64, not pushed)
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          platforms: linux/amd64
+          push: false
