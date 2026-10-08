@@ -26,12 +26,19 @@ RUN apk add --no-cache dumb-init libstdc++
 # Only the binary for the image's architecture is kept. The build FAILS if the
 # tarball does not carry it: better a red build than an image whose local
 # channel silently cannot work.
+#
+# The tarball is a third-party binary that runs inside the integration: it is
+# fetched over HTTPS and pinned by its SHA-256, so the build also FAILS when
+# Devmel publishes a new one (or anything else answers at that URL). Upgrading
+# it is deliberate: download it, check it, and update both ARGs together.
 # -----------------------------------------------------------------------------
 ARG TARGETARCH
-ARG AIRSEND_SERVICE_URL="http://devmel.com/dl/AirSendWebService.tgz"
+ARG AIRSEND_SERVICE_URL="https://devmel.com/dl/AirSendWebService.tgz"
+ARG AIRSEND_SERVICE_SHA256="ca8544c4c0320a64b8491b5af8e81608022f41f8fee4fda68047dad920cffaf8"
 RUN set -eux; \
     mkdir -p /opt/airsend; \
     wget -q -O /tmp/airsend.tgz "$AIRSEND_SERVICE_URL"; \
+    echo "$AIRSEND_SERVICE_SHA256  /tmp/airsend.tgz" | sha256sum -c -; \
     tar -xzf /tmp/airsend.tgz -C /opt/airsend; \
     rm /tmp/airsend.tgz; \
     case "$TARGETARCH" in \
@@ -56,7 +63,7 @@ WORKDIR /app
 
 # Install the PROD dependencies first (better build cache).
 COPY package.json package-lock.json* ./
-RUN npm ci --omit=dev || npm install --omit=dev
+RUN npm ci --omit=dev && npm cache clean --force
 
 # Then the integration code.
 COPY index.js ./
