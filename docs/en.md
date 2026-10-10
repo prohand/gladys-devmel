@@ -446,6 +446,11 @@ what that position is. Measure it once and declare it with
 Without it, the shutter is reported as stopped somewhere in between — the
 honest answer.
 
+Most Somfy RTS remotes send that button as a plain **STOP**: it stops a shutter
+that moves, and sends a still one to its position. With `favorite_position`
+declared, the integration tells the two apart with the travel: a STOP heard
+while the shutter is still sends it to its favourite position in Gladys too.
+
 ## Listening to the radio
 
 The AirSend box can forward every frame it hears — a wall remote pressed by

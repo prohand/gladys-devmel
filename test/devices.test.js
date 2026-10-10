@@ -797,6 +797,46 @@ test('the favourite position of the motor is published when it was configured', 
   assert.deepEqual(statesOf('Sun sail'), [0]);
 });
 
+test('the "my" button of a Somfy remote, heard as STOP, sends a still shutter to its favourite', async (t) => {
+  // Seen in the field: the remote says "stop" for its middle button. On a
+  // shutter at rest that is "my": the motor runs to its programmed position,
+  // and Gladys kept showing the shutter where it was.
+  const { gladys, config, clock, positionsOf, statesOf } = setupTimed(t);
+  const sail = deviceNamed(config, 'Sun sail');
+  const stop = [{ kind: 'state', value: 'stop', command: 'stop' }];
+  shutter.travel.set(sail, 100);
+
+  await shutter.applyReadings(gladys, { device: sail, readings: stop });
+  // The same press, repeated by the remote 0.4 s later: no new order.
+  await clock.advance(400);
+  await shutter.applyReadings(gladys, { device: sail, readings: stop });
+  await clock.advance(10000);
+
+  assert.equal(positionsOf('Sun sail').at(-1), 40);
+  assert.deepEqual(statesOf('Sun sail'), [0]);
+});
+
+test('a STOP still stops a moving shutter that has a favourite position', async (t) => {
+  const { gladys, config, clock, positionsOf, statesOf } = setupTimed(t);
+  const sail = deviceNamed(config, 'Sun sail');
+  shutter.travel.set(sail, 100);
+
+  // Inverted: the radio DOWN opens it, so UP closes it, 10 s end to end.
+  await shutter.applyReadings(gladys, {
+    device: sail,
+    readings: [{ kind: 'level', value: 100, command: 'up' }],
+  });
+  await clock.advance(2000);
+  await shutter.applyReadings(gladys, {
+    device: sail,
+    readings: [{ kind: 'state', value: 'stop', command: 'stop' }],
+  });
+  await clock.advance(10000);
+
+  assert.equal(positionsOf('Sun sail').at(-1), 80);
+  assert.deepEqual(statesOf('Sun sail'), [-1, 0]);
+});
+
 test('a shutter with no favourite position configured says nothing about it', async (t) => {
   const { gladys, config, clock, send, positionsOf } = setupTimed(t);
 
