@@ -35,6 +35,7 @@ import {
   STATE_VALUES,
 } from '../devmel/notes.js';
 import { DIRECTIONS, ShutterTravel } from '../devmel/travel.js';
+import { PRESS_WINDOW_MS } from '../capabilities/scenes.js';
 import { idsFor, publishState, sendNotes } from './helpers.js';
 
 const KEY = 'shutter';
@@ -185,7 +186,12 @@ export const shutter = {
     let handled = 0;
     for (const reading of readings) {
       if (reading.command === COMMANDS.STOP) {
-        await freeze(gladys, device, ids);
+        // A remote repeats its frame for as long as the button is held: the
+        // second STOP of one press is no new order. Read as one, it would stop
+        // the shutter the first STOP has just sent to its favorite position.
+        if (!isRepeatedStop(device)) {
+          await freeze(gladys, device, ids);
+        }
       } else if (reading.command === COMMANDS.FAVORITE) {
         await goToFavorite(gladys, device, ids);
       } else if (reading.command === COMMANDS.UP || reading.command === COMMANDS.DOWN) {
@@ -351,6 +357,14 @@ function travelDirection(current, destination) {
  */
 async function freeze(gladys, device, ids) {
   const wasMoving = shutter.travel.isMoving(device);
+  // The Somfy "my" button and the STOP order are one and the same frame: it
+  // stops a shutter that moves, and sends a still one to the position
+  // programmed in its motor. The radio cannot tell the two apart, the travel
+  // can — once the user has said what that position is.
+  if (!wasMoving && hasFavorite(device)) {
+    await goToFavorite(gladys, device, ids);
+    return;
+  }
   const position = shutter.travel.stop(device);
   await publishState(gladys, ids.feature(FEATURE.STATE), SHUTTER_STATE.STOP);
   if (wasMoving && position !== null) {
@@ -371,9 +385,35 @@ async function goToFavorite(gladys, device, ids) {
     await publishState(gladys, ids.feature(FEATURE.STATE), SHUTTER_STATE.STOP);
     return;
   }
-  shutter.travel.set(device, favorite);
-  await publishState(gladys, ids.feature(FEATURE.STATE), toShutterState(favorite));
-  await publishPosition(gladys, device, ids, favorite);
+  // Travelled like any other order, so the position follows the shutter
+  // instead of jumping there.
+  const announced = toShutterState(favorite);
+  await publishState(gladys, ids.feature(FEATURE.STATE), announced);
+  await goTo(gladys, device, ids, favorite, { announced });
+}
+
+function hasFavorite(device) {
+  return device.favoritePosition !== null && device.favoritePosition !== undefined;
+}
+
+/**
+ * When each shutter last heard a STOP on the radio, keyed by platform id —
+ * per travel, so that whoever swaps the travel (the tests, with their own
+ * clock) starts from a clean slate.
+ */
+const lastStopHeard = new WeakMap();
+
+/** Is this STOP the same press as the one heard a moment ago? */
+function isRepeatedStop(device) {
+  const travel = shutter.travel;
+  if (!lastStopHeard.has(travel)) {
+    lastStopHeard.set(travel, new Map());
+  }
+  const heard = lastStopHeard.get(travel);
+  const now = travel.now();
+  const last = heard.get(device.platformId);
+  heard.set(device.platformId, now);
+  return last !== undefined && now - last < PRESS_WINDOW_MS;
 }
 
 /** Publish a position, on the shutters that expose one. */

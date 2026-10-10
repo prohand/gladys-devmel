@@ -465,6 +465,12 @@ laquelle. Mesurez-la une fois et déclarez-la avec `"favorite_position": 40` :
 appuyer sur ce bouton remonte alors 40 % dans Gladys. Sans elle, le volet est
 signalé arrêté quelque part entre les deux — la réponse honnête.
 
+La plupart des télécommandes Somfy RTS envoient ce bouton comme un simple
+**STOP** : il arrête un volet qui bouge, et envoie un volet à l'arrêt à sa
+position. Avec `favorite_position` déclarée, l'intégration fait la différence
+grâce à la course : un STOP reçu alors que le volet est à l'arrêt l'envoie
+aussi à sa position favorite dans Gladys.
+
 ## Écouter la radio
 
 Le boîtier AirSend peut retransmettre chaque trame qu'il entend — une
