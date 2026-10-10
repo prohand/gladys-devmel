@@ -36,6 +36,12 @@
 // A wall remote emits from ANOTHER address (that is what makes it another
 // emitter), so none of the three ever swallows it: what they suppress is the
 // integration hearing itself.
+//
+// The voice still expires, a minute after Gladys last used it — three times
+// the slowest echo seen. A device declared with the very address of its remote
+// (a remote copied into the AirSend app, the usual way for a fixed-code gate)
+// speaks with that voice too, and a voice that never expired turned every press
+// of that remote, an hour after a single order from Gladys, into an echo.
 // -----------------------------------------------------------------------------
 
 import { isSameChannel } from './notes.js';
@@ -50,6 +56,14 @@ export const DEFAULT_TTL_MS = 30000;
  */
 export const DEFAULT_CHANNEL_WINDOW_MS = 5000;
 
+/**
+ * How long a frame on a channel Gladys transmits on is still read as its echo,
+ * counted from the last order sent on it. Far above the slowest echo seen
+ * (twenty seconds), and short enough that a remote sharing that address — one
+ * copied into the AirSend app — is followed again a minute after an order.
+ */
+export const DEFAULT_VOICE_WINDOW_MS = 60000;
+
 /** How many orders are remembered at once, oldest evicted first. */
 export const DEFAULT_LIMIT = 64;
 
@@ -58,27 +72,31 @@ export class SentOrders {
    * @param {object} [options]
    * @param {number} [options.ttlMs] how long an order stays recognizable by uid
    * @param {number} [options.channelWindowMs] and by channel
+   * @param {number} [options.voiceWindowMs] and by voice
    * @param {number} [options.limit] orders kept before the oldest is dropped
    * @param {() => number} [options.now] clock, so tests can date orders
    */
   constructor({
     ttlMs = DEFAULT_TTL_MS,
     channelWindowMs = DEFAULT_CHANNEL_WINDOW_MS,
+    voiceWindowMs = DEFAULT_VOICE_WINDOW_MS,
     limit = DEFAULT_LIMIT,
     now = () => Date.now(),
   } = {}) {
     this.ttlMs = ttlMs;
     this.channelWindowMs = channelWindowMs;
+    this.voiceWindowMs = voiceWindowMs;
     this.limit = limit;
     this.now = now;
     /** @type {Map<string, object>} keyed by the thing uid, insertion-ordered */
     this.entries = new Map();
     /**
-     * The channels Gladys transmits on, keyed `pid-addr`: our own voice.
+     * The channels Gladys transmits on, keyed `pid-addr`: our own voice, and
+     * when it was last used.
      *
-     * Never pruned, unlike the orders above — it is not a memory of what was
-     * said, it is the list of addresses we say things from, and that does not
-     * expire. One entry per device driven since the integration started.
+     * Kept longer than the orders above (see `voiceWindowMs`): it is not a
+     * memory of what was said, it is the list of addresses we say things from.
+     * One entry per device driven since the integration started.
      *
      * @type {Map<string, object>}
      */
@@ -121,7 +139,12 @@ export class SentOrders {
     const voice = channelKey(device.channel);
     if (voice) {
       this.voices.delete(voice);
-      this.voices.set(voice, { name: entry.name, platformId: entry.platformId, channel: voice });
+      this.voices.set(voice, {
+        name: entry.name,
+        platformId: entry.platformId,
+        channel: voice,
+        at: entry.at,
+      });
       while (this.voices.size > this.limit) {
         this.voices.delete(this.voices.keys().next().value);
       }
@@ -159,8 +182,10 @@ export class SentOrders {
         return entry;
       }
     }
-    // Later than the window, and still on a channel we transmit on: ours.
-    return this.voices.get(channelKey(channel)) ?? null;
+    // Later than the window, and still on a channel we transmit on: ours —
+    // for a minute, not for ever (see `voiceWindowMs`).
+    const voice = this.voices.get(channelKey(channel));
+    return voice && now - voice.at <= this.voiceWindowMs ? voice : null;
   }
 
   /** Forget the orders nothing can echo any more. */

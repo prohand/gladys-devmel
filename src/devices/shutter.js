@@ -95,9 +95,18 @@ export const shutter = {
    * Pick the position tracking back up where it was left: without this, every
    * restart of the integration would start from "position unknown" and wait for
    * the next full travel to know anything again.
+   *
+   * Only when the travel knows nothing. This also runs on every reconnection to
+   * Gladys and every saved configuration, and then the value Gladys kept is
+   * older than the one in memory: setting it cancelled the movement under way —
+   * a shutter driven to 40 % never got its STOP and ran into its end stop,
+   * while Gladys stayed on the last position it had been told.
    */
   restoreStates(gladys, { device, features }) {
     if (!hasPosition(device)) {
+      return;
+    }
+    if (shutter.travel.positionOf(device) !== null || shutter.travel.isMoving(device)) {
       return;
     }
     const ids = idsFor(gladys, KEY, device);
@@ -120,9 +129,7 @@ export const shutter = {
     if (!hasPosition(device)) {
       return;
     }
-    if (shutter.travel.positionOf(device) === null && !shutter.travel.isMoving(device)) {
-      shutter.restoreStates(gladys, { device, features });
-    }
+    shutter.restoreStates(gladys, { device, features });
     // A moving shutter publishes its position on every tick anyway.
     const position = shutter.travel.positionOf(device);
     if (position === null || shutter.travel.isMoving(device)) {
@@ -360,8 +367,10 @@ async function freeze(gladys, device, ids) {
   // The Somfy "my" button and the STOP order are one and the same frame: it
   // stops a shutter that moves, and sends a still one to the position
   // programmed in its motor. The radio cannot tell the two apart, the travel
-  // can — once the user has said what that position is.
-  if (!wasMoving && hasFavorite(device)) {
+  // can — once the user has said what that position is, and only for a shutter
+  // it times: an untimed one never "moves" for the travel, and every STOP it
+  // was given mid-course was read as "go to your favourite position".
+  if (!wasMoving && hasFavorite(device) && shutter.travel.tracks(device)) {
     await goToFavorite(gladys, device, ids);
     return;
   }

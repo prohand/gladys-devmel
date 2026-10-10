@@ -6,6 +6,18 @@ All notable changes to this integration are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- A reconnection to Gladys, or a configuration saved, while a timed shutter is travelling no longer cancels the travel: a shutter driven to 40 % gets its STOP on time instead of running into its end stop, and a position known in memory is no longer replaced by the older one Gladys kept.
+- The Somfy "my" button, which most RTS remotes send as a plain STOP, sends a still timed shutter to its `favorite_position` in Gladys too, the Gladys STOP order included; the repeated frames of one press count as one STOP. A shutter without travel times keeps reading a STOP as a STOP: nothing says whether it moves.
+- A remote that shares the address of its device (a remote copied into the AirSend app) is followed again a minute after an order from Gladys, instead of being taken for Gladys' own echo for as long as the integration runs.
+- A press of a type `1` remote publishes one click, not one per frame: a scene "on click, toggle" no longer toggles two or three times.
+- "Attach a remote" keeps a remote already declared as `"remote": …` or as a lone `"remotes": …` instead of dropping it from the line to paste.
+- A connection string declared on the box alone serves every device: shutters and lamps are no longer "unreachable" and the status no longer says "not configured yet".
+- A device entry whose `type` is empty (`null`, `""`) is reported and ignored instead of being read as a box.
+- A Gladys Plus webhook payload already decoded is read instead of dropped.
+- Without any box to listen through (no connection string), listening, "Test the connection" and the widget say so, instead of pointing at a missing route or Gladys Plus.
+
 ## [2.2.3] - 2026-10-08
 
 - Maintenance release, no functional change.

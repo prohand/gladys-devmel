@@ -455,6 +455,12 @@ async function armListening() {
     logger.info('No route for the radio frames -> sensors are refreshed by polling only');
     return false;
   }
+  if (boxDevices(config).length === 0) {
+    // Nothing to bind through: without a connection string there is no box to
+    // ask, and a renewal timer would bind nothing every ten minutes.
+    logger.info('No AirSend box to listen through: paste the sp:// connection string first');
+    return false;
+  }
   if (listenState.plan.fallback) {
     // Binding still happens: generic 433 MHz is the only useful guess before
     // anything is declared. But it is a default, and a default that cannot
@@ -603,6 +609,11 @@ async function rearmListening() {
   if (!plan?.enabled) {
     throw new Error('Listening is turned off (listening channel set to 0)');
   }
+  if (boxDevices(config).length === 0) {
+    // Said as what it is: "no route" sent the user after a relay that was
+    // working, when what is missing is the connection string.
+    throw new Error('No AirSend box to listen through: paste the sp:// connection string first');
+  }
   if (listenState.error) {
     throw new Error(`The box refused the subscription: ${listenState.error}`);
   }
@@ -696,11 +707,18 @@ function webhookUrlOf(info) {
 }
 
 function parseWebhookBody(request) {
-  if (!request?.body) {
+  const body = request?.body;
+  if (!body) {
     return null;
   }
+  // The relay hands the body over as text, but nothing in the SDK contract
+  // promises it: an object already decoded went through `JSON.parse` as
+  // "[object Object]", and every frame of the relay was dropped.
+  if (typeof body === 'object' && !Buffer.isBuffer(body)) {
+    return body;
+  }
   try {
-    return JSON.parse(request.body);
+    return JSON.parse(String(body));
   } catch (err) {
     logger.warn(`Ignoring an unreadable webhook payload: ${err.message}`);
     return null;

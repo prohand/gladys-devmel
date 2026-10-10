@@ -337,3 +337,26 @@ test('the connection string can be shown without giving the password away', () =
   // string that shape may be anything, secret included.
   assert.equal(describeSpurl('whatever'), '8 characters, and no sp://…@ in them');
 });
+
+test('a connection string declared on the box serves every device when the global one is empty', () => {
+  const onBox = 'sp://boxpass@fe80::1?gw=0&rhost=192.168.1.60';
+  const global = 'sp://pass@fe80::2?gw=0&rhost=192.168.1.50';
+  const devices = JSON.stringify({
+    devices: { Box: { type: 0, spurl: onBox }, Shutter: { type: 4098, pid: 25455, addr: 8295 } },
+  });
+
+  const config = normalizeConfig({ devices });
+  assert.equal(config.spurl, onBox);
+  assert.deepEqual(config.spurlProblems, []);
+  // The global field, once filled, still wins.
+  assert.equal(normalizeConfig({ devices, spurl: global }).spurl, global);
+});
+
+test('an entry whose type was left empty is reported, not read as a box', () => {
+  const devices = parseDevices(
+    JSON.stringify({ devices: { A: { type: null }, B: { type: '' }, C: { type: false } } }),
+  );
+  assert.deepEqual(devices, []);
+  // A type written as text still counts.
+  assert.equal(parseDevices(JSON.stringify([{ name: 'Box', type: '0' }]))[0].rtype, 0);
+});

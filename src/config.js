@@ -109,6 +109,23 @@ export function normalizeConfig(raw = {}) {
   config.effectiveServiceUrl =
     config.service_url || (config.embeddedService ? EMBEDDED_SERVICE_URL : '');
 
+  config.devmelDevices = parseDevices(raw.devices, config);
+
+  // A box declared in the list "carries the connection string", as the
+  // documentation puts it — and a user who pasted it there only had a box that
+  // listened and read its sensors, while every shutter and lamp was
+  // "unreachable" and the status said "not configured yet". With the global
+  // field empty, the string of the (first) box that has one is the global one.
+  if (!config.spurl) {
+    const box = config.devmelDevices.find(
+      (device) => device.rtype === DEVICE_TYPES.BOX && device.spurl,
+    );
+    if (box) {
+      config.spurl = box.spurl;
+      logger.debug(`Connection string: the one declared on "${box.name}"`);
+    }
+  }
+
   // What is wrong with the connection string, before the box gets a chance to
   // answer 401 about it. Kept on the config so every screen that has to explain
   // the local channel says the same thing (see src/devmel/connection.js).
@@ -121,8 +138,6 @@ export function normalizeConfig(raw = {}) {
     // read by someone already looking at why the box refuses them.
     logger.debug(`Connection string: ${describeSpurl(config.spurl)}`);
   }
-
-  config.devmelDevices = parseDevices(raw.devices, config);
   return config;
 }
 
@@ -191,7 +206,9 @@ export function parseDeviceEntries(source) {
  * of the airsend.cloud export as well as from a nested `channel`.
  */
 export function channelOfEntry(entry) {
-  return entry && typeof entry === 'object' ? normalizeChannel(entry, Number(entry.type)) : null;
+  return entry && typeof entry === 'object'
+    ? normalizeChannel(entry, toDeviceType(entry.type))
+    : null;
 }
 
 function parseDeviceSource(source) {
@@ -223,7 +240,7 @@ function normalizeDevice(name, entry, config) {
     return null;
   }
   const deviceName = String(entry.name ?? name ?? '').trim();
-  const rtype = Number(entry.type);
+  const rtype = toDeviceType(entry.type);
   if (!deviceName) {
     logger.warn('Ignoring a device without a name');
     return null;
@@ -378,6 +395,21 @@ function normalizeRemotes(source, channel) {
     remotes.push({ id, source: address });
   }
   return remotes;
+}
+
+/**
+ * The airsend.cloud type of an entry, or NaN when it has none. `Number()` alone
+ * reads `null`, `""` and `false` as 0 — the type of a box — so an entry whose
+ * type was left empty used to become a box instead of being reported.
+ */
+function toDeviceType(value) {
+  if (typeof value === 'number') {
+    return value;
+  }
+  if (typeof value === 'string' && value.trim() !== '') {
+    return Number(value);
+  }
+  return Number.NaN;
 }
 
 /** First value of the list that is neither undefined nor null. */

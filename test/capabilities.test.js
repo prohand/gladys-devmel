@@ -324,6 +324,20 @@ test('the radio widget says what is missing before anything can work', () => {
   assert.deepEqual(validateWidgetContent(content), []);
 });
 
+test('the radio widget says "no box" rather than "no route" without a connection string', () => {
+  const gladys = createFakeGladys();
+  const content = buildRadioWidget({
+    gladys,
+    config: normalizeConfig({}),
+    listen: { url: null, error: null, plan: { enabled: true, channel: 1 } },
+  });
+  const status = content.components.find((component) => component.type === 'status');
+  const listening = status.items.find((item) => item.label.en === 'Listening');
+
+  assert.equal(listening.value.en, 'no box');
+  assert.deepEqual(validateWidgetContent(content), []);
+});
+
 test('every scene event carries each filter and variable its trigger declares', async () => {
   // A declared key missing from the data reads as null in a scene, and a filter
   // on it never matches: the trigger would look broken with nothing in the logs.

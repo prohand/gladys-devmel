@@ -15,7 +15,7 @@
 // -----------------------------------------------------------------------------
 
 import { DEVICE_TYPES } from '../config.js';
-import { describeFate } from '../devmel/connection.js';
+import { boxDevices, describeFate } from '../devmel/connection.js';
 import { describeAge, describeEmitter } from '../devmel/heard.js';
 import { hearsChannel } from '../devices/index.js';
 import { idsFor } from '../devices/helpers.js';
@@ -197,6 +197,10 @@ function listeningItem(config, listen, table) {
     };
   }
   if (!listen?.url) {
+    // No box at all is not a missing route: it is a missing connection string.
+    if (boxDevices(config).length === 0) {
+      return { label, value: { en: 'no box', fr: 'aucun boîtier' }, color: 'warning' };
+    }
     return { label, value: { en: 'no route', fr: 'aucune route' }, color: 'warning' };
   }
   const name = plan.name ?? table?.get?.(Number(plan.channel))?.name;

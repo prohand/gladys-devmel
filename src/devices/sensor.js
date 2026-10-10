@@ -18,6 +18,7 @@ import {
 } from '@gladysassistant/integration-sdk';
 import { DEVICE_TYPES } from '../config.js';
 import { READINGS } from '../devmel/notes.js';
+import { ordersOf, PRESS_WINDOW_MS } from '../capabilities/scenes.js';
 import { idsFor, publishState } from './helpers.js';
 
 const KEY = 'sensor';
@@ -31,6 +32,21 @@ const FEATURE = {
 
 // "Toggle", in the Gladys click catalog: the only order a radio remote sends.
 const CLICK_TOGGLE = 52;
+
+/**
+ * When each remote last clicked, per order (`platformId:order` -> ms).
+ *
+ * A press is several frames — the remote repeats itself for as long as the
+ * button is held — and a click published per frame ran a scene "on click,
+ * toggle the lamp" two or three times per press: back where it started. Same
+ * window, same rule as the `remote_pressed` trigger (see scenes.js).
+ */
+const lastClicks = new Map();
+
+/** Forget the clicks heard (tests). */
+export function resetSensorClicks() {
+  lastClicks.clear();
+}
 
 export const sensor = {
   key: KEY,
@@ -95,8 +111,14 @@ export const sensor = {
     };
   },
 
-  /** @returns {Promise<number>} how many readings this sensor published. */
-  async applyReadings(gladys, { device, readings, createdAt }) {
+  /**
+   * Publish what a frame said. `now` is the clock the presses are dated with,
+   * injectable for the tests.
+   *
+   * @returns {Promise<number>} how many readings this sensor acted on — a
+   *   repeated frame of a press already clicked counts: it was understood.
+   */
+  async applyReadings(gladys, { device, readings, createdAt, now = Date.now() }) {
     const ids = idsFor(gladys, KEY, device);
     const declared = new Set(device.features);
     let handled = 0;
@@ -105,13 +127,30 @@ export const sensor = {
       if (!feature || !declared.has(feature)) {
         continue;
       }
-      const value = feature === FEATURE.CLICK ? CLICK_TOGGLE : reading.value;
-      await publishState(gladys, ids.feature(feature), value, createdAt);
       handled += 1;
+      if (feature === FEATURE.CLICK) {
+        if (isSamePress(device, reading, now)) {
+          continue;
+        }
+        await publishState(gladys, ids.feature(feature), CLICK_TOGGLE, createdAt);
+        continue;
+      }
+      await publishState(gladys, ids.feature(feature), reading.value, createdAt);
     }
     return handled;
   },
 };
+
+/** Is this frame the same press as a click published a moment ago? */
+function isSamePress(device, reading, now) {
+  const key = `${device.platformId}:${ordersOf([reading])[0] ?? reading.kind}`;
+  const last = lastClicks.get(key);
+  if (last !== undefined && now - last < PRESS_WINDOW_MS) {
+    return true;
+  }
+  lastClicks.set(key, now);
+  return false;
+}
 
 const FEATURE_BY_READING = {
   [READINGS.TEMPERATURE]: FEATURE.TEMPERATURE,
