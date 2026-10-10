@@ -6,6 +6,8 @@ All notable changes to this integration are documented here. The format follows
 
 ## [Unreleased]
 
+## [2.2.4] - 2026-10-10
+
 ### Fixed
 
 - A reconnection to Gladys, or a configuration saved, while a timed shutter is travelling no longer cancels the travel: a shutter driven to 40 % gets its STOP on time instead of running into its end stop, and a position known in memory is no longer replaced by the older one Gladys kept.
@@ -230,7 +232,8 @@ First public release.
 
 - Compute the position of a shutter from its travel time
 
-[Unreleased]: https://github.com/prohand/gladys-devmel/compare/v2.2.3...HEAD
+[Unreleased]: https://github.com/prohand/gladys-devmel/compare/v2.2.4...HEAD
+[2.2.4]: https://github.com/prohand/gladys-devmel/compare/v2.2.3...v2.2.4
 [2.2.3]: https://github.com/prohand/gladys-devmel/compare/v2.2.2...v2.2.3
 [2.2.2]: https://github.com/prohand/gladys-devmel/compare/v2.2.1...v2.2.2
 [2.2.1]: https://github.com/prohand/gladys-devmel/compare/v2.2.0...v2.2.1
