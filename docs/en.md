@@ -233,7 +233,8 @@ under `channel` instead of the flat `pid` / `addr` pair. It stays JSON:
 | `features`          | On a sensor (`type: 1`): `temperature`, `humidity`, `illuminance`, `click` |
 
 A box declared without `sensors: true` creates no device in Gladys — it is
-only there to carry the connection string.
+only there to carry the connection string. When the global **Connection
+string** field is empty, the one declared on the box serves every device.
 
 ## Getting an order through
 
@@ -337,7 +338,9 @@ What identifies an echo is **the address it comes from**. The channel Gladys
 transmits on is the box's own: nothing else in the house speaks with that voice,
 whatever the delay. A box that takes ten seconds to repeat itself is no longer
 mistaken for a hand on a remote — which was enough to send a shutter stopped at
-40 % back to the top.
+40 % back to the top. That voice is Gladys' for a minute after its last order:
+a remote copied into the AirSend app (same address as the device, the usual
+way for a fixed-code gate) is followed again once that minute has passed.
 
 Two visible consequences:
 
@@ -450,6 +453,8 @@ Most Somfy RTS remotes send that button as a plain **STOP**: it stops a shutter
 that moves, and sends a still one to its position. With `favorite_position`
 declared, the integration tells the two apart with the travel: a STOP heard
 while the shutter is still sends it to its favourite position in Gladys too.
+That takes a timed shutter (`travel_up` / `travel_down`): without travel times
+nothing says whether it is moving, and a STOP stays a STOP.
 
 ## Listening to the radio
 
@@ -887,7 +892,8 @@ In the scene editor, under **Integrations**:
   drives and on the order (`up`, `down`, `stop`, `favorite`, `on`, `off`,
   `toggle`). The scene can read `device_name`, `order`, `pid` and `addr`.
   Gladys' own orders never fire it, so a scene cannot loop on itself. A remote
-  held down is one press, not one event per frame.
+  held down is one press, not one event per frame — and one click on the
+  `click` feature of a type `1` remote, too.
 - **A radio order failed** — the box did not carry an order Gladys gave:
   unreachable, connection string refused, box busy… The scene can read
   `device_name`, `reason` (`NETWORK`, `SECURITY`, `BUSY`, `HTTP_401`,

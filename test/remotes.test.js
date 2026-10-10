@@ -288,3 +288,26 @@ test('no address on a protocol the box decodes addresses on: no line, press agai
   assert.match(message.fr, /Rien n'a été rattaché/);
   assert.doesNotMatch(message.fr, /"remotes"/);
 });
+
+test('attaching a remote keeps the one declared without a list, or as "remote"', () => {
+  for (const extra of [{ remote: 42 }, { remotes: 42 }, { remote: { pid: 25455, addr: 42 } }]) {
+    const source = JSON.stringify({
+      devices: [{ name: 'Baie vitree', type: 4098, pid: 25455, addr: 8295, ...extra }],
+    });
+    const device = configOf(source).devmelDevices[0];
+
+    const line = attachRemote(source, device, { id: 25455, source: 99 });
+    const [entry] = JSON.parse(line).devices;
+
+    // Moved into the list, not left behind as a second declaration.
+    assert.equal(entry.remote, undefined, JSON.stringify(extra));
+    assert.deepEqual(configOf(line).devmelDevices[0].remotes, [
+      { id: 25455, source: 42 },
+      { id: 25455, source: 99 },
+    ]);
+
+    // And attaching the one already there changes nothing.
+    const again = attachRemote(source, device, { id: 25455, source: 42 });
+    assert.deepEqual(configOf(again).devmelDevices[0].remotes, [{ id: 25455, source: 42 }]);
+  }
+});

@@ -46,7 +46,11 @@ export function attachRemote(source, device, remote) {
   }
 
   const entry = found[1];
-  const declared = Array.isArray(entry.remotes) ? entry.remotes : [];
+  // Every spelling the configuration reads (see `normalizeRemotes`): a list, a
+  // single remote not wrapped in one, and the singular `remote`. Reading only
+  // the list dropped the remote already declared the other two ways.
+  const fromSingular = entry.remotes === undefined || entry.remotes === null;
+  const declared = listOf(fromSingular ? entry.remote : entry.remotes);
   const already = declared.some((known) =>
     isSameChannel(asChannel(known, device), { id: remote.id, source: remote.source }),
   );
@@ -60,6 +64,11 @@ export function attachRemote(source, device, remote) {
       ...declared,
       hasAddress(remote) ? { pid: remote.id, addr: remote.source } : { pid: remote.id },
     ];
+    // Moved into `remotes`, which the configuration reads first: left behind,
+    // the singular would be a remote declared twice, once for nothing.
+    if (fromSingular) {
+      delete entry.remote;
+    }
   }
   return JSON.stringify(parsed.root);
 }
@@ -78,6 +87,14 @@ function asChannel(declared, device) {
     // protocol alone must compare equal to the address-less emitter it names.
     source: address === undefined || address === null ? undefined : Number(address),
   };
+}
+
+/** A `remotes` field as a list: absent is none, a lone remote is one. */
+function listOf(value) {
+  if (value === undefined || value === null || value === '') {
+    return [];
+  }
+  return Array.isArray(value) ? value : [value];
 }
 
 /** Did the box decode an address for this emitter, or only its protocol? */

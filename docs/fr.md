@@ -242,7 +242,9 @@ sous `channel` plutôt que le couple `pid` / `addr` à plat. Cela reste du JSON 
 | `features`          | Sur un capteur (`type: 1`) : `temperature`, `humidity`, `illuminance`, `click` |
 
 Un boîtier déclaré sans `sensors: true` ne crée aucun appareil dans Gladys :
-il n'est là que pour porter la chaîne de connexion.
+il n'est là que pour porter la chaîne de connexion. Quand le champ global
+**Chaîne de connexion** est vide, celle déclarée sur le boîtier sert à tous les
+appareils.
 
 ## Faire passer un ordre
 
@@ -352,7 +354,10 @@ Ce qui identifie un écho, c'est **l'adresse d'où il part**. Le canal sur leque
 Gladys émet est celui du boîtier : rien d'autre dans la maison ne parle avec
 cette voix, quel que soit le délai. Un boîtier qui met dix secondes à se répéter
 n'est donc plus pris pour une main sur une télécommande — c'était de quoi
-renvoyer en haut un volet arrêté à 40 %.
+renvoyer en haut un volet arrêté à 40 %. Cette voix reste celle de Gladys une
+minute après son dernier ordre : une télécommande recopiée dans l'appli AirSend
+(même adresse que l'appareil, l'usage pour un portail à code fixe) est de
+nouveau suivie une fois cette minute passée.
 
 Deux conséquences visibles :
 
@@ -469,7 +474,9 @@ La plupart des télécommandes Somfy RTS envoient ce bouton comme un simple
 **STOP** : il arrête un volet qui bouge, et envoie un volet à l'arrêt à sa
 position. Avec `favorite_position` déclarée, l'intégration fait la différence
 grâce à la course : un STOP reçu alors que le volet est à l'arrêt l'envoie
-aussi à sa position favorite dans Gladys.
+aussi à sa position favorite dans Gladys. Il faut pour cela un volet minuté
+(`travel_up` / `travel_down`) : sans temps de course, rien ne dit s'il bouge, et
+un STOP reste un STOP.
 
 ## Écouter la radio
 
@@ -932,7 +939,8 @@ Dans l'éditeur de scènes, rubrique **Intégrations** :
   et sur l'ordre (`up`, `down`, `stop`, `favorite`, `on`, `off`, `toggle`). La
   scène peut lire `device_name`, `order`, `pid` et `addr`. Les ordres de Gladys
   ne le déclenchent jamais : une scène ne peut pas boucler sur elle-même. Une
-  télécommande tenue appuyée compte pour un seul appui.
+  télécommande tenue appuyée compte pour un seul appui — et pour un seul clic
+  sur la fonction `click` d'une télécommande de type `1`.
 - **Un ordre radio a échoué** — le boîtier n'a pas porté un ordre donné par
   Gladys : injoignable, chaîne de connexion refusée, boîtier occupé… La scène
   peut lire `device_name`, `reason` (`NETWORK`, `SECURITY`, `BUSY`, `HTTP_401`,

@@ -71,7 +71,7 @@ test('an order that can no longer echo is forgotten', () => {
 
   advance(31000);
   // The order itself is gone — what is left is the voice it was said with,
-  // which is not a memory of an order and does not expire.
+  // which is not a memory of an order and is kept longer (a minute).
   assert.equal(orders.match(echo('0xabc', { id: 900, source: 9 })), null);
   assert.equal(orders.entries.size, 0);
 });
@@ -96,4 +96,22 @@ test('the registry stays bounded', () => {
   orders.remember('0x3', SHUTTER);
 
   assert.deepEqual([...orders.entries.keys()], ['0x2', '0x3']);
+});
+
+test('a voice is ours for a minute, then a remote sharing it is followed again', () => {
+  // A device declared with the very address of its remote (a remote copied into
+  // the AirSend app) speaks with that voice too: an hour after a single order
+  // from Gladys, its presses used to be taken for echoes and dropped.
+  const { orders, advance } = registry();
+  orders.remember('0xabc', SHUTTER);
+
+  advance(60000);
+  assert.ok(orders.match({ type: 3, channel: SHUTTER.channel }));
+  advance(1);
+  assert.equal(orders.match({ type: 3, channel: SHUTTER.channel }), null);
+
+  // Spoken with again: ours again, for another minute.
+  orders.remember('0xdef', SHUTTER);
+  advance(30000);
+  assert.ok(orders.match({ type: 3, channel: SHUTTER.channel }));
 });

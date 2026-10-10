@@ -439,3 +439,26 @@ test('test_connection shows the connection string, without the password in it', 
   );
   assert.doesNotMatch(report.en, /0123456789abcdef/);
 });
+
+test('a connection string pasted on the box alone is a configured connection', async () => {
+  const devices = JSON.stringify({
+    devices: { Box: { type: 0, spurl: SPURL }, ...JSON.parse(DEVICES) },
+  });
+  const status = await describeConnection(fakeClient(), normalizeConfig({ devices }), RUNNING);
+  assert.equal(status.connected, true);
+});
+
+test('with no box to listen through, test_connection asks for the connection string', async () => {
+  const report = await testConnection(
+    fakeClient(),
+    normalizeConfig({ devices: DEVICES }),
+    RUNNING,
+    {
+      url: null,
+      error: null,
+    },
+  );
+  assert.match(report.en, /no AirSend box to listen through/);
+  assert.doesNotMatch(report.en, /Gladys Plus/);
+  assert.match(report.fr, /aucun boîtier/);
+});

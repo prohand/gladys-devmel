@@ -12,8 +12,9 @@ import {
   restoreDeviceStates,
 } from '../src/devices/index.js';
 import { shutter } from '../src/devices/shutter.js';
+import { resetSensorClicks, sensor } from '../src/devices/sensor.js';
 import { resetGatewayReads } from '../src/devices/gateway.js';
-import { NOTE_TYPES, STATE_VALUES } from '../src/devmel/notes.js';
+import { NOTE_TYPES, READINGS, STATE_VALUES } from '../src/devmel/notes.js';
 import { toThingUid } from '../src/devmel/client.js';
 import { HeardChannels } from '../src/devmel/heard.js';
 import { SentOrders } from '../src/devmel/orders.js';
@@ -1435,4 +1436,133 @@ test('a remote declared by its protocol alone follows the frames nobody can attr
 
   assert.equal(applied, 1);
   assert.deepEqual(gladys.statesOf('shutter:300-3:state'), [-1]);
+});
+
+// --- What a restart, a reconnection or a saved configuration must not undo ---
+
+test('a reconnection in the middle of a timed travel does not cancel its STOP', async (t) => {
+  const { gladys, config, client, clock, send, positionsOf } = setupTimed(t);
+  const externalId = deviceExternalId(config, 'Timed shutter');
+
+  await send('Timed shutter', 'state', -1);
+  await clock.advance(10000);
+  await send('Timed shutter', 'position', 40);
+  await clock.advance(3000);
+
+  // Gladys reconnects (or the configuration is saved): the initialization
+  // restores the states Gladys kept, older than what the travel knows.
+  await restoreDeviceStates(gladys, config, [
+    {
+      external_id: externalId,
+      features: [{ external_id: `${externalId}:position`, last_value: 15 }],
+    },
+  ]);
+  await clock.advance(5000);
+
+  // 40 % of a 20 s opening is 8 s: stopped on time, and known to be there.
+  assert.equal(client.noteAt(2).value, STATE_VALUES.STOP);
+  assert.equal(positionsOf('Timed shutter').at(-1), 40);
+});
+
+test('a position known in memory wins over the older one Gladys kept', async (t) => {
+  const { gladys, config, clock, send, positionsOf } = setupTimed(t);
+  const externalId = deviceExternalId(config, 'Timed shutter');
+
+  await send('Timed shutter', 'state', -1);
+  await clock.advance(10000);
+  await restoreDeviceStates(gladys, config, [
+    {
+      external_id: externalId,
+      features: [{ external_id: `${externalId}:position`, last_value: 60 }],
+    },
+  ]);
+
+  // Opening starts from the bottom it reached, not from a stale 60 %.
+  await send('Timed shutter', 'state', 1);
+  await clock.advance(2000);
+  assert.deepEqual(positionsOf('Timed shutter'), [0, 5, 10]);
+});
+
+test('an untimed shutter stopped mid-course is not sent to its favourite position', async (t) => {
+  // Nothing tells the travel this shutter moves, so it cannot tell "my" from
+  // a STOP: it is a STOP, the way it was before the favourite position existed.
+  const gladys = createFakeGladys();
+  const config = normalizeConfig({
+    devices: JSON.stringify({
+      devices: { Store: { type: 4099, favorite_position: 40, channel: { id: 710, source: 1 } } },
+    }),
+    spurl: 'sp://pass@[fe80::1]?rhost=192.168.1.50',
+  });
+  const client = createFakeClient({ config });
+  const clock = createFakeClock();
+  const previous = shutter.travel;
+  shutter.travel = new ShutterTravel({ now: clock.now, timers: clock.timers, tickMs: 1000 });
+  t.after(() => {
+    shutter.travel.clear();
+    shutter.travel = previous;
+  });
+
+  const found = findDeviceByExternalId(gladys, config, deviceExternalId(config, 'Store'));
+  for (const value of [-1, 1, 0]) {
+    await found.blueprint.onSetValue(gladys, {
+      device: found.device,
+      feature: featureOf(gladys, config, 'Store', 'state'),
+      value,
+      client,
+    });
+  }
+
+  assert.deepEqual(gladys.statesOf(`${deviceExternalId(config, 'Store')}:position`), [0, 100]);
+  assert.equal(gladys.statesOf(`${deviceExternalId(config, 'Store')}:state`).at(-1), 0);
+});
+
+// --- One press, one click -----------------------------------------------------
+
+const KEYFOB = JSON.stringify({
+  devices: { Keyfob: { type: 1, channel: { id: 610, source: 1 } } },
+});
+
+test('a press of a remote is one click, however many frames it sends', async (t) => {
+  resetSensorClicks();
+  t.after(resetSensorClicks);
+  const gladys = createFakeGladys();
+  const config = normalizeConfig({ devices: KEYFOB });
+  const frame = {
+    type: 3,
+    channel: { id: 610, source: 1 },
+    thingnotes: { notes: [{ type: NOTE_TYPES.STATE, value: STATE_VALUES.TOGGLE }] },
+  };
+
+  const applied = await applyEvents(
+    gladys,
+    config,
+    [frame, frame, frame],
+    new HeardChannels(),
+    new SentOrders(),
+    null,
+  );
+
+  // Every frame was understood; one click went to Gladys.
+  assert.equal(applied, 3);
+  assert.deepEqual(gladys.statesOf(`${deviceExternalId(config, 'Keyfob')}:click`), [52]);
+});
+
+test('another button clicks at once, the same one again after the press window', async (t) => {
+  resetSensorClicks();
+  t.after(resetSensorClicks);
+  const gladys = createFakeGladys();
+  const config = normalizeConfig({ devices: KEYFOB });
+  const device = deviceNamed(config, 'Keyfob');
+  const toggle = [{ kind: READINGS.TOGGLE, value: 'TOGGLE' }];
+
+  await sensor.applyReadings(gladys, { device, readings: toggle, now: 0 });
+  await sensor.applyReadings(gladys, { device, readings: toggle, now: 1000 });
+  await sensor.applyReadings(gladys, {
+    device,
+    readings: [{ kind: READINGS.LEVEL, value: 0 }],
+    now: 1200,
+  });
+  await sensor.applyReadings(gladys, { device, readings: toggle, now: 2600 });
+
+  assert.equal(gladys.statesOf(`${deviceExternalId(config, 'Keyfob')}:click`).length, 3);
 });

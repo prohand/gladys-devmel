@@ -221,6 +221,14 @@ function describeListening(config, listen, language) {
       ? `${channel}, trames poussées vers ${listen.url}.${coverage}`
       : `${channel}, frames pushed to ${listen.url}.${coverage}`;
   }
+  // No box to bind through: the route is not what is missing, the connection
+  // string is — and sending the user after Gladys Plus would be the wrong half.
+  if (boxDevices(config).length === 0) {
+    return language === 'fr'
+      ? `${channel} : aucun boîtier à qui demander l'écoute — collez d'abord la chaîne de ` +
+          'connexion sp://.'
+      : `${channel}: no AirSend box to listen through — paste the sp:// connection string first.`;
+  }
   // No route at all. With the bundled service that never happens (the loopback
   // callback is always there); with a service of the user's own it does, and
   // the relay is then the only way back in.
