@@ -182,3 +182,19 @@ test('the events of a body: the documented list, a lone event, or nothing', () =
   assert.deepEqual(eventsOf('<html>'), []);
   assert.deepEqual(eventsOf(''), []);
 });
+
+test('a body the Gladys Plus relay already decoded is read in every shape too', () => {
+  // The relay may hand the webhook an object rather than text, and the
+  // answer to a fire-and-forget transfer arrives as a lone event: it carries
+  // the failure of an order the box did not carry.
+  const failure = {
+    channel: { id: 25455, source: 8295 },
+    type: 260,
+    thingnotes: { uid: '0xabc', notes: [] },
+  };
+  assert.deepEqual(eventsOf(failure), [failure]);
+  assert.deepEqual(eventsOf([failure]), [failure]);
+  assert.deepEqual(eventsOf({ events: [failure] }), [failure]);
+  assert.deepEqual(eventsOf(Buffer.from(JSON.stringify(failure))), [failure]);
+  assert.deepEqual(eventsOf({ nothing: true }), []);
+});

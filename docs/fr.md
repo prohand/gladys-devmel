@@ -1005,8 +1005,11 @@ Dans l'éditeur de scènes, rubrique **Intégrations** :
   et sur l'ordre (`up`, `down`, `stop`, `favorite`, `on`, `off`, `toggle`). La
   scène peut lire `device_name`, `order`, `pid` et `addr`. Les ordres de Gladys
   ne le déclenchent jamais : une scène ne peut pas boucler sur elle-même. Une
-  télécommande tenue appuyée compte pour un seul appui — et pour un seul clic
-  sur la fonction `click` d'une télécommande de type `1`.
+  télécommande tenue appuyée compte pour un seul appui, aussi long soit-il — et
+  pour un seul clic sur la fonction `click` d'une télécommande de type `1`,
+  quel que soit le bouton (stop et _my_ compris). Cette fonction, comme les
+  mesures d'un capteur radio, peut aussi lancer une scène par les déclencheurs
+  d'appareil de Gladys.
 - **Un ordre radio a échoué** — le boîtier n'a pas porté un ordre donné par
   Gladys : injoignable, chaîne de connexion refusée, boîtier occupé… La scène
   peut lire `device_name`, `reason` (`NETWORK`, `SECURITY`, `BUSY`, `HTTP_401`,

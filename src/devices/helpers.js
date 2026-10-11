@@ -57,10 +57,13 @@ export function isOn(value) {
 }
 
 /**
- * Publish one feature state, dating it when it comes from a radio event.
+ * Publish one feature state, dating it when it comes from a radio event that
+ * arrived late.
  *
  * Events relayed by Gladys Plus can arrive late or out of order, so the box
- * timestamp — not the arrival time — is what the history of a SENSOR records.
+ * timestamp — not the arrival time — is what the history of a SENSOR records
+ * for a late frame. A frame heard just now is published undated: Gladys runs
+ * the scene triggers on undated states only (see `pastDateOf`).
  *
  * LIVE_STATE: never what a shutter, a switch or a light publishes. Gladys
  * files a dated state as a past one, and only makes it the current value when

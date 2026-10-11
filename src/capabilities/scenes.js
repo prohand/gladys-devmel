@@ -52,8 +52,10 @@ export const REMOTE_ORDERS = {
 
 /**
  * A press is several frames (the remote repeats itself for as long as the
- * button is held): the same order from the same device within this window is
- * the same press.
+ * button is held): the same order from the same device within this window of
+ * the PREVIOUS frame is the same press. Measured from the last frame, not the
+ * first one let through: a button held two seconds otherwise came out as two
+ * presses, and a scene "on toggle" put the lamp back where it was.
  */
 export const PRESS_WINDOW_MS = 1500;
 
@@ -143,7 +145,7 @@ export class SceneEvents {
    * @returns {Promise<boolean>} whether an event was published
    */
   async remotePressed(gladys, { externalId, name, order, channel }) {
-    if (!this.admit(`press:${externalId}:${order}`, PRESS_WINDOW_MS)) {
+    if (!this.admit(`press:${externalId}:${order}`, PRESS_WINDOW_MS, { sliding: true })) {
       return false;
     }
     return this.publish(gladys, SCENE_TRIGGERS.REMOTE_PRESSED, {
@@ -177,14 +179,26 @@ export class SceneEvents {
     });
   }
 
-  /** Is this event new, or the same one again within its window? */
-  admit(key, windowMs) {
+  /**
+   * Is this event new, or the same one again within its window?
+   *
+   * @param {object} [options]
+   * @param {boolean} [options.sliding] every repeat, dropped ones included,
+   *   pushes the window back — a press lasts as long as its frames keep
+   *   coming. Not for failures: a box failing every order must still say so
+   *   once a minute.
+   */
+  admit(key, windowMs, { sliding = false } = {}) {
     const now = this.now();
     const last = this.fired.get(key);
-    if (last !== undefined && now - last < windowMs) {
+    const repeat = last !== undefined && now - last < windowMs;
+    if (repeat && !sliding) {
       return false;
     }
     this.fired.set(key, now);
+    if (repeat) {
+      return false;
+    }
     // Bounded: a key per device and order, but the air is public.
     if (this.fired.size > 256) {
       this.fired.delete(this.fired.keys().next().value);

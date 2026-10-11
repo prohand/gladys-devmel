@@ -178,6 +178,24 @@ export function buildTransportEntries(gladys, config, client) {
   return entries;
 }
 
+/**
+ * Gladys takes at most this many transport badges per request (the SDK throws
+ * above it, before anything is sent).
+ */
+const MAX_TRANSPORTS_PER_REQUEST = 100;
+
+/**
+ * Publish the transport badge of every device, in as many requests as it
+ * takes: a house past a hundred devices sent them all at once, and every
+ * (re)connection failed on it.
+ */
+export async function publishTransportEntries(gladys, config, client) {
+  const entries = buildTransportEntries(gladys, config, client);
+  for (let start = 0; start < entries.length; start += MAX_TRANSPORTS_PER_REQUEST) {
+    await gladys.publishTransports(entries.slice(start, start + MAX_TRANSPORTS_PER_REQUEST));
+  }
+}
+
 function expectedTransport(client, device) {
   return client.canUseLocal(device) ? 'local' : 'unreachable';
 }
@@ -374,7 +392,7 @@ export async function applyEvents(
       }
       continue;
     }
-    const createdAt = toDate(event.timestamp);
+    const createdAt = pastDateOf(event.timestamp);
     const pressed = ordersOf(readings);
     for (const device of listeners) {
       // First of all, before anything is published: a repeat of the previous
@@ -519,7 +537,7 @@ async function applyOwnEcho(gladys, config, event, echo, { orders, scenes, clien
       `${leftovers.length === 0 ? '' : `, also reporting ${describeReadings(leftovers)}`}`,
   );
 
-  const createdAt = toDate(event.timestamp);
+  const createdAt = pastDateOf(event.timestamp);
   let applied = 0;
   for (const device of config.devmelDevices.filter((candidate) =>
     hearsChannel(candidate, event.channel),
@@ -746,9 +764,26 @@ function isDeclaredRemote(channel, config) {
   );
 }
 
-function toDate(timestampMs) {
+/**
+ * How old a frame must be, by the box timestamp, to be published as a past
+ * state rather than as the current one.
+ */
+const LATE_FRAME_MS = 30 * 1000;
+
+/**
+ * The date to publish a frame's readings with: none for a frame heard just
+ * now, its box timestamp for one that arrived late.
+ *
+ * Gladys files a dated state as history and runs no scene trigger on it — only
+ * a state published undated is checked against the scenes. Every frame carries
+ * a timestamp, and dating them all meant a scene "when the click of the keyfob
+ * is pressed" or "when the outdoor temperature drops below 0" never ran. Only
+ * a frame relayed well after the fact (Gladys Plus catching up) still keeps
+ * its date: it must not pass for the current reading, nor run a scene late.
+ */
+function pastDateOf(timestampMs, now = Date.now()) {
   const timestamp = Number(timestampMs);
-  if (!Number.isFinite(timestamp) || timestamp <= 0) {
+  if (!Number.isFinite(timestamp) || timestamp <= 0 || now - timestamp < LATE_FRAME_MS) {
     return undefined;
   }
   return new Date(timestamp).toISOString();

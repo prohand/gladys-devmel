@@ -30,7 +30,9 @@ const FEATURE = {
   CLICK: 'click',
 };
 
-// "Toggle", in the Gladys click catalog: the only order a radio remote sends.
+// "Toggle", in the Gladys click catalog: what every press of a radio remote is
+// published as, whichever button it was (the `remote_pressed` trigger is the
+// one that tells them apart).
 const CLICK_TOGGLE = 52;
 
 /**
@@ -139,7 +141,9 @@ export const sensor = {
     const declared = new Set(device.features);
     let handled = 0;
     for (const reading of readings) {
-      const feature = FEATURE_BY_READING[reading.kind];
+      // Any order is a press: the STOP and "my" buttons of a three-button
+      // remote decode to a state, not to a level, and clicked nothing.
+      const feature = reading.command ? FEATURE.CLICK : FEATURE_BY_READING[reading.kind];
       if (!feature || !declared.has(feature)) {
         continue;
       }
@@ -157,15 +161,16 @@ export const sensor = {
   },
 };
 
-/** Is this frame the same press as a click published a moment ago? */
+/**
+ * Is this frame the same press as the frame heard a moment ago? Every frame
+ * pushes the window back, the ones dropped included: a button held two
+ * seconds is still one press (see scenes.js).
+ */
 function isSamePress(device, reading, now) {
   const key = `${device.platformId}:${ordersOf([reading])[0] ?? reading.kind}`;
   const last = lastClicks.get(key);
-  if (last !== undefined && now - last < PRESS_WINDOW_MS) {
-    return true;
-  }
   lastClicks.set(key, now);
-  return false;
+  return last !== undefined && now - last < PRESS_WINDOW_MS;
 }
 
 const FEATURE_BY_READING = {

@@ -23,9 +23,9 @@ import { AirSendClient } from './src/devmel/client.js';
 import {
   applyEvents,
   buildDiscoveredDevices,
-  buildTransportEntries,
   findDeviceByExternalId,
   identifyDevice,
+  publishTransportEntries,
   replayDeviceStates,
   restoreDeviceStates,
   setKnownPosition,
@@ -34,7 +34,7 @@ import {
 } from './src/devices/index.js';
 import { boxDevices, describeConnection, testConnection } from './src/devmel/connection.js';
 import { AirSendService } from './src/devmel/service.js';
-import { CallbackServer } from './src/devmel/callback.js';
+import { CallbackServer, eventsOf } from './src/devmel/callback.js';
 import { indexChannels } from './src/devmel/listening.js';
 import { armListening, rearmedChannel, renewListening } from './src/devmel/subscription.js';
 import { createListenLoop } from './src/devmel/listenLoop.js';
@@ -194,7 +194,11 @@ gladys.onPoll(async (device) => {
     callbackUrl: radioCallbackUrl(),
     config,
   });
-  await publishDeviceTransports();
+  // The read worked: a badge Gladys refused is no reason to report the poll
+  // as failed.
+  await publishDeviceTransports().catch((err) =>
+    logger.debug(`Could not publish the transports: ${err.message}`),
+  );
 });
 
 // --- Device created / updated by the user ------------------------------------
@@ -224,9 +228,10 @@ gladys.onDeviceUpdated((device) => onDeviceSaved(device, 'onDeviceUpdated'));
 // Every frame the box hears on the listening channel — a wall remote pressed by
 // hand, a weather sensor waking up, the confirmation of an order we sent —
 // reaches this function, whichever route carried it: the loopback callback
-// above, or the `events` webhook relayed by Gladys Plus. Sensor readings are
-// dated with the box timestamp, because relayed events can arrive out of
-// order; the state of what a remote drives is not (see helpers.js).
+// above, or the `events` webhook relayed by Gladys Plus. Sensor readings that
+// arrive late are dated with the box timestamp, because relayed events can
+// arrive out of order; the state of what a remote drives is not (see
+// helpers.js).
 async function handleRadioEvents(events, route) {
   // The client too: an order heard from a wall remote cancels the repeats of
   // the Gladys order it overrides, and an order the box says it never carried
@@ -250,13 +255,14 @@ async function handleRadioEvents(events, route) {
   refreshWidget();
 }
 
-// `fire_and_forget` mode: the caller only awaits an acknowledgement.
+// `fire_and_forget` mode: the caller only awaits an acknowledgement. Read like
+// the loopback callback, every shape included: it is the same service posting.
 gladys.onWebhook('events', async (request) => {
-  const payload = parseWebhookBody(request);
-  if (!payload) {
+  const events = eventsOf(request?.body, 'webhook payload');
+  if (events.length === 0) {
     return;
   }
-  await handleRadioEvents(payload.events, 'Webhook');
+  await handleRadioEvents(events, 'Webhook');
 });
 
 // The Gladys Plus link changed: pick up the fresh URL and re-register it at the
@@ -353,17 +359,35 @@ gladys.onConfigUpdated(async (newConfig) => {
   logger.info('onConfigUpdated -> new configuration received');
   // A new `refresh` applies from the next tick.
   resetGatewayReads();
-  await initialize(newConfig);
+  await initializeOrReport(async () => newConfig, 'Initialization after a configuration save');
 });
 
 // --- Connection lifecycle ----------------------------------------------------
 // The SDK itself logs the WebSocket lifecycle under the `gladys-sdk` name: these
 // handlers only run the integration's own (re)initialization.
 gladys.on('connected', async () => {
+  await initializeOrReport(() => gladys.getConfig(), 'Post-connection initialization');
+});
+
+gladys.on('disconnected', () => {
+  stopListening();
+  stopKeepingWarm();
+});
+
+/**
+ * `initialize`, with its failure said: in the logs, and in the status of the
+ * Configuration screen. Whatever a handler throws, the SDK swallows into its
+ * own debug output, which no setting of the integration turns on — a save
+ * that failed used to leave no trace at all, and the old status in place.
+ *
+ * @param {() => Promise<object>} readConfig the raw configuration to apply
+ * @param {string} what the step, as the log line names it
+ */
+async function initializeOrReport(readConfig, what) {
   try {
-    await initialize(await gladys.getConfig());
+    await initialize(await readConfig());
   } catch (err) {
-    logger.error('Post-connection initialization failed', err);
+    logger.error(`${what} failed`, err);
     await gladys
       .setConnectionStatus(false, {
         en: 'Initialization failed, check the integration logs.',
@@ -371,12 +395,7 @@ gladys.on('connected', async () => {
       })
       .catch(() => {});
   }
-});
-
-gladys.on('disconnected', () => {
-  stopListening();
-  stopKeepingWarm();
-});
+}
 
 /**
  * Apply a configuration and (re)build everything that depends on it: the
@@ -412,8 +431,16 @@ async function initialize(rawConfig) {
   client.configure(config);
   logger.info(`${config.devmelDevices.length} Devmel device(s) configured`);
 
-  // publishDiscoveredDevices is idempotent (upsert by external_id).
-  await gladys.publishDiscoveredDevices(buildDiscoveredDevices(gladys, config));
+  // publishDiscoveredDevices is idempotent (upsert by external_id). A Gladys
+  // that refuses it does not make the box any less reachable: what only
+  // depends on the box — listening to the protocol just chosen, keeping the
+  // link warm — is still put in place, and the failure reported after that.
+  let discovery = null;
+  try {
+    await gladys.publishDiscoveredDevices(buildDiscoveredDevices(gladys, config));
+  } catch (err) {
+    discovery = err;
+  }
 
   // Resume where the last run left off: the position of a shutter is computed
   // from the travel of its motor, so it has to start from the value Gladys
@@ -430,8 +457,16 @@ async function initialize(rawConfig) {
   eventsWebhookUrl = webhookUrlOf(await gladys.getWebhooks().catch(() => null));
   await startListening();
 
-  await publishDeviceTransports();
+  // A badge is a nicety: one Gladys refused must not cost the keep-warm and
+  // the status below.
+  await publishDeviceTransports().catch((err) =>
+    logger.warn(`Could not publish the transports: ${err.message}`),
+  );
   startKeepingWarm();
+
+  if (discovery) {
+    throw discovery;
+  }
 
   // Application-level status, shown in the Configuration screen: distinct from
   // the container state machine, an integration can be RUNNING and still unable
@@ -659,10 +694,7 @@ function stopKeepingWarm() {
  * rendered as a badge in the Gladys UI.
  */
 async function publishDeviceTransports() {
-  const entries = buildTransportEntries(gladys, config, client);
-  if (entries.length > 0) {
-    await gladys.publishTransports(entries);
-  }
+  await publishTransportEntries(gladys, config, client);
 }
 
 function webhookUrlOf(info) {
@@ -670,25 +702,6 @@ function webhookUrlOf(info) {
     return null;
   }
   return info.webhooks?.find((webhook) => webhook.key === 'events')?.url ?? null;
-}
-
-function parseWebhookBody(request) {
-  const body = request?.body;
-  if (!body) {
-    return null;
-  }
-  // The relay hands the body over as text, but nothing in the SDK contract
-  // promises it: an object already decoded went through `JSON.parse` as
-  // "[object Object]", and every frame of the relay was dropped.
-  if (typeof body === 'object' && !Buffer.isBuffer(body)) {
-    return body;
-  }
-  try {
-    return JSON.parse(String(body));
-  } catch (err) {
-    logger.warn(`Ignoring an unreadable webhook payload: ${err.message}`);
-    return null;
-  }
 }
 
 // --- Graceful shutdown -------------------------------------------------------

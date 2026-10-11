@@ -948,8 +948,10 @@ In the scene editor, under **Integrations**:
   drives and on the order (`up`, `down`, `stop`, `favorite`, `on`, `off`,
   `toggle`). The scene can read `device_name`, `order`, `pid` and `addr`.
   Gladys' own orders never fire it, so a scene cannot loop on itself. A remote
-  held down is one press, not one event per frame — and one click on the
-  `click` feature of a type `1` remote, too.
+  held down is one press, however long, not one event per frame — and one
+  click on the `click` feature of a type `1` remote, too, whichever button
+  (stop and _my_ included). That feature, like the readings of a radio sensor,
+  can also start a scene through Gladys' own device triggers.
 - **A radio order failed** — the box did not carry an order Gladys gave:
   unreachable, connection string refused, box busy… The scene can read
   `device_name`, `reason` (`NETWORK`, `SECURITY`, `BUSY`, `HTTP_401`,

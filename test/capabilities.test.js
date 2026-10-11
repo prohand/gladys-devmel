@@ -143,6 +143,46 @@ test('a remote held down is one press, not one event per frame', async (t) => {
   assert.equal(gladys.sceneEvents.length, 2);
 });
 
+test('a remote held down for two seconds is still one press', async (t) => {
+  // Its frames keep coming every half second: the window runs from the last
+  // one, so a long press never splits into two — a scene "on toggle" would
+  // put the lamp back where it was.
+  t.after(() => shutter.travel.clear());
+  let now = 0;
+  const { gladys, config, scenes, heard, orders } = setup({ now: () => now });
+
+  for (let elapsed = 0; elapsed <= 2000; elapsed += 500) {
+    now = elapsed;
+    await applyEvents(
+      gladys,
+      config,
+      [frame({ id: 100, source: 11 }, STATE_VALUES.TOGGLE)],
+      heard,
+      orders,
+      scenes,
+    );
+  }
+
+  assert.deepEqual(
+    gladys.sceneEvents.map((event) => event.data.order),
+    ['toggle'],
+  );
+});
+
+test('a box failing every order still says so once a minute', async () => {
+  let now = 0;
+  const scenes = new SceneEvents({ now: () => now });
+  const gladys = createFakeGladys();
+  const failure = { externalId: 'switch:200-2', name: 'Kitchen plug', reason: 'BUSY' };
+
+  for (let elapsed = 0; elapsed <= 60 * 1000; elapsed += 20 * 1000) {
+    now = elapsed;
+    await scenes.orderFailed(gladys, failure);
+  }
+
+  assert.equal(gladys.sceneEvents.length, 2);
+});
+
 test("Gladys' own orders never fire remote_pressed: no scene can loop on itself", async (t) => {
   t.after(() => shutter.travel.clear());
   const { gladys, config, scenes, heard, orders } = setup();

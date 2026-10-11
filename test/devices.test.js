@@ -2483,3 +2483,105 @@ test('a weather sensor pasted without its features is told so, not blamed on its
   );
   assert.match(describeFate(config, entry, 'fr'), /ajoutez "temperature", "humidity"/);
 });
+
+test('a remote held down for two seconds is still one click', async (t) => {
+  // Its frames keep coming every half second: the window runs from the last
+  // one, or a scene "on click, toggle" toggles twice in one long press.
+  resetSensorClicks();
+  t.after(resetSensorClicks);
+  const gladys = createFakeGladys();
+  const config = normalizeConfig({ devices: KEYFOB });
+  const device = deviceNamed(config, 'Keyfob');
+  const toggle = [{ kind: READINGS.TOGGLE, value: 'TOGGLE' }];
+
+  for (let now = 0; now <= 2000; now += 500) {
+    await sensor.applyReadings(gladys, { device, readings: toggle, now });
+  }
+
+  assert.deepEqual(gladys.statesOf(`${deviceExternalId(config, 'Keyfob')}:click`), [52]);
+});
+
+test('every button of a three-button remote clicks, stop and "my" included', async (t) => {
+  resetSensorClicks();
+  t.after(resetSensorClicks);
+  const gladys = createFakeGladys();
+  const config = normalizeConfig({
+    devices: JSON.stringify({ devices: { Remote: { type: 1, channel: { id: 300, source: 9 } } } }),
+  });
+  const press = (value) => ({
+    type: 3,
+    channel: { id: 300, source: 9 },
+    thingnotes: { notes: [{ type: NOTE_TYPES.STATE, value }] },
+  });
+
+  const logs = captureLogs(() =>
+    applyEvents(
+      gladys,
+      config,
+      [
+        press(STATE_VALUES.UP),
+        press(STATE_VALUES.STOP),
+        press(STATE_VALUES.DOWN),
+        press(STATE_VALUES.USERPOSITION),
+      ],
+      new HeardChannels(),
+      new SentOrders(),
+      null,
+    ),
+  );
+
+  assert.equal(await logs.result, 4);
+  assert.deepEqual(
+    gladys.statesOf(`${deviceExternalId(config, 'Remote')}:click`),
+    [52, 52, 52, 52],
+  );
+  // Nothing claims a fully decoded STOP is a protocol only partially decoded.
+  assert.deepEqual(
+    logs.of('INFO').filter((line) => line.includes('says nothing')),
+    [],
+  );
+});
+
+test('a click and a reading heard live are current states, so Gladys scenes run on them', async (t) => {
+  // Gladys files a dated state as history and checks no scene trigger
+  // against it: every live frame dated by the box was a scene that never ran.
+  resetSensorClicks();
+  t.after(resetSensorClicks);
+  const gladys = createFakeGladys();
+  const config = normalizeConfig({
+    devices: JSON.stringify({
+      devices: {
+        Keyfob: { type: 1, channel: { id: 610, source: 1 } },
+        'Outdoor sensor': { type: 1, features: ['temperature'], channel: { id: 600, source: 6 } },
+      },
+    }),
+  });
+  const timestamp = Date.now() - 2000;
+
+  await applyEvents(
+    gladys,
+    config,
+    [
+      {
+        type: 3,
+        timestamp,
+        channel: { id: 610, source: 1 },
+        thingnotes: { notes: [{ type: NOTE_TYPES.STATE, value: STATE_VALUES.TOGGLE }] },
+      },
+      {
+        type: 3,
+        timestamp,
+        channel: { id: 600, source: 6 },
+        thingnotes: { notes: [{ type: NOTE_TYPES.TEMPERATURE, value: 272.15 }] },
+      },
+    ],
+    new HeardChannels(),
+    new SentOrders(),
+    null,
+  );
+
+  assert.deepEqual(gladys.published, [
+    { featureExternalId: `${deviceExternalId(config, 'Keyfob')}:click`, state: 52 },
+    { featureExternalId: `${deviceExternalId(config, 'Outdoor sensor')}:temperature`, state: -1 },
+  ]);
+});
