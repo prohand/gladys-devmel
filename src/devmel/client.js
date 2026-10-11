@@ -237,7 +237,9 @@ export class AirSendClient {
    * @param {string} [options.callbackUrl] where the box pushes the answer when
    *   `wait` is false
    * @param {number} [options.repeat] extra emissions, overriding the setting
-   * @returns {Promise<{ transport: string, notes: Array<object>, degraded: boolean }>}
+   * @param {() => boolean} [options.stale] asked when the order's turn on the
+   *   radio comes: true drops it unsent, and the answer says `dropped`
+   * @returns {Promise<{ transport: string, notes: Array<object>, degraded: boolean, dropped?: boolean }>}
    */
   async transfer(device, notes, options = {}) {
     if (!this.canUseLocal(device)) {
@@ -249,6 +251,7 @@ export class AirSendClient {
 
     const repeats = this.repeatsFor(device, notes, options);
     const order = {};
+    const previous = this.latestOrders.get(device.platformId);
     this.latestOrders.set(device.platformId, order);
     // What the user is about to wait through, split where it can be acted on:
     // the queue is ours, the box is not. Only the first emission is measured —
@@ -258,6 +261,17 @@ export class AirSendClient {
     try {
       answer = await this.emit(device, notes, options, { pace, order });
     } catch (err) {
+      if (err instanceof SupersededOrder) {
+        // Dropped by the caller's own `stale` check: nothing went on the air,
+        // nothing failed, and the badge has nothing new to say.
+        logger.debug(`Dropped an order to "${device.name}" that no longer applied`);
+        // Nor is it the device's last order: the repeats of the one before it
+        // are still owed.
+        if (this.latestOrders.get(device.platformId) === order) {
+          this.latestOrders.set(device.platformId, previous);
+        }
+        return { transport: null, degraded: false, notes: [], dropped: true };
+      }
       logger.warn(
         err.eventType === undefined
           ? `Local transfer failed for "${device.name}": ${err.message}`
@@ -385,6 +399,12 @@ export class AirSendClient {
           () => {
             if (checked && this.isOverridden(device, order, seen)) {
               throw new SupersededOrder(`A newer order to "${device.name}" replaced this one`);
+            }
+            // Asked of the first emission too: an order decided before its
+            // turn came (the STOP that ends a timed travel) may mean nothing
+            // by then, and saying it anyway undoes whatever happened since.
+            if (options.stale?.()) {
+              throw new SupersededOrder(`The order to "${device.name}" no longer applies`);
             }
             return this.transferLocal(device, notes, options);
           },

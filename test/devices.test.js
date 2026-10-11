@@ -19,6 +19,7 @@ import { AirSendClient, toThingUid } from '../src/devmel/client.js';
 import { HeardChannels } from '../src/devmel/heard.js';
 import { SentOrders } from '../src/devmel/orders.js';
 import { ShutterTravel } from '../src/devmel/travel.js';
+import { SceneEvents } from '../src/capabilities/scenes.js';
 import { createFakeGladys } from './helpers/fakeGladys.js';
 import { createFakeClient } from './helpers/fakeAirSend.js';
 import { createFakeClock } from './helpers/fakeClock.js';
@@ -1022,6 +1023,213 @@ test('a shutter with no reference yet is sent to the nearest end stop', async (t
   assert.equal(client.noteAt(0).value, STATE_VALUES.DOWN);
   assert.deepEqual(positionsOf('Timed shutter'), [0]);
   assert.equal(client.sent.length, 1);
+});
+
+test('a timed shutter is stopped on time when Gladys refuses the state of the order', async (t) => {
+  const { gladys, config, client, clock, send } = setupTimed(t);
+
+  await send('Timed shutter', 'state', -1);
+  await clock.advance(10000);
+
+  // The one publication made as the order goes out is refused (429: a scene
+  // closing every shutter in the same minute). The order is on the air.
+  const publishState = gladys.publishState;
+  gladys.publishState = async () => {
+    gladys.publishState = publishState;
+    throw new Error('Too many requests (429)');
+  };
+  await send('Timed shutter', 'position', 40);
+  assert.ok(shutter.travel.isMoving(deviceNamed(config, 'Timed shutter')));
+
+  // The stopwatch runs all the same: STOP at 40 %, not the top end stop.
+  await clock.advance(8000);
+  assert.equal(client.noteAt(2).value, STATE_VALUES.STOP);
+  assert.equal(shutter.travel.positionOf(deviceNamed(config, 'Timed shutter')), 40);
+});
+
+test('a STOP heard while the order before it is still being published stops the shutter', async (t) => {
+  const { gladys, config, clock, send, positionsOf } = setupTimed(t);
+  const device = deviceNamed(config, 'Timed shutter');
+
+  await send('Timed shutter', 'state', 1);
+  await clock.advance(25000);
+
+  // Gladys takes its time answering: DOWN, then STOP from the wall remote a
+  // moment later, while the state of the DOWN is still on its way.
+  const publishState = gladys.publishState;
+  const held = [];
+  gladys.publishState = (...args) =>
+    new Promise((resolve) => held.push(() => publishState(...args).then(resolve)));
+  const down = applyEvents(gladys, config, [
+    radioState(config, 'Timed shutter', STATE_VALUES.DOWN),
+  ]);
+  await new Promise(setImmediate);
+  const stop = applyEvents(gladys, config, [
+    radioState(config, 'Timed shutter', STATE_VALUES.STOP),
+  ]);
+  await new Promise(setImmediate);
+  gladys.publishState = publishState;
+  for (const release of held) {
+    release();
+  }
+  await Promise.all([down, stop]);
+
+  // The STOP came last and wins: no travel starting after it.
+  assert.equal(shutter.travel.isMoving(device), false);
+  await clock.advance(15000);
+  assert.equal(shutter.travel.positionOf(device), 100);
+  assert.notEqual(positionsOf('Timed shutter').at(-1), 0);
+});
+
+test('a timed shutter is stopped on time even when Gladys is slow to take its positions', async (t) => {
+  const { gladys, config, client, clock, send } = setupTimed(t);
+
+  await send('Timed shutter', 'state', -1);
+  await clock.advance(10000);
+  await send('Timed shutter', 'position', 40);
+
+  // Gladys is loaded: a position published on the way is answered much later.
+  const publishState = gladys.publishState;
+  const held = [];
+  gladys.publishState = (...args) =>
+    new Promise((resolve) => held.push(() => publishState(...args).then(resolve)));
+  await clock.advance(8000);
+
+  // The STOP is due at 8 s and went out at 8 s, not once Gladys answered.
+  assert.equal(client.noteAt(2)?.value, STATE_VALUES.STOP);
+  gladys.publishState = publishState;
+  for (const release of held) {
+    release();
+  }
+  await clock.advance(1000);
+  assert.equal(shutter.travel.positionOf(deviceNamed(config, 'Timed shutter')), 40);
+});
+
+test('a timed shutter whose STOP could not go out is followed to its end stop, and it is said', async (t) => {
+  const { gladys, config, client, clock, send, positionsOf } = setupTimed(t);
+  const previousScenes = shutter.scenes;
+  shutter.scenes = new SceneEvents();
+  t.after(() => {
+    shutter.scenes = previousScenes;
+  });
+
+  await send('Timed shutter', 'state', -1);
+  await clock.advance(10000);
+  await send('Timed shutter', 'position', 40);
+
+  // The service restarts at the worst moment: the STOP never reaches the air.
+  const transfer = client.transfer;
+  client.transfer = async (device, notes, options) => {
+    if (notes[0].value === STATE_VALUES.STOP) {
+      throw new Error('fetch failed');
+    }
+    return transfer(device, notes, options);
+  };
+  await clock.advance(8000);
+
+  // Nothing stopped the motor: it runs on to the top, and so does the travel.
+  assert.ok(shutter.travel.isMoving(deviceNamed(config, 'Timed shutter')));
+  await clock.advance(12000);
+  assert.equal(shutter.travel.positionOf(deviceNamed(config, 'Timed shutter')), 100);
+  assert.equal(positionsOf('Timed shutter').at(-1), 100);
+  assert.deepEqual(
+    gladys.sceneEvents.map((event) => [event.key, event.data.device_name, event.data.reason]),
+    [['order_failed', 'Timed shutter', 'ERROR']],
+  );
+});
+
+test('the STOP of a timed travel is dropped when a wall remote set the shutter off meanwhile', async (t) => {
+  const { gladys, config, client, clock, send, positionsOf, statesOf } = setupTimed(t);
+
+  await send('Timed shutter', 'state', -1);
+  await clock.advance(10000);
+  await send('Timed shutter', 'position', 40);
+
+  // The radio is busy with another order when the STOP falls due...
+  const transfer = client.transfer;
+  let release = null;
+  client.transfer = async (device, notes, options) => {
+    if (notes[0].value === STATE_VALUES.STOP) {
+      await new Promise((resolve) => {
+        release = resolve;
+      });
+    }
+    return transfer(device, notes, options);
+  };
+  await clock.advance(8000);
+  assert.ok(release, 'the STOP waits for the radio');
+
+  // ...and the user presses UP on the wall remote in the meantime.
+  const remote = {
+    type: 3,
+    channel: { id: 700, source: 42 },
+    thingnotes: { notes: [{ type: NOTE_TYPES.STATE, value: STATE_VALUES.UP }] },
+  };
+  await applyEvents(gladys, config, [remote], new HeardChannels(), new SentOrders());
+  release();
+  await clock.advance(15000);
+
+  // The STOP never went out, and the old arrival did not land over the UP.
+  assert.deepEqual(
+    client.sent.map((entry) => entry.notes[0].value),
+    [STATE_VALUES.DOWN, STATE_VALUES.UP],
+  );
+  assert.equal(positionsOf('Timed shutter').at(-1), 100);
+  assert.equal(statesOf('Timed shutter').at(-1), 1);
+  assert.equal(shutter.travel.positionOf(deviceNamed(config, 'Timed shutter')), 100);
+});
+
+test('a moving shutter that reaches the position asked for is stopped there', async (t) => {
+  const { config, client, clock, send, positionsOf } = setupTimed(t);
+  const device = deviceNamed(config, 'Timed shutter');
+
+  await send('Timed shutter', 'state', 1);
+  await clock.advance(25000);
+  await send('Timed shutter', 'state', -1);
+  await clock.advance(4500);
+
+  // Closing, at 55 %, and an order takes half a second to reach the air: by
+  // then the shutter is at 50 %, which is where it was asked to go.
+  const transfer = client.transfer;
+  client.transfer = async (...args) => {
+    await clock.advance(500);
+    return transfer(...args);
+  };
+  await send('Timed shutter', 'position', 50);
+  assert.equal(client.sent.at(-1).notes[0].value, STATE_VALUES.STOP);
+  assert.equal(shutter.travel.isMoving(device), false);
+  client.transfer = transfer;
+
+  // Asked for exactly where a moving shutter is: stopped there as well.
+  await send('Timed shutter', 'state', 1);
+  await clock.advance(3000);
+  const passing = shutter.travel.positionOf(device);
+  await send('Timed shutter', 'position', passing);
+  assert.equal(client.sent.at(-1).notes[0].value, STATE_VALUES.STOP);
+  await clock.advance(20000);
+  assert.equal(positionsOf('Timed shutter').at(-1), passing);
+});
+
+test('two positions asked at once are followed in turn, the last one winning', async (t) => {
+  const { client, clock, send, positionsOf } = setupTimed(t);
+
+  await send('Timed shutter', 'state', 1);
+  await clock.advance(25000);
+
+  const transfer = client.transfer;
+  client.transfer = async (...args) => {
+    await clock.advance(800);
+    return transfer(...args);
+  };
+  await Promise.all([
+    send('Timed shutter', 'position', 40),
+    send('Timed shutter', 'position', 100),
+  ]);
+  client.transfer = transfer;
+  await clock.advance(30000);
+
+  assert.equal(positionsOf('Timed shutter').at(-1), 100);
+  assert.equal(client.sent.at(-1).notes[0].value, STATE_VALUES.UP);
 });
 
 // --- The integration hearing itself ------------------------------------------

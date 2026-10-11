@@ -25,6 +25,7 @@ export async function sendNotes(client, device, notes, options = {}) {
     uid: options.uid ?? device.platformId,
     wait: options.wait ?? device.wait,
     callbackUrl: options.callbackUrl,
+    stale: options.stale,
   });
 }
 

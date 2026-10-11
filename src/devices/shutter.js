@@ -35,7 +35,7 @@ import {
   STATE_VALUES,
 } from '../devmel/notes.js';
 import { DIRECTIONS, ShutterTravel } from '../devmel/travel.js';
-import { PRESS_WINDOW_MS } from '../capabilities/scenes.js';
+import { failureReason, PRESS_WINDOW_MS, sceneEvents } from '../capabilities/scenes.js';
 import { idsFor, publishState, sendNotes } from './helpers.js';
 
 const KEY = 'shutter';
@@ -58,6 +58,9 @@ export const shutter = {
    * than in a module constant so the tests can drive its clock.
    */
   travel: new ShutterTravel(),
+
+  /** Where `order_failed` is fired from, held here for the same reason. */
+  scenes: sceneEvents,
 
   buildDevice(gladys, device) {
     const ids = idsFor(gladys, KEY, device);
@@ -170,7 +173,6 @@ export const shutter = {
       await freeze(gladys, device, ids);
       return;
     }
-    await publishState(gladys, ids.feature(FEATURE.STATE), state);
     await goTo(gladys, device, ids, state === SHUTTER_STATE.OPEN ? 100 : 0, {
       announced: state,
     });
@@ -205,9 +207,7 @@ export const shutter = {
         // The reading is in radio coordinates, like every level here: a shutter
         // wired upside down opens by going down.
         const destination = device.invert ? 100 - reading.value : reading.value;
-        const announced = toOrderedState(destination);
-        await publishState(gladys, ids.feature(FEATURE.STATE), announced);
-        await goTo(gladys, device, ids, destination, { announced });
+        await goTo(gladys, device, ids, destination, { announced: toOrderedState(destination) });
       } else if (reading.kind === READINGS.LEVEL) {
         const position = device.invert ? 100 - reading.value : reading.value;
         shutter.travel.set(device, position);
@@ -256,33 +256,36 @@ function hasPosition(device) {
  * otherwise publish the destination straight away — the protocol offers nothing
  * better, and it is what the official Devmel component does.
  *
- * `announced` is the state already published for the order under way, so the
- * arrival only publishes a state when it says something new (a shutter told to
- * open is "open" both before and after the travel; one told to go to 40 % ends
- * up stopped in between).
+ * `announced` is the state the order announces, published here, so the arrival
+ * only publishes a state when it says something new (a shutter told to open is
+ * "open" both before and after the travel; one told to go to 40 % ends up
+ * stopped in between). `direction` is the one the radio order was given, when
+ * the caller chose it.
+ *
+ * Called once the order is on the air, and the travel is armed before anything
+ * is published: a publication Gladys refused (429, a timeout) left the STOP of
+ * a shutter driven to 40 % unarmed, and one merely slow let a STOP heard
+ * meanwhile find a still shutter, then the travel start after it. Nor does a
+ * refused state make the order fail: it went out.
  */
-async function goTo(gladys, device, ids, destination, { announced = null, onArrival } = {}) {
-  const direction = travelDirection(shutter.travel.positionOf(device), destination);
+async function goTo(
+  gladys,
+  device,
+  ids,
+  destination,
+  { announced = null, onArrival = null, direction = null } = {},
+) {
+  const way = direction ?? travelDirection(shutter.travel.positionOf(device), destination);
   const moving =
-    direction !== null &&
+    way !== null &&
     shutter.travel.move(device, {
-      direction,
+      direction: way,
       target: destination,
+      arrive: onArrival,
       publish: async (position, { done }) => {
+        await publishPosition(gladys, device, ids, position);
         if (!done) {
-          await publishPosition(gladys, device, ids, position);
           return;
-        }
-        // The STOP of a shutter driven to a mid-course position goes out FIRST:
-        // a radio order is time-critical, a publication is not, and a Gladys
-        // that fails to take the position must not leave the motor running to
-        // its end stop.
-        try {
-          if (onArrival) {
-            await onArrival();
-          }
-        } finally {
-          await publishPosition(gladys, device, ids, position);
         }
         const arrived = toShutterState(position);
         if (arrived !== announced) {
@@ -290,25 +293,66 @@ async function goTo(gladys, device, ids, destination, { announced = null, onArri
         }
       },
     });
-  if (moving) {
-    return;
+  if (!moving) {
+    shutter.travel.set(device, destination);
   }
-  shutter.travel.set(device, destination);
-  await publishPosition(gladys, device, ids, destination);
+  if (announced !== null) {
+    try {
+      await publishState(gladys, ids.feature(FEATURE.STATE), announced);
+    } catch (error) {
+      logger.warn(`State of "${device.name}" not published: ${error.message}`);
+    }
+  }
+  if (!moving) {
+    await publishPosition(gladys, device, ids, destination);
+  }
 }
 
 /**
  * Drive a shutter that has no positionable motor to a position, with a
  * stopwatch: start it in the right direction and stop it when the travel says
  * it has arrived. This is what gives a plain 4098 a usable position slider.
+ *
+ * One positioning at a time per shutter: each decides from where the shutter
+ * is, and two sent together (40 %, then 100 %) both read where it was before
+ * either had started — the second found it "already at 100 %" and was dropped.
  */
-async function driveTo(gladys, device, ids, target, { client, callbackUrl, uid }) {
+function driveTo(gladys, device, ids, target, radio) {
+  const previous = driving.get(device.platformId) ?? Promise.resolve();
+  const run = previous.then(() => drive(gladys, device, ids, target, radio));
+  const tail = run.catch(() => {});
+  driving.set(device.platformId, tail);
+  tail.then(() => {
+    if (driving.get(device.platformId) === tail) {
+      driving.delete(device.platformId);
+    }
+  });
+  return run;
+}
+
+/** The positioning under way per shutter, by platform id (see `driveTo`). */
+const driving = new Map();
+
+async function drive(gladys, device, ids, target, { client, callbackUrl, uid }) {
   const current = shutter.travel.positionOf(device);
   // With no reference, the only position this shutter can be sent to is an end
   // stop: the motor stops there by itself, and that is where the reference for
   // every later positioning is established.
   const destination = current === null ? (target < 50 ? 0 : 100) : target;
-  const direction = travelDirection(current, destination);
+  let direction = travelDirection(current, destination);
+  if (direction === null && shutter.travel.isMoving(device)) {
+    // Moving, and passing the position asked for right now: "already there"
+    // let it run on. An end stop is where it is leaving: it is sent back. A
+    // position in between is where it is: it is stopped there.
+    if (destination <= 0 || destination >= 100) {
+      direction = destination >= 100 ? DIRECTIONS.UP : DIRECTIONS.DOWN;
+    } else {
+      logger.info(`"${device.name}" -> ${destination} % (passing it: stopped there)`);
+      await sendNotes(client, device, [stateNote(STATE_VALUES.STOP)], { uid, callbackUrl });
+      await freeze(gladys, device, ids);
+      return;
+    }
+  }
   if (direction === null) {
     logger.info(`"${device.name}" is already at ${destination} %`);
     await publishPosition(gladys, device, ids, destination);
@@ -325,14 +369,50 @@ async function driveTo(gladys, device, ids, target, { client, callbackUrl, uid }
     uid,
     callbackUrl,
   });
-  await publishState(gladys, ids.feature(FEATURE.STATE), state);
+  // The order took its time to reach the air, and a shutter already moving
+  // that way may have reached the target meanwhile: it is stopped where it is.
+  // Tracked as the travel to the target instead, it got no STOP at all (on the
+  // target) or one late and in the wrong place (past it).
+  const reached = shutter.travel.positionOf(device);
+  if (
+    reached !== null &&
+    destination > 0 &&
+    destination < 100 &&
+    (direction === DIRECTIONS.UP ? reached >= destination : reached <= destination)
+  ) {
+    logger.info(`"${device.name}" reached ${destination} % before the order went out: stopped`);
+    await sendNotes(client, device, [stateNote(STATE_VALUES.STOP)], { uid, callbackUrl });
+    await freeze(gladys, device, ids);
+    return;
+  }
   await goTo(gladys, device, ids, destination, {
     announced: state,
+    direction,
     onArrival: async () => {
       // At an end stop the motor stops on its own; anywhere else it has to be
       // told, at the very moment the travel says it is there.
-      if (destination > 0 && destination < 100) {
-        await sendNotes(client, device, [stateNote(STATE_VALUES.STOP)], { uid, callbackUrl });
+      if (destination <= 0 || destination >= 100) {
+        return;
+      }
+      try {
+        await sendNotes(client, device, [stateNote(STATE_VALUES.STOP)], {
+          uid,
+          callbackUrl,
+          // Dropped if, by its turn on the radio, a newer order has set the
+          // shutter off again (a wall remote pressed meanwhile): it would stop
+          // the shutter the user just sent somewhere else.
+          stale: () => shutter.travel.isMoving(device),
+        });
+      } catch (err) {
+        // The one failure of this order that matters most, and the only one
+        // nobody was waiting for: Gladys was answered when the travel started.
+        await shutter.scenes.orderFailed(gladys, {
+          externalId: ids.device,
+          name: device.name,
+          reason: failureReason(err),
+          message: err.message,
+        });
+        throw err;
       }
     },
   });
@@ -396,9 +476,7 @@ async function goToFavorite(gladys, device, ids) {
   }
   // Travelled like any other order, so the position follows the shutter
   // instead of jumping there.
-  const announced = toShutterState(favorite);
-  await publishState(gladys, ids.feature(FEATURE.STATE), announced);
-  await goTo(gladys, device, ids, favorite, { announced });
+  await goTo(gladys, device, ids, favorite, { announced: toShutterState(favorite) });
 }
 
 function hasFavorite(device) {

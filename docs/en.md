@@ -418,7 +418,9 @@ moment it stops by itself, and write the two durations down:
 
 From then on the integration follows the shutter second by second, whether the
 order came from Gladys or from a wall remote it heard on the radio (which needs
-the listening channel below). Three things follow:
+the listening channel below). When many shutters move at once, each publishes
+its position less often, so together they stay well under the 300 states a
+minute Gladys accepts and every end stop gets through. Three things follow:
 
 - a **`4098` gets a position too** — the feature appears as soon as the shutter
   is timed, and its slider drives the motor with a timed Open/Stop: the
@@ -448,7 +450,11 @@ Two more things worth knowing:
   again from the value Gladys kept. A shutter you add in Gladys after the
   integration started gets the position already known straight away;
 - a shutter driven to a position is **stopped on time even when Gladys is
-  briefly unreachable**: the STOP goes out before the position is published.
+  briefly unreachable or slow to answer**: the STOP goes out before the
+  position is published, and never waits for Gladys. A STOP the box could not
+  send fires the **A radio order failed** trigger, and the position follows the
+  shutter to its end stop, since nothing stopped it. A STOP still waiting for
+  the radio when a wall remote sets the shutter off again is dropped.
 
 ### The favourite position
 

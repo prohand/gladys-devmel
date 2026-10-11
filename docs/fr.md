@@ -440,7 +440,10 @@ les deux durées :
 
 L'intégration suit alors le volet seconde par seconde, que l'ordre vienne de
 Gladys ou d'une télécommande murale entendue à la radio (ce qui suppose le
-canal d'écoute décrit plus bas). Trois conséquences :
+canal d'écoute décrit plus bas). Quand beaucoup de volets bougent en même
+temps, chacun publie sa position moins souvent : ensemble, ils restent bien
+sous les 300 états par minute qu'accepte Gladys, et chaque butée passe. Trois
+conséquences :
 
 - un **`4098` obtient lui aussi une position** — la fonctionnalité apparaît dès
   que le volet est chronométré, et son curseur pilote le moteur par un
@@ -473,7 +476,12 @@ Deux détails qui comptent :
   valeur conservée par Gladys. Un volet ajouté dans Gladys après le démarrage de
   l'intégration reçoit tout de suite la position déjà connue ;
 - un volet envoyé à une position est **arrêté à temps même si Gladys ne répond
-  plus un instant** : le STOP part avant que la position soit publiée.
+  plus un instant ou tarde à répondre** : le STOP part avant que la position
+  soit publiée, et n'attend jamais Gladys. Un STOP que le boîtier n'a pas pu
+  envoyer active le déclencheur **Un ordre radio a échoué**, et la position
+  suit le volet jusqu'à sa butée, puisque rien ne l'a arrêté. Un STOP qui
+  attend encore la radio quand une télécommande murale relance le volet est
+  abandonné.
 
 ### La position favorite
 

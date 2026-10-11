@@ -30,6 +30,16 @@ const logger = createLogger({ name: 'travel' });
 /** How often a moving shutter publishes its position, in milliseconds. */
 export const DEFAULT_TICK_MS = 1000;
 
+/**
+ * Positions published per tick by all the moving shutters together. Gladys
+ * takes 300 states a minute from an integration and answers 429 past that: a
+ * dozen shutters closed by one scene, each publishing every second, used the
+ * whole budget on the way down, and their end stops — published last, the ones
+ * that matter — were refused. With many shutters on the move each publishes
+ * less often; the arrival is never held back by this.
+ */
+export const POSITIONS_PER_TICK = 2;
+
 /** Directions a shutter travels in. */
 export const DIRECTIONS = { UP: 'up', DOWN: 'down' };
 
@@ -111,9 +121,11 @@ export class ShutterTravel {
    * @param {number} [options.target] where the motor was told to stop; the end
    *   stop of `direction` by default
    * @param {(position: number, info: { done: boolean }) => Promise<void>} options.publish
+   * @param {() => Promise<void>} [options.arrive] what stops the motor at
+   *   `target` (a STOP order), run at the arrival before anything is published
    * @returns {boolean} false when this shutter has no travel time configured
    */
-  move(device, { direction, target, publish }) {
+  move(device, { direction, target, publish, arrive = null }) {
     const travelMs = travelMsFor(device, direction);
     if (travelMs === null) {
       return false;
@@ -141,6 +153,11 @@ export class ShutterTravel {
       startedAt,
       endAt: startedAt + (distance / 100) * travelMs,
       publish,
+      arrive,
+      /** The mid-course publication still in flight, if any. */
+      publishing: null,
+      /** The last mid-course position Gladys was given. */
+      published: null,
     };
     this.schedule(device, state);
     return true;
@@ -189,13 +206,19 @@ export class ShutterTravel {
   }
 
   /**
-   * Arm the next position publication. The delay is the tick, or what is left
-   * of the travel when that is shorter, so the shutter lands on its end stop at
-   * the very moment the motor does.
+   * Arm the next position publication. The delay is the tick (longer when many
+   * shutters move at once, see `POSITIONS_PER_TICK`), or what is left of the
+   * travel when that is shorter, so the shutter lands on its end stop at the
+   * very moment the motor does.
    */
   schedule(device, state) {
     const remaining = state.move.endAt - this.now();
-    const delay = Math.max(0, Math.min(this.tickMs, remaining));
+    let moving = 0;
+    for (const other of this.states.values()) {
+      moving += other.move ? 1 : 0;
+    }
+    const interval = this.tickMs * Math.max(1, moving / POSITIONS_PER_TICK);
+    const delay = Math.max(0, Math.min(interval, remaining));
     state.handle = this.timers.set(() => {
       this.tick(device, state).catch((error) => {
         // Nothing above a timer callback can handle it: say it and move on.
@@ -215,31 +238,89 @@ export class ShutterTravel {
     if (done) {
       state.move = null;
       state.position = move.target;
-      // The arrival callback is what STOPS a shutter driven to a mid-course
-      // position: it runs whatever Gladys answers to the publication, and its
-      // failure goes to the caller of tick (logged above).
+      await this.arrive(device, state, move);
+      // A newer movement replaced this one while its STOP waited for the radio
+      // (a wall remote pressed meanwhile): its publications are the ones that
+      // say where the shutter is, and the old target must not land over them.
+      if (state.move) {
+        return;
+      }
+      // Published after the last position of the way, never before it: Gladys
+      // keeps whichever it is told last.
+      await move.publishing;
       await move.publish(move.target, { done: true });
       return;
     }
 
-    // Mid-course: only a shutter whose starting point was known has an
-    // intermediate position worth publishing. A failed publication (Gladys
-    // unreachable for a second) must NOT end the tracking: the next tick is
+    // The next tick is armed FIRST, whatever Gladys does with this one: it is
     // what carries the arrival, and the arrival is what sends the STOP of a
-    // shutter driven to 40 % — skip it and the motor runs into its end stop.
+    // shutter driven to 40 %. Armed after a publication that failed, the motor
+    // ran into its end stop; after one Gladys took six seconds to answer, the
+    // STOP went out six seconds late.
+    this.schedule(device, state);
+    // Mid-course: only a shutter whose starting point was known has an
+    // intermediate position worth publishing — and only one at a time: a tick
+    // that finds the previous one still in flight lets it be, rather than
+    // piling requests on a Gladys already slow to answer.
+    if (move.from === null || move.publishing) {
+      return;
+    }
+    const position = positionAt(move, this.now());
+    if (position === move.published) {
+      return;
+    }
+    move.publishing = move
+      .publish(position, { done: false })
+      .then(
+        () => {
+          move.published = position;
+        },
+        (error) => {
+          logger.warn(
+            `Position of "${device.name ?? device.platformId}" not published: ${error.message}`,
+          );
+        },
+      )
+      .finally(() => {
+        move.publishing = null;
+      });
+    await move.publishing;
+  }
+
+  /**
+   * The travel says the shutter is there: stop the motor, when it has to be
+   * told. That runs before any publication — a radio order is time-critical, a
+   * publication is not.
+   *
+   * A STOP that could not go out did not stop anything: the motor carries on
+   * to the end stop of its direction, and so does the travel, from where the
+   * STOP was due. Kept at the target, memory and Gladys showed 40 % while the
+   * shutter was at the top, and every later positioning started from there.
+   * The failure itself goes to the caller of tick (logged in `schedule`).
+   */
+  async arrive(device, state, move) {
+    if (!move.arrive) {
+      return;
+    }
     try {
-      if (move.from !== null) {
-        await move.publish(positionAt(move, this.now()), { done: false });
-      }
+      await move.arrive();
     } catch (error) {
-      logger.warn(
-        `Position of "${device.name ?? device.platformId}" not published: ${error.message}`,
-      );
-    } finally {
-      // The movement may have been replaced while the publication was awaited.
-      if (state.move === move) {
+      if (!state.move && state.position === move.target) {
+        const end = move.direction === DIRECTIONS.UP ? 100 : 0;
+        const travelMs = travelMsFor(device, move.direction);
+        state.move = {
+          ...move,
+          from: move.target,
+          target: end,
+          startedAt: move.endAt,
+          endAt: move.endAt + (Math.abs(end - move.target) / 100) * travelMs,
+          arrive: null,
+          publishing: null,
+          published: null,
+        };
         this.schedule(device, state);
       }
+      throw error;
     }
   }
 }

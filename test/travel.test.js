@@ -156,3 +156,89 @@ test('a failed publication does not stop the tracking before the arrival', async
   assert.equal(travel.positionOf(SHUTTER), 40);
   assert.equal(clock.armed, 0);
 });
+
+test('the arrival does not wait for Gladys to take a position, and is published after it', async () => {
+  const { clock, travel } = setup();
+  travel.set(SHUTTER, 0);
+  const published = [];
+  let answer = null;
+  let arrivedAt = null;
+  const publish = async (position, { done }) => {
+    if (!done && answer === null) {
+      // Gladys is loaded: the first position on the way takes ages.
+      await new Promise((resolve) => {
+        answer = resolve;
+      });
+    }
+    published.push(done ? `${position}!` : position);
+  };
+
+  travel.move(SHUTTER, {
+    direction: DIRECTIONS.UP,
+    target: 40,
+    publish,
+    arrive: async () => {
+      arrivedAt = clock.now();
+    },
+  });
+  await clock.advance(9000);
+
+  // The STOP is due at 8 s, and went out at 8 s...
+  assert.equal(arrivedAt, 8000);
+  // ...while the arrival publication waits for the one still in flight, so
+  // Gladys is not left on the older value.
+  assert.deepEqual(published, []);
+  answer();
+  await new Promise(setImmediate);
+  assert.deepEqual(published, [5, '40!']);
+});
+
+test('many shutters moving at once share what Gladys accepts, and all land', async () => {
+  const { clock, travel } = setup();
+  const published = [];
+  const shutters = Array.from({ length: 12 }, (_, index) => ({
+    platformId: `shutter-${index}`,
+    travelUp: 30,
+  }));
+  for (const device of shutters) {
+    travel.set(device, 100);
+    travel.move(device, {
+      direction: DIRECTIONS.DOWN,
+      publish: async (position, { done }) => {
+        published.push({ id: device.platformId, position, done });
+      },
+    });
+  }
+  await clock.advance(31000);
+
+  // A dozen shutters closed by one scene, one position each per second, were
+  // 360 states in 30 s: past the 300 a minute Gladys takes, and the end stops,
+  // published last, were refused.
+  assert.ok(published.length <= 120, `${published.length} states published`);
+  for (const device of shutters) {
+    const last = published.filter((entry) => entry.id === device.platformId).at(-1);
+    assert.deepEqual(last, { id: device.platformId, position: 0, done: true });
+  }
+});
+
+test('a STOP that could not go out leaves the shutter running to its end stop', async () => {
+  const { clock, travel, positions, publish } = setup();
+  travel.set(SHUTTER, 0);
+
+  travel.move(SHUTTER, {
+    direction: DIRECTIONS.UP,
+    target: 40,
+    publish,
+    arrive: async () => {
+      throw new Error('fetch failed');
+    },
+  });
+  await clock.advance(8000);
+  // Not at 40 %: nothing stopped the motor there.
+  assert.ok(travel.isMoving(SHUTTER));
+  assert.equal(travel.positionOf(SHUTTER), 40);
+
+  await clock.advance(12000);
+  assert.equal(positions.at(-1), '100!');
+  assert.equal(travel.positionOf(SHUTTER), 100);
+});

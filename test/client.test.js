@@ -409,6 +409,40 @@ test('a repeat waiting behind other devices is dropped once a remote overrode it
   assert.equal(calls.length - onFirst.length, 2);
 });
 
+test('an order that no longer applies when its turn comes is dropped unsent', async () => {
+  // The STOP that ends a timed travel waits behind another shutter's order;
+  // meanwhile a wall remote sets the shutter off again. Sent anyway, the STOP
+  // stopped the shutter the user had just sent somewhere else.
+  const SECOND = { ...DEVICE, name: 'Office plug', platformId: '201-2', channel: { id: 201 } };
+  let release = null;
+  stubFetch((url, options) => {
+    if (JSON.parse(options.body).channel.id === SECOND.channel.id) {
+      return new Promise((resolve) => {
+        release = () => resolve(jsonResponse(200, { type: 3 }));
+      });
+    }
+    return jsonResponse(200, { type: 3 });
+  });
+  const client = clientWith();
+  let stale = false;
+
+  const second = client.transfer(SECOND, [stateNote(STATE_VALUES.UP)]);
+  const stop = client.transfer(DEVICE, [stateNote(STATE_VALUES.STOP)], { stale: () => stale });
+  await new Promise(setImmediate);
+  stale = true;
+  release();
+  await second;
+
+  const answer = await stop;
+  assert.equal(answer.dropped, true);
+  assert.deepEqual(
+    calls.map((call) => JSON.parse(call.options.body).channel.id),
+    [SECOND.channel.id],
+  );
+  // Nothing failed: the badge has nothing to say about it.
+  assert.equal(client.transportOf(DEVICE), undefined);
+});
+
 test('a repeat that fails changes nothing: the order did go out', async () => {
   let answered = 0;
   stubFetch(() => {
