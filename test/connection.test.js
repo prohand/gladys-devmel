@@ -546,3 +546,84 @@ test('with no box to listen through, test_connection asks for the connection str
   assert.doesNotMatch(report.en, /Gladys Plus/);
   assert.match(report.fr, /aucun boîtier/);
 });
+
+test('a box declared before the connection string still asks for the string', async () => {
+  // The docs' own example declares the box with no string of its own: it is
+  // not a box anything can listen through until the sp:// field is filled in.
+  const config = normalizeConfig({
+    devices: JSON.stringify({
+      devices: { 'AirSend box': { type: 0, sensors: true, refresh: 300 }, ...JSON.parse(DEVICES) },
+    }),
+  });
+  assert.deepEqual(boxDevices(config), []);
+
+  const report = await testConnection(fakeClient(), config, RUNNING, { url: null, error: null });
+  assert.match(report.en, /no AirSend box to listen through — paste the sp:\/\/ connection/);
+  assert.doesNotMatch(report.en, /Gladys Plus/);
+});
+
+test('test_connection names a remote declared by its protocol alone without an address', async () => {
+  const config = normalizeConfig({
+    spurl: SPURL,
+    devices: JSON.stringify({
+      devices: {
+        'Patio door': { type: 4098, pid: 25455, addr: 8295, remotes: [{ pid: 14177 }] },
+        S1: { type: 1, pid: 25455, addr: 1 },
+        S2: { type: 1, pid: 25455, addr: 2 },
+      },
+    }),
+  });
+  const plan = planListening(config);
+  const report = await testConnection(fakeClient(), config, RUNNING, {
+    url: 'http://127.0.0.1:33864/',
+    plan,
+  });
+
+  assert.match(report.en, /so never heard: Patio door \(pid 14177\)\./);
+  assert.doesNotMatch(report.en, /undefined/);
+  assert.doesNotMatch(report.fr, /undefined/);
+});
+
+test('test_connection follows a remote declared by its protocol alone', async () => {
+  // The documented last resort, already in place: advising the listening
+  // channel the user has set is the wrong answer to frames being followed.
+  const config = normalizeConfig({
+    spurl: SPURL,
+    listen_channel: 14177,
+    devices: JSON.stringify({
+      devices: { 'Patio door': { type: 4098, pid: 25455, addr: 8295, remotes: [{ pid: 14177 }] } },
+    }),
+  });
+  const heard = new HeardChannels();
+  heard.record(
+    { id: 14177 },
+    { readings: [{ kind: 'level', value: 100, command: 'up' }], claimed: true, understood: true },
+  );
+
+  const report = await testConnection(fakeClient(), config, RUNNING, null, heard);
+  assert.match(report.en, /address not decoded.*followed by Patio door/);
+  assert.doesNotMatch(report.en, /did not decode this protocol/);
+  assert.match(report.fr, /suivi par Patio door/);
+
+  // Nobody declaring it: the advice is still the one that works.
+  const alone = normalizeConfig({ spurl: SPURL, devices: DEVICES });
+  const unclaimed = await testConnection(fakeClient(), alone, RUNNING, null, heard);
+  assert.match(unclaimed.en, /did not decode this protocol \(no address\)/);
+});
+
+test('test_connection does not judge a remote just attached on frames heard before', async () => {
+  // Heard while nobody declared it, then attached and saved: what its frames
+  // did then says nothing about the device now declaring it.
+  const heard = new HeardChannels();
+  heard.record(WALL_REMOTE, {
+    readings: [{ kind: 'level', value: 100, command: 'up' }],
+    claimed: false,
+  });
+  heard.reannounce();
+  const config = normalizeConfig({ spurl: SPURL, devices: DEVICES_WITH_REMOTE });
+
+  const report = await testConnection(fakeClient(), config, RUNNING, null, heard);
+  assert.match(report.en, /declared on Baie vitree, not heard since the configuration changed/);
+  assert.doesNotMatch(report.en, /no order to replay|does nothing with the order/);
+  assert.match(report.fr, /pas entendu depuis le changement de configuration/);
+});

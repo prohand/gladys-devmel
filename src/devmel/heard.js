@@ -18,6 +18,7 @@
 // -----------------------------------------------------------------------------
 
 import { describeReadings } from './notes.js';
+import { PRESS_WINDOW_MS } from '../capabilities/scenes.js';
 
 /** How many distinct emitters are remembered, oldest evicted first. */
 export const DEFAULT_LIMIT = 32;
@@ -123,7 +124,23 @@ export class HeardChannels {
       dropped: null,
     };
     entry.frames += 1;
-    entry.dropped = dropped;
+    // A bad copy of a press a good copy already delivered says nothing about
+    // the emitter: with two boxes on the same callback, the far one grades
+    // every press of a remote the near one hears well, and the last copy in
+    // won — a remote being followed showed "dropped" and the advice to accept
+    // unreliable frames, which would let the far box's garbage through too.
+    // Arrival time, not the box timestamp: two boxes do not share a clock.
+    const arrived = this.now();
+    const samePress =
+      Boolean(dropped) &&
+      known?.usableAt !== undefined &&
+      arrived - known.usableAt < PRESS_WINDOW_MS;
+    if (!samePress) {
+      entry.dropped = dropped;
+    }
+    if (!dropped) {
+      entry.usableAt = arrived;
+    }
     // Sticky: a remote that was understood once is understood, even when its
     // next frame carries nothing (a released button, a repeated frame).
     entry.understood = entry.understood || understood;
@@ -132,6 +149,8 @@ export class HeardChannels {
     // actually established is written down.
     if (claimed !== undefined) {
       entry.claimed = claimed;
+      // Routed under the configuration in force: its verdict is current again.
+      entry.stale = false;
     }
     if (readings !== undefined) {
       entry.readings = readings;
@@ -197,6 +216,17 @@ export class HeardChannels {
    */
   reannounce() {
     this.generation += 1;
+    // And forget what the frames did under the previous configuration: who
+    // claimed them and whether a device acted on them were answers about
+    // devices that may no longer be declared that way. A remote heard before
+    // it was attached was routed to nobody, so "understood" stayed false, and
+    // every screen called the remote just attached mute until it was pressed
+    // again. Until its next frame, an emitter is "not heard since the change".
+    for (const entry of this.entries.values()) {
+      entry.stale = true;
+      entry.understood = false;
+      delete entry.undeclared;
+    }
   }
 
   /** Every emitter heard, most recent first. */

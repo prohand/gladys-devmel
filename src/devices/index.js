@@ -409,6 +409,13 @@ export async function applyEvents(
       if (!blueprint || typeof blueprint.applyReadings !== 'function') {
         // A push-only device type (a plain BUTTON) has nothing to publish when
         // it hears itself: normal, and not worth an info line.
+        //
+        // An order it heard was acted on all the same: it fired the scene
+        // trigger above, which is all a spare remote on a Button is for. Left
+        // "not understood", every screen called that working remote mute.
+        if (blueprint && pressed.length > 0 && heard) {
+          heard.understood = true;
+        }
         logger.debug(
           `Heard ${describeChannel(event.channel)} for "${device.name}", a device type that ` +
             'publishes nothing on radio frames',

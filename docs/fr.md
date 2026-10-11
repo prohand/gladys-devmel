@@ -789,7 +789,7 @@ votre volet. À n'utiliser qu'en connaissance de cause.
 Une fois l'émetteur déclaré, la trame arrive bien à l'appareil — reste à savoir
 si elle **porte un ordre**. Commencez par **Tester la connexion** : la ligne
 _Entendu_ répond sans passer par les logs (voir « Ce que le boîtier a entendu »).
-Elle distingue quatre cas qui se ressemblent et n'ont rien à voir :
+Elle distingue cinq cas qui se ressemblent et n'ont rien à voir :
 
 - `déclaré sur « Baie vitrée », mais ses trames ne portent aucun ordre
 rejouable` — la trame est arrivée, l'appareil ne sait qu'en faire. C'est le lot
@@ -804,6 +804,10 @@ rejouable` — la trame est arrivée, l'appareil ne sait qu'en faire. C'est le l
   exemple. Le protocole n'y est pour rien ; vérifiez le type déclaré sur
   airsend.cloud (une télécommande qui envoie TOGGLE commande un Bouton, type
   `4096`) ou que c'est la bonne télécommande qui est rattachée ;
+- `pas entendu depuis le changement de configuration` — l'émetteur a été
+  entendu avant le dernier enregistrement (avant d'être rattaché, le plus
+  souvent), et ce que ses trames ont donné alors ne dit rien de l'appareil qui le
+  déclare maintenant : appuyez sur la télécommande, puis relancez l'action ;
 - `aucun appareil ne le déclare` — l'émetteur est bien entendu, il n'est
   simplement rattaché à rien : relancez **Rattacher une télécommande** ;
 - l'émetteur n'apparaît pas du tout — la trame n'arrive plus. Si la télécommande
@@ -893,15 +897,16 @@ marque inscrite sur le boîtier plastique ne le dit pas toujours — un volet ve
 sous une marque française peut embarquer la radio d'un autre fabricant — alors
 que le nom donné ici est celui du décodeur qui a réellement décodé la trame.
 
-Quatre verdicts possibles pour un émetteur :
+Les verdicts possibles pour un émetteur :
 
-| Verdict                            | Ce que ça veut dire                                                            |
-| ---------------------------------- | ------------------------------------------------------------------------------ |
-| `suivi par <appareil>`             | tout marche : ses trames pilotent bien l'appareil                              |
-| `aucun appareil ne le déclare`     | l'émetteur est entendu, mais rattaché à rien — **Rattacher une télécommande**  |
-| `ne déclare pas`                   | un capteur bien décodé, en mesures absentes de ses `features` : ajoutez-les    |
-| `ne fait rien de l'ordre décodé`   | l'ordre est décodé, mais ce type d'appareil ne le suit pas — vérifiez son type |
-| `ne portent aucun ordre rejouable` | la trame arrive à l'appareil et ne porte rien à rejouer (code tournant)        |
+| Verdict                                             | Ce que ça veut dire                                                                                 |
+| --------------------------------------------------- | --------------------------------------------------------------------------------------------------- |
+| `suivi par <appareil>`                              | tout marche : ses trames pilotent bien l'appareil                                                   |
+| `aucun appareil ne le déclare`                      | l'émetteur est entendu, mais rattaché à rien — **Rattacher une télécommande**                       |
+| `ne déclare pas`                                    | un capteur bien décodé, en mesures absentes de ses `features` : ajoutez-les                         |
+| `ne fait rien de l'ordre décodé`                    | l'ordre est décodé, mais ce type d'appareil ne le suit pas — vérifiez son type                      |
+| `ne portent aucun ordre rejouable`                  | la trame arrive à l'appareil et ne porte rien à rejouer (code tournant)                             |
+| `pas entendu depuis le changement de configuration` | ses trames ont été jugées sous la configuration précédente : appuyez dessus, puis relancez l'action |
 
 La ligne cite **toutes** les notes différentes entendues d'un même émetteur, pas
 seulement la dernière — c'est ce qui distingue une télécommande dont le service

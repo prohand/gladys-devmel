@@ -28,7 +28,16 @@ import { ordersOf } from '../capabilities/scenes.js';
  * say listening worked.
  */
 export function boxDevices(config) {
-  const boxes = config.devmelDevices.filter((device) => device.rtype === DEVICE_TYPES.BOX);
+  // Only the boxes something can reach: a box declared before any connection
+  // string was pasted (the docs' own example) has nothing to bind with, and
+  // counting it made listening, "Test the connection" and the widget report
+  // "the box refused the subscription" every ten minutes instead of asking for
+  // the string.
+  const boxes = config.devmelDevices.filter(
+    (device) =>
+      device.rtype === DEVICE_TYPES.BOX &&
+      Boolean(config.effectiveServiceUrl && (device.spurl || config.spurl)),
+  );
   if (boxes.some((box) => isGlobalBox(box, config))) {
     return boxes;
   }
@@ -360,7 +369,7 @@ function describeUnheardRemotes(plan, language) {
   }
   const listed = unheard
     .slice(0, 5)
-    .map(({ device, remote }) => `${device.name} (pid ${remote.id}, addr ${remote.source})`)
+    .map(({ device, remote }) => `${device.name} (${describeRemote(remote)})`)
     .join(', ');
   const more = unheard.length > 5 ? ` (+${unheard.length - 5})` : '';
   return language === 'fr'
@@ -368,6 +377,18 @@ function describeUnheardRemotes(plan, language) {
         "Renseignez leur pid dans le canal d'écoute pour écouter le leur à la place."
     : ` Remotes declared on another protocol, so never heard: ${listed}${more}. Fill in their ` +
         'pid as the listening channel to listen to theirs instead.';
+}
+
+/**
+ * A remote of a `remotes` list: pid and address, or the pid alone for a remote
+ * declared by its protocol only (`{ "pid": 14177 }`, the documented last
+ * resort), which has no address to print.
+ */
+function describeRemote(remote) {
+  if (remote.source === null || remote.source === undefined) {
+    return `pid ${remote.id}`;
+  }
+  return `pid ${remote.id}, addr ${remote.source}`;
 }
 
 function names(devices) {
@@ -522,11 +543,16 @@ function describeHeardEmitter(config, entry, now, language, table) {
  * nothing, and it looks exactly like a remote that was never attached.
  */
 export function describeFate(config, entry, language) {
+  const claimants = config.devmelDevices.filter((device) => hearsChannel(device, entry));
   // No address at all: the box picked the protocol up without decoding it, so
   // there is nothing to attach and nothing to publish. The fix is upstream —
   // listen to that protocol's own decoder — and it is the only advice that
   // works here, so it comes before everything else.
-  if (entry.source === null || entry.source === undefined) {
+  //
+  // Unless a device declares that protocol alone (`remotes: [{ "pid": X }]`,
+  // the documented last resort once X is listened to): the frames are then
+  // followed like any other, and advising the channel already set was wrong.
+  if ((entry.source === null || entry.source === undefined) && claimants.length === 0) {
     return language === 'fr'
       ? `le boîtier n'a pas décodé ce protocole (aucune adresse)${dropped(entry, language)} : ` +
           `renseignez ${entry.id} comme canal d'écoute pour qu'il l'écoute sur son propre décodeur`
@@ -543,17 +569,27 @@ export function describeFate(config, entry, language) {
       : `its last frame was dropped before any device (${entry.dropped}): "Accept unreliable ` +
           'frames" lets them through';
   }
-  const claimants = config.devmelDevices.filter((device) => hearsChannel(device, entry));
   if (claimants.length === 0) {
     return language === 'fr'
       ? 'aucun appareil ne le déclare : « Rattacher une télécommande » écrit la ligne'
       : 'no device declares it: "Attach a remote" writes the line for you';
   }
   const claimed = names(claimants);
+  // What its frames did was established under the previous configuration (see
+  // HeardChannels.reannounce): a remote heard before it was attached was
+  // routed to nobody, and reading that as "carries no order" told the user
+  // who had just attached it that it could not work.
+  if (entry.stale) {
+    return language === 'fr'
+      ? `déclaré sur ${claimed}, pas entendu depuis le changement de configuration : ` +
+          "appuyez dessus pour voir s'il est suivi"
+      : `declared on ${claimed}, not heard since the configuration changed: press it to see ` +
+          'whether it is followed';
+  }
   if (entry.understood) {
     return language === 'fr'
-      ? `suivi par ${claimed}${describeOneNote(entry, language)}`
-      : `followed by ${claimed}${describeOneNote(entry, language)}`;
+      ? `suivi par ${claimed}${describeOneNote(entry, claimants, language)}`
+      : `followed by ${claimed}${describeOneNote(entry, claimants, language)}`;
   }
   // Decoded fine, into readings the device does not declare (a weather sensor
   // pasted from the airsend.cloud export, which carries no `features`).
@@ -597,8 +633,13 @@ export function describeFate(config, entry, language) {
  * Said as the check to run rather than as a verdict: a user who has only ever
  * pressed one button has one note too, and the answer is the same either way.
  */
-function describeOneNote(entry, language) {
+function describeOneNote(entry, claimants, language) {
   if (entry.frames < 3 || entry.notes?.size !== 1) {
+    return '';
+  }
+  // A Button only ever hears one order (a spare remote sending TOGGLE), and
+  // that is all a scene trigger needs: nothing here is half understood.
+  if (claimants.every((device) => device.rtype === DEVICE_TYPES.BUTTON)) {
     return '';
   }
   const note = [...entry.notes][0];

@@ -192,3 +192,27 @@ test('a re-arm says why it did not take', async () => {
   // Cancelled by a disconnection before it ran.
   assert.throws(() => rearmedChannel(null, config), /stopped/);
 });
+
+test('a box declared before the connection string is pasted is not listened through', async () => {
+  // The docs' own example declares the box with no string of its own: until
+  // the sp:// field is filled in, there is nothing to bind with, and the user
+  // must be asked for the string, not told every ten minutes that the box
+  // refused a subscription it was never asked for.
+  const config = normalizeConfig({
+    devices: JSON.stringify({
+      devices: { 'AirSend box': { type: 0, sensors: true, refresh: 300 }, Volet: SHUTTER },
+    }),
+  });
+  const client = fakeBinder();
+  const { result: outcome, of } = await quietly(() =>
+    armListening({ config, table: TABLE, callbackUrl: CALLBACK, client }),
+  );
+
+  assert.deepEqual(client.binds, []);
+  assert.equal(outcome.error, null);
+  // No renewal timer binding nothing.
+  assert.equal(outcome.renewable, false);
+  assert.ok(of('INFO').some((line) => /paste the sp:\/\/ connection string/.test(line)));
+  assert.equal(of('WARN').length, 0);
+  assert.throws(() => rearmedChannel(outcome, config), /paste the sp:\/\/ connection string/);
+});

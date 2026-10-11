@@ -259,14 +259,20 @@ function emitterItem(config, entry, now, table) {
 
 /** What became of an emitter's frames, as a short colored badge. */
 function badgeOf(config, entry) {
-  if (entry.source === null || entry.source === undefined) {
+  // In the order describeFate tells it, so the badge never contradicts the
+  // line under it: a protocol-only remote claims the address-less frames.
+  const claimed = config.devmelDevices.some((device) => hearsChannel(device, entry));
+  if ((entry.source === null || entry.source === undefined) && !claimed) {
     return { text: { en: 'not decoded', fr: 'non décodé' }, color: 'neutral' };
   }
   if (entry.dropped) {
     return { text: { en: 'dropped', fr: 'écarté' }, color: 'danger' };
   }
-  if (!config.devmelDevices.some((device) => hearsChannel(device, entry))) {
+  if (!claimed) {
     return { text: { en: 'unknown', fr: 'inconnu' }, color: 'warning' };
+  }
+  if (entry.stale) {
+    return { text: { en: 'press again', fr: 'à réessayer' }, color: 'neutral' };
   }
   return entry.understood
     ? { text: { en: 'followed', fr: 'suivi' }, color: 'success' }

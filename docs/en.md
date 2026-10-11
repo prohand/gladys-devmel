@@ -745,7 +745,7 @@ knowingly.
 Once the emitter is declared the frame does reach the device — what remains is
 whether it **carries an order**. Start with **Test the connection**: its _Heard_
 line answers without going through the logs (see "What the box actually heard").
-It tells apart four cases that look alike and are unrelated:
+It tells apart five cases that look alike and are unrelated:
 
 - `declared on Living room shutter, but its frames carry no order to replay` —
   the frame arrived, the device has no use for it. That is the fate of
@@ -759,6 +759,10 @@ It tells apart four cases that look alike and are unrelated:
   from a one-button remote attached to a switch or a light, say. The protocol is
   fine; check the type declared on airsend.cloud (a remote sending TOGGLE drives
   a Button, type `4096`) or that the right remote is attached;
+- `not heard since the configuration changed` — the emitter was heard before
+  the last save (before it was attached, typically), and what its frames did
+  then says nothing about the device declaring it now: press the remote, then
+  run the action again;
 - `no device declares it` — the emitter is heard, it is simply attached to
   nothing: run **Attach a remote** again;
 - the emitter is not listed at all — the frame no longer arrives. When the remote
@@ -843,15 +847,16 @@ brand printed on the plastic does not always say — a shutter sold under one na
 may carry another manufacturer's radio — while the name here is the decoder that
 actually decoded the frame.
 
-Four possible verdicts per emitter:
+The possible verdicts per emitter:
 
-| Verdict                               | What it means                                                                  |
-| ------------------------------------- | ------------------------------------------------------------------------------ |
-| `followed by <device>`                | it works: those frames do drive the device                                     |
-| `no device declares it`               | the emitter is heard but attached to nothing — **Attach a remote**             |
-| `does not declare`                    | a sensor decoded fine, into readings missing from its `features`: add them     |
-| `does nothing with the order decoded` | the order is decoded, but that device type does not act on it — check its type |
-| `carry no order to replay`            | the frame reaches its device and carries nothing to replay (rolling code)      |
+| Verdict                                     | What it means                                                                                |
+| ------------------------------------------- | -------------------------------------------------------------------------------------------- |
+| `followed by <device>`                      | it works: those frames do drive the device                                                   |
+| `no device declares it`                     | the emitter is heard but attached to nothing — **Attach a remote**                           |
+| `does not declare`                          | a sensor decoded fine, into readings missing from its `features`: add them                   |
+| `does nothing with the order decoded`       | the order is decoded, but that device type does not act on it — check its type               |
+| `carry no order to replay`                  | the frame reaches its device and carries nothing to replay (rolling code)                    |
+| `not heard since the configuration changed` | its frames were judged under the previous configuration: press it, then run the action again |
 
 The line quotes **every** distinct note an emitter has been heard saying, not
 just its last frame — that is what tells a remote whose buttons the service
