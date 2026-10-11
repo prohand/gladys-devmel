@@ -260,13 +260,18 @@ Trois choses y répondent, sans rien à régler :
 - **les ordres passent un par un.** Un boîtier n'a qu'une radio : pendant qu'il
   émet, il n'entend rien, et un deuxième ordre envoyé dans la foulée arrive sur
   un boîtier occupé. Les ordres font donc la queue, espacés d'un quart de
-  seconde, dans l'ordre où vous les avez donnés ;
+  seconde, dans l'ordre où vous les avez donnés — une file par boîtier, si bien
+  qu'un boîtier qui ne répond pas ne retient jamais les ordres envoyés par un
+  autre ;
 - **un ordre que le boîtier n'a pas pu porter est renvoyé.** Un refus, lui, ne
   l'est pas : une chaîne de connexion rejetée et un canal inconnu répondront
-  exactement pareil la seconde fois. Un TOGGLE de bouton poussoir n'est renvoyé
-  que s'il n'est certainement pas parti (service injoignable, boîtier occupé) :
-  après un délai dépassé, il a peut-être déjà ouvert le portail, et un second le
-  refermerait ;
+  exactement pareil la seconde fois. Un TOGGLE de bouton poussoir, ou un Stop,
+  n'est renvoyé que s'il n'est certainement pas parti (service injoignable,
+  boîtier occupé) : après un délai dépassé, il a peut-être déjà ouvert le
+  portail, et un second le refermerait. Un ordre n'est pas non plus renvoyé une
+  fois que vous avez donné à l'appareil un ordre plus récent — depuis Gladys ou
+  sa télécommande murale : un Ouvrir renvoyé après votre Stop relancerait le
+  volet ;
 - **un ordre est répété sur l'air**, comme une vraie télécommande le répète tant
   qu'on garde le doigt appuyé. Par défaut, chaque ordre part deux fois.
 
@@ -280,8 +285,12 @@ avoir la sienne, sans changer celle des autres :
 ```
 
 Seuls les ordres qui veulent dire la même chose deux fois sont répétés — Ouvrir,
-Stop, Fermer, une position. Un TOGGLE de bouton poussoir, lui, part une seule
-fois : entendu deux fois, il revient d'où il part.
+Fermer, une position. Un TOGGLE de bouton poussoir, lui, part une seule fois :
+entendu deux fois, il revient d'où il part. Stop aussi : en Somfy RTS, STOP et
+le bouton « my » sont la même trame, et un second arrivant sur un volet que le
+premier vient d'arrêter l'envoie à sa position favorite. Une répétition qui
+attend encore son tour est abandonnée quand l'appareil reçoit un ordre plus
+récent, de Gladys ou de sa télécommande murale.
 
 Ces répétitions ne font **pas attendre l'interface** : Gladys est servie dès que
 l'ordre est sur l'air, et les répétitions continuent derrière, à leur place dans
@@ -320,7 +329,11 @@ faster than it was being kept warm… Touching it every 2 min from now on.
 ```
 
 Elle ne fait que raccourcir : un réveil rapide prouve que l'intervalle où il a
-eu lieu fonctionne, jamais qu'un plus long fonctionnerait.
+eu lieu fonctionne, jamais qu'un plus long fonctionnerait. Et seul un boîtier qui
+a répondu lui apprend quelque chose : le premier contact après le démarrage
+refait la session et est lent quel que soit l'intervalle, et un boîtier éteint
+fait durer chaque réveil tout le délai d'attente. Chaque boîtier est gardé au
+chaud après son propre silence.
 
 Quand un ordre met tout de même plus d'une seconde et demie à partir, les
 journaux le disent, et disent **où le temps est passé** :

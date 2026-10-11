@@ -228,6 +228,8 @@ export async function setKnownPosition(gladys, config, externalId, position) {
  *   tests do not share the registry of the running integration
  * @param {object} [orders] the orders we sent, same reason
  * @param {object} [scenes] where the scene triggers are fired, same reason
+ * @param {object} [client] the AirSend driver, told when a remote gave a device
+ *   a newer order than the one it is still repeating (see `client.supersede`)
  * @returns {Promise<number>} how many devices acted on a frame
  */
 export async function applyEvents(
@@ -237,6 +239,7 @@ export async function applyEvents(
   registry = heardChannels,
   orders = sentOrders,
   scenes = sceneEvents,
+  client = null,
 ) {
   if (!Array.isArray(events)) {
     return 0;
@@ -348,6 +351,12 @@ export async function applyEvents(
     const createdAt = toDate(event.timestamp);
     const pressed = ordersOf(readings);
     for (const device of listeners) {
+      // First of all, before anything is published: a repeat of the previous
+      // Gladys order may still be waiting its turn on the radio, and once it
+      // goes out it undoes what the wall remote just said.
+      if (pressed.length > 0) {
+        client?.supersede(device);
+      }
       // Someone pressed a remote: whatever the device makes of it below, a
       // scene may want to know. A plain BUTTON publishes nothing, and a spare
       // remote attached to one is exactly a scene trigger.

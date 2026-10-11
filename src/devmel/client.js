@@ -41,6 +41,10 @@ const LOCAL_TIMEOUT_MS = 8000;
  * moving, the STOP that ends a timed travel, the renewal of the listening
  * subscription — reach a box still busy with the previous one, and the second
  * is the one that vanishes. So they queue, spaced by this gap.
+ *
+ * One queue PER BOX: two boxes are two radios. Sharing one made every order
+ * to the box that works wait up to eight seconds behind each request to a box
+ * that is unplugged — the STOP that ends a timed travel included.
  */
 const RADIO_GAP_MS = 250;
 
@@ -88,6 +92,14 @@ const WARM_FLOOR_MS = 60 * 1000;
  */
 const COLD_LINK_MS = 1000;
 
+/**
+ * Raised in the queue when a retry or a repeat comes up for an order the device
+ * has since been given a newer one than (see `AirSendClient.emit`). It never
+ * reaches Gladys: a retry reports the failure it was retrying, a repeat is
+ * dropped.
+ */
+class SupersededOrder extends Error {}
+
 /** Thrown when a request reached the box but was refused. */
 export class AirSendError extends Error {
   constructor(message, { status, transport, eventType } = {}) {
@@ -123,20 +135,15 @@ export class AirSendClient {
      * back to its starting point on every configuration.
      */
     this.warmAfter = WARM_AFTER_MS;
-    /** Tail of the radio queue: one operation at a time, in order. */
-    this.queue = Promise.resolve();
-    /** Radio operations queued or in flight: the box is not free while > 0. */
-    this.pending = 0;
-    /** Emissions still going out behind an order already answered. */
-    this.trailing = Promise.resolve();
+    /** The radio of each box, by connection string (see `radioOf`). */
+    this.radios = new Map();
     /**
-     * The last order given to each device, by platform id. A repeat is the
+     * The last order given to each device, by platform id — by Gladys, or by a
+     * remote heard on the air (see `supersede`). A repeat or a retry is the
      * previous order said again: once the device has been told something
-     * newer, saying the old one again is saying it WRONG (see `repeat`).
+     * newer, saying the old one again is saying it WRONG (see `emit`).
      */
     this.latestOrders = new Map();
-    /** When the box last had the radio to itself. */
-    this.lastRadioAt = 0;
     /**
      * Called after every exchange that used the radio. The box drops out of
      * reception while it transmits, so the integration re-arms its listening
@@ -178,6 +185,30 @@ export class AirSendClient {
   }
 
   /**
+   * The radio a device is reached through: one per box, told apart by the
+   * connection string, each with its own queue and its own idea of when it was
+   * last spoken to.
+   */
+  radioOf(device) {
+    const key = this.spurlOf(device) ?? '';
+    let radio = this.radios.get(key);
+    if (!radio) {
+      radio = {
+        /** Tail of the queue: one operation at a time, in order. */
+        queue: Promise.resolve(),
+        /** Operations queued or in flight: the box is not free while > 0. */
+        pending: 0,
+        /** Emissions still going out behind an order already answered. */
+        trailing: Promise.resolve(),
+        /** When the box last had the radio to itself; null until it has. */
+        lastRadioAt: null,
+      };
+      this.radios.set(key, radio);
+    }
+    return radio;
+  }
+
+  /**
    * Send notes to a device.
    *
    * Radio is one-way and lossy: nothing acknowledges an order, and a frame that
@@ -187,7 +218,7 @@ export class AirSendClient {
    *
    *   - it waits its turn, because a box busy transmitting hears nothing;
    *   - a transmission the box could not carry is tried again;
-   *   - an order that means the same thing twice (UP, STOP, a percentage — see
+   *   - an order that means the same thing twice (UP, DOWN, a percentage — see
    *     `isRepeatable`) is repeated, the way a real remote repeats it for as
    *     long as the button is held. A TOGGLE, which does NOT mean the same
    *     thing twice, never is.
@@ -225,14 +256,18 @@ export class AirSendClient {
     const pace = { waited: 0, box: 0, attempts: 0 };
     let answer;
     try {
-      answer = await this.emit(device, notes, options, pace);
+      answer = await this.emit(device, notes, options, { pace, order });
     } catch (err) {
       logger.warn(
         err.eventType === undefined
           ? `Local transfer failed for "${device.name}": ${err.message}`
           : `The box did not carry the order sent to "${device.name}". ${explainFailure(err.eventType)}`,
       );
-      this.rememberTransport(device, DEVICE_TRANSPORTS.UNREACHABLE);
+      // The badge is the newest order's to set: one sent behind this one may
+      // well have gone through by now.
+      if (!this.isSuperseded(device, order)) {
+        this.rememberTransport(device, DEVICE_TRANSPORTS.UNREACHABLE);
+      }
       this.notifyTransmit();
       throw err;
     }
@@ -252,24 +287,25 @@ export class AirSendClient {
    * to say it a second time changes nothing anyone can see.
    *
    * Only the first repeat is sure to be queued before the next order: the
-   * following ones join the queue one at a time. So a repeat checks, before it
-   * goes out, that its order is still the last one this device was given — or
-   * an UP repeated behind a STOP sets the shutter off again.
+   * following ones join the queue one at a time. So a repeat checks, when its
+   * turn comes, that its order is still the last one this device was given —
+   * or an UP repeated behind a STOP sets the shutter off again (see `emit`).
    */
   repeat(device, notes, options, times, order = null) {
     if (times <= 0) {
       return;
     }
-    this.trailing = this.trailing.then(async () => {
+    const radio = this.radioOf(device);
+    radio.trailing = radio.trailing.then(async () => {
       for (let emission = 0; emission < times; emission += 1) {
-        if (order && this.latestOrders.get(device.platformId) !== order) {
-          logger.debug(`Dropped the repeats of an older order to "${device.name}"`);
-          return;
-        }
         try {
-          await this.emit(device, notes, options);
+          await this.emit(device, notes, options, { order, again: true });
         } catch (err) {
-          logger.debug(`Could not repeat the order sent to "${device.name}": ${err.message}`);
+          logger.debug(
+            err instanceof SupersededOrder
+              ? `Dropped the repeats of an older order to "${device.name}"`
+              : `Could not repeat the order sent to "${device.name}": ${err.message}`,
+          );
           return;
         }
         this.rememberTransport(device, DEVICE_TRANSPORTS.LOCAL);
@@ -278,9 +314,9 @@ export class AirSendClient {
     });
   }
 
-  /** Is the box in the middle of something? (An order queued, a repeat going out.) */
+  /** Is a box in the middle of something? (An order queued, a repeat going out.) */
   get busy() {
-    return this.pending > 0;
+    return [...this.radios.values()].some((radio) => radio.pending > 0);
   }
 
   /**
@@ -289,21 +325,77 @@ export class AirSendClient {
    * but a test that asserts what went on the air has to know when to look.
    */
   async idle() {
-    await this.trailing;
-    await this.queue;
+    for (const radio of this.radios.values()) {
+      await radio.trailing;
+      await radio.queue;
+    }
+  }
+
+  /**
+   * The device was given an order that did not come from Gladys: a wall remote
+   * heard on the air. The repeats and retries of the previous Gladys order
+   * still waiting their turn are dropped — the UP repeated behind the STOP
+   * pressed on the wall set the shutter off again, and its echo, ours, left
+   * Gladys showing it stopped.
+   */
+  supersede(device) {
+    this.latestOrders.set(device.platformId, { heard: true });
+  }
+
+  /** Has this device been given a newer order than `order`? */
+  isSuperseded(device, order) {
+    return Boolean(order) && this.latestOrders.get(device.platformId) !== order;
+  }
+
+  /**
+   * Is it too late to say `order` again, now that its turn has come?
+   *
+   * `seen` is the device's latest order when this emission joined the queue.
+   * Anything newer by then is IN FRONT of it and has gone out: saying the old
+   * order after it undoes it. A Gladys order given since is behind it, and
+   * goes out after it anyway — the radio order stays the user's. An order
+   * heard on the air since has already happened.
+   */
+  isOverridden(device, order, seen) {
+    if (!this.isSuperseded(device, order)) {
+      return false;
+    }
+    return seen !== order || this.latestOrders.get(device.platformId).heard === true;
   }
 
   /**
    * One emission, tried again when the box could not carry it. A refusal is not
    * retried: a connection string the box rejects and a channel it does not know
    * are answered exactly the same way the second time.
+   *
+   * A retry and a repeat (`again`) join the back of the queue, behind orders
+   * given since. So they check, when their turn comes, that nothing has
+   * overridden their order: an UP retried after the STOP that was queued
+   * behind it set the shutter off again, and a gate the user had just closed
+   * reopened.
    */
-  async emit(device, notes, options, pace = null) {
+  async emit(device, notes, options, { pace = null, order = null, again = false } = {}) {
     let failure = null;
     for (let attempt = 1; attempt <= ATTEMPTS; attempt += 1) {
+      const checked = again || attempt > 1;
+      const seen = this.latestOrders.get(device.platformId);
       try {
-        return await this.radio(() => this.transferLocal(device, notes, options), pace);
+        return await this.radio(
+          device,
+          () => {
+            if (checked && this.isOverridden(device, order, seen)) {
+              throw new SupersededOrder(`A newer order to "${device.name}" replaced this one`);
+            }
+            return this.transferLocal(device, notes, options);
+          },
+          pace,
+        );
       } catch (err) {
+        if (err instanceof SupersededOrder) {
+          // What the caller is owed is why the order failed, not why it was
+          // not sent again.
+          throw failure ?? err;
+        }
         failure = err;
         if (attempt >= ATTEMPTS || !isRetryable(err, notes)) {
           break;
@@ -336,12 +428,13 @@ export class AirSendClient {
    * is what makes "the second click did nothing" impossible: orders reach the
    * box one at a time, in the order the user gave them.
    */
-  radio(operation, pace = null) {
-    this.pending += 1;
+  radio(device, operation, pace = null) {
+    const radio = this.radioOf(device);
+    radio.pending += 1;
     const askedAt = this.now();
-    const run = this.queue.then(async () => {
+    const run = radio.queue.then(async () => {
       try {
-        const idle = this.lastRadioAt + RADIO_GAP_MS - this.now();
+        const idle = radio.lastRadioAt === null ? 0 : radio.lastRadioAt + RADIO_GAP_MS - this.now();
         if (idle > 0) {
           await this.sleep(idle);
         }
@@ -354,19 +447,19 @@ export class AirSendClient {
         try {
           return await operation();
         } finally {
-          this.lastRadioAt = this.now();
+          radio.lastRadioAt = this.now();
           if (pace) {
-            pace.box += this.lastRadioAt - startedAt;
+            pace.box += radio.lastRadioAt - startedAt;
             pace.attempts += 1;
           }
         }
       } finally {
-        this.pending -= 1;
+        radio.pending -= 1;
       }
     });
     // The tail must stay resolved: a failed operation cannot be allowed to
     // reject every order queued behind it.
-    this.queue = run.then(
+    radio.queue = run.then(
       () => {},
       () => {},
     );
@@ -424,22 +517,38 @@ export class AirSendClient {
    * @returns {Promise<boolean>} whether the box was actually touched
    */
   async keepWarm(device) {
-    if (!this.canUseLocal(device) || this.busy) {
+    if (!this.canUseLocal(device)) {
       return false;
     }
-    const idleFor = this.now() - this.lastRadioAt;
+    // This box's radio, not the client's: with two boxes, the first one woken
+    // made the second look busy, and its traffic made the second look used.
+    const radio = this.radioOf(device);
+    if (radio.pending > 0) {
+      return false;
+    }
+    const firstContact = radio.lastRadioAt === null;
+    const idleFor = this.now() - (radio.lastRadioAt ?? 0);
     if (idleFor < this.warmAfter) {
       return false;
     }
     const startedAt = this.now();
+    let telling = !firstContact;
     try {
-      await this.radio(() =>
+      await this.radio(device, () =>
         this.transferLocal(device, [queryNote(QUERY_TYPES.TEMPERATURE)], { wait: true }),
       );
     } catch (err) {
       logger.debug(`Could not keep the link to "${device.name}" warm: ${err.message}`);
+      telling = telling && answeredItself(err);
     }
-    this.learnHowFastItGoesCold(device, idleFor, this.now() - startedAt);
+    // Only a box that answered, after a real silence, says how fast its link
+    // goes cold. The first contact builds the session and is slow whatever the
+    // interval; a box that is off makes every wake last the eight seconds of
+    // the timeout — and both used to bring the interval down to its floor, with
+    // a line in the log every minute all night.
+    if (telling) {
+      this.learnHowFastItGoesCold(device, idleFor, this.now() - startedAt);
+    }
     // Whether it answered or refused, the box was addressed — and if that took
     // it out of reception, listening has to be armed again. Cheaper to re-arm
     // for nothing than to let a wall remote go unheard until the renewal.
@@ -598,7 +707,7 @@ export class AirSendClient {
     // Through the radio queue like an order: subscribing switches the box to
     // permanent reception, and doing that while it is transmitting is how a
     // subscription silently fails to take.
-    const response = await this.radio(() =>
+    const response = await this.radio(device, () =>
       this.localRequest(
         'airsend/bind',
         { channel: { id: Number(channelId) }, duration: 0, callback: callbackUrl },
@@ -668,8 +777,9 @@ export class AirSendClient {
  * say nothing about whether the frame went out (a TIMEOUT, a lost SYNC, an HTTP
  * 500 "no radio confirmation", a request cut after 8 s): the order may well
  * have reached the motor. Sent again, an UP is still an UP — but a TOGGLE opens
- * the gate and then closes it. So an order that is not repeatable is only tried
- * again when it provably never reached the air.
+ * the gate and then closes it, and a STOP sends the Somfy shutter the first one
+ * stopped to its favourite position. So an order that is not repeatable is only
+ * tried again when it provably never reached the air.
  */
 function isRetryable(err, notes) {
   if (!isTransient(err)) {
@@ -690,6 +800,20 @@ function isTransient(err) {
     return true;
   }
   return status >= 500;
+}
+
+/**
+ * Did the box itself answer, even to refuse? A box with no sensor to read says
+ * UNSUPPORTED, which is the very exchange keeping it warm is for. A request cut
+ * by the timeout, a service that could not reach the box (NETWORK, TIMEOUT, an
+ * HTTP error) say nothing about the link but that it is not there.
+ */
+function answeredItself(err) {
+  if (err?.eventType === undefined) {
+    return false;
+  }
+  const { name } = describeFailure(err.eventType);
+  return name !== 'NETWORK' && name !== 'TIMEOUT';
 }
 
 /**

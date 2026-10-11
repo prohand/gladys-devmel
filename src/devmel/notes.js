@@ -111,19 +111,23 @@ export function levelNote(level) {
  * twice is back where it started, and PROG heard twice is a pairing undone. A
  * lossy one-way radio is a good reason to say things twice, never a good enough
  * one to say them wrong.
+ *
+ * Neither STOP nor the favourite position (MIDDLE, USERPOSITION) is here. On
+ * Somfy RTS they are one and the same frame, the "my" button: it stops a
+ * shutter that moves and sends a still one to the position programmed in its
+ * motor. A repeat is a second press, not a held button — so the STOP repeated
+ * behind the one that had just stopped a shutter at 40 % sent it to its
+ * favourite position, while Gladys kept showing 40 %.
  */
 const REPEATABLE_STATES = new Set([
-  STATE_VALUES.STOP,
   STATE_VALUES.OFF,
   STATE_VALUES.ON,
   STATE_VALUES.CLOSE,
   STATE_VALUES.OPEN,
-  STATE_VALUES.MIDDLE,
   STATE_VALUES.DOWN,
   STATE_VALUES.UP,
   STATE_VALUES.LEFT,
   STATE_VALUES.RIGHT,
-  STATE_VALUES.USERPOSITION,
 ]);
 
 /**

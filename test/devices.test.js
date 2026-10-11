@@ -15,7 +15,7 @@ import { shutter } from '../src/devices/shutter.js';
 import { resetSensorClicks, sensor } from '../src/devices/sensor.js';
 import { resetGatewayReads } from '../src/devices/gateway.js';
 import { NOTE_TYPES, READINGS, STATE_VALUES } from '../src/devmel/notes.js';
-import { toThingUid } from '../src/devmel/client.js';
+import { AirSendClient, toThingUid } from '../src/devmel/client.js';
 import { HeardChannels } from '../src/devmel/heard.js';
 import { SentOrders } from '../src/devmel/orders.js';
 import { ShutterTravel } from '../src/devmel/travel.js';
@@ -1151,6 +1151,81 @@ test('a wall remote pressed during that time is still a fresh order', async (t) 
   await clock.advance(2000);
 
   assert.deepEqual(positionsOf('Timed shutter'), [0, 5, 10]);
+});
+
+test('a wall remote heard on the air cancels the repeat of the Gladys order it overrides', async (t) => {
+  // A scene opens two shutters at once, so the repeat of the first UP waits
+  // behind the second shutter's order. STOP pressed on the wall meanwhile: the
+  // repeated UP used to go out after it and run the shutter to the top, its
+  // echo filtered as ours, while Gladys showed it stopped.
+  const { gladys, config } = setupTimed(t);
+  const orders = new SentOrders();
+  const client = new AirSendClient({ sleep: async () => {}, orders });
+  client.configure(
+    normalizeConfig({
+      service_url: 'http://192.168.1.50:33863',
+      spurl: 'sp://pass@[fe80::1]?rhost=192.168.1.50',
+      command_repeat: 1,
+    }),
+  );
+  const channels = [];
+  let release = null;
+  const realFetch = globalThis.fetch;
+  t.after(() => {
+    globalThis.fetch = realFetch;
+  });
+  globalThis.fetch = async (url, options) => {
+    const channel = JSON.parse(options.body).channel.id;
+    channels.push(channel);
+    if (channel === 800 && !release) {
+      await new Promise((resolve) => {
+        release = resolve;
+      });
+    }
+    return { status: 200, json: async () => ({ type: 3 }) };
+  };
+  const open = (name) => {
+    const found = findDeviceByExternalId(gladys, config, deviceExternalId(config, name));
+    return found.blueprint.onSetValue(gladys, {
+      device: found.device,
+      feature: featureOf(gladys, config, name, 'state'),
+      value: 1,
+      client,
+    });
+  };
+
+  const first = open('Timed shutter');
+  const second = open('Sun sail');
+  await first;
+  await new Promise(setImmediate);
+  await applyEvents(
+    gladys,
+    config,
+    [
+      {
+        type: 3,
+        channel: { id: 700, source: 42 },
+        thingnotes: { notes: [{ type: NOTE_TYPES.STATE, value: STATE_VALUES.STOP }] },
+      },
+    ],
+    new HeardChannels(),
+    orders,
+    undefined,
+    client,
+  );
+  release();
+  await second;
+  await client.idle();
+
+  assert.deepEqual(
+    channels.filter((channel) => channel === 700),
+    [700],
+  );
+  // The other shutter was told nothing new: its repeat still goes out.
+  assert.deepEqual(
+    channels.filter((channel) => channel === 800),
+    [800, 800],
+  );
 });
 
 test('an order the box could not transmit is said out loud, not swallowed', async (t) => {

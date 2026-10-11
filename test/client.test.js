@@ -311,12 +311,102 @@ test('a newer order to the same device drops the repeats of the older one', asyn
   await client.idle();
 
   const sent = calls.map((call) => JSON.parse(call.options.body).thingnotes.notes[0].value);
-  assert.equal(sent.at(-1), STATE_VALUES.STOP);
-  assert.deepEqual(sent.slice(sent.indexOf(STATE_VALUES.STOP)), [
-    STATE_VALUES.STOP,
-    STATE_VALUES.STOP,
-    STATE_VALUES.STOP,
-  ]);
+  // Nothing after the STOP, which is itself said once (see the next test).
+  assert.deepEqual(sent.slice(sent.indexOf(STATE_VALUES.STOP)), [STATE_VALUES.STOP]);
+});
+
+test('a STOP goes out once, whatever the repeats: a second one is the Somfy "my" press', async () => {
+  // A repeat is a separate press, reaching a shutter the first STOP has just
+  // stopped: on Somfy RTS that sends it to its favourite position, while
+  // Gladys shows where it was stopped.
+  stubFetch(() => jsonResponse(200, { type: 3 }));
+  const client = clientWith({ command_repeat: 2 });
+
+  await client.transfer(DEVICE, [stateNote(STATE_VALUES.STOP)]);
+  await client.idle();
+
+  assert.equal(calls.length, 1);
+});
+
+test('a STOP that may have gone out is not sent a second time', async () => {
+  stubFetch(() => jsonResponse(500));
+  const client = clientWith();
+
+  await assert.rejects(
+    () => client.transfer(DEVICE, [stateNote(STATE_VALUES.STOP)]),
+    /no radio confirmation/,
+  );
+  assert.equal(calls.length, 1);
+});
+
+test('an order retried behind a newer one is dropped, not sent after it', async () => {
+  // UP hangs until the request times out, though its frame may well have gone
+  // out: the shutter moves, the user clicks STOP, which waits behind it. A
+  // retry of UP sent after that STOP set the shutter off again.
+  let hung = null;
+  stubFetch(() => {
+    if (calls.length === 1) {
+      return new Promise((resolve, reject) => {
+        hung = () =>
+          reject(Object.assign(new Error('The operation timed out'), { name: 'TimeoutError' }));
+      });
+    }
+    return jsonResponse(200, { type: 3 });
+  });
+  const client = clientWith();
+  let transports = 0;
+  client.rememberTransport = (device, transport) => {
+    transports += 1;
+    assert.equal(transport, 'local', "the badge is the STOP's, which went through");
+  };
+
+  const up = client.transfer(DEVICE, [stateNote(STATE_VALUES.UP)]);
+  await new Promise(setImmediate);
+  const stop = client.transfer(DEVICE, [stateNote(STATE_VALUES.STOP)]);
+  hung();
+
+  // UP did fail: nothing says it reached the shutter, and nothing must now
+  // announce it open and start tracking a travel to the top.
+  await assert.rejects(up, /timed out/);
+  await stop;
+  await client.idle();
+
+  assert.deepEqual(
+    calls.map((call) => JSON.parse(call.options.body).thingnotes.notes[0].value),
+    [STATE_VALUES.UP, STATE_VALUES.STOP],
+  );
+  assert.equal(transports, 1);
+});
+
+test('a repeat waiting behind other devices is dropped once a remote overrode its order', async () => {
+  // A scene opens two shutters at once: the repeat of the first one queues
+  // behind the second one's order. The wall remote pressed STOP meanwhile, and
+  // the repeated UP must not undo it.
+  const SECOND = { ...DEVICE, name: 'Office plug', platformId: '201-2', channel: { id: 201 } };
+  let release = null;
+  stubFetch((url, options) => {
+    if (JSON.parse(options.body).channel.id === SECOND.channel.id && !release) {
+      return new Promise((resolve) => {
+        release = () => resolve(jsonResponse(200, { type: 3 }));
+      });
+    }
+    return jsonResponse(200, { type: 3 });
+  });
+  const client = clientWith({ command_repeat: 1 });
+
+  const first = client.transfer(DEVICE, [stateNote(STATE_VALUES.UP)]);
+  const second = client.transfer(SECOND, [stateNote(STATE_VALUES.UP)]);
+  await first;
+  await new Promise(setImmediate);
+  client.supersede(DEVICE);
+  release();
+  await second;
+  await client.idle();
+
+  const onFirst = calls.filter((call) => JSON.parse(call.options.body).channel.id === 200);
+  assert.equal(onFirst.length, 1);
+  // The other shutter was told nothing new: its repeat still goes out.
+  assert.equal(calls.length - onFirst.length, 2);
 });
 
 test('a repeat that fails changes nothing: the order did go out', async () => {
@@ -592,6 +682,9 @@ test('a box that goes cold quickly is touched more often, down to a floor', asyn
     return client.keepWarm(BOX);
   };
 
+  // The first contact builds the session: slow whatever the interval, it
+  // teaches nothing (see the test below).
+  await wake(50);
   assert.equal(client.warmAfter, WARM_AFTER_MS);
   await wake(3000);
   assert.equal(client.warmAfter, WARM_AFTER_MS / 2);
@@ -612,6 +705,9 @@ test('a box that goes cold quickly is touched more often, down to a floor', asyn
 test('a fresh configuration forgets what the old box taught us', async () => {
   const tick = { at: 0 };
   const client = clientOnClock(tick);
+  stubFetch(() => jsonResponse(200, { type: 3, thingnotes: { notes: [] } }));
+  tick.at += WARM_AFTER_MS;
+  await client.keepWarm(BOX);
   stubFetch(() => {
     tick.at += 3000;
     return jsonResponse(200, { type: 3, thingnotes: { notes: [] } });
@@ -623,4 +719,118 @@ test('a fresh configuration forgets what the old box taught us', async () => {
 
   client.configure(normalizeConfig({ spurl: 'sp://pass@[fe80::2]?rhost=192.168.1.51' }));
   assert.equal(client.warmAfter, WARM_AFTER_MS);
+});
+
+test('the first contact with a box, slow by nature, does not shorten the interval', async () => {
+  // Nothing had reached the box since start-up: that wake builds the session,
+  // and its slowness says nothing about how fast the link goes cold.
+  const tick = { at: Date.parse('2026-10-11T08:00:00Z') };
+  const client = clientOnClock(tick);
+  stubFetch(() => {
+    tick.at += 1200;
+    return jsonResponse(200, { type: 3, thingnotes: { notes: [] } });
+  });
+
+  const lines = captureLogs(() => client.keepWarm(BOX));
+
+  assert.equal(await lines.result, true);
+  assert.equal(client.warmAfter, WARM_AFTER_MS);
+  assert.equal(lines.of('INFO').length, 0);
+});
+
+test('a box that is off does not bring the interval down, nor fill the log', async () => {
+  // Every wake of a box that is unplugged lasts the whole timeout: that is the
+  // box missing, not a link going cold.
+  const tick = { at: 0 };
+  const client = clientOnClock(tick);
+  stubFetch(() => jsonResponse(200, { type: 3, thingnotes: { notes: [] } }));
+  tick.at += WARM_AFTER_MS;
+  await client.keepWarm(BOX);
+
+  const lines = captureLogs(async () => {
+    for (const failure of [
+      () => {
+        tick.at += 8000;
+        throw Object.assign(new Error('The operation timed out'), { name: 'TimeoutError' });
+      },
+      // The service is there, the box is not.
+      () => {
+        tick.at += 3000;
+        return jsonResponse(200, { type: 0x101 });
+      },
+      () => {
+        tick.at += 3000;
+        return jsonResponse(200, { type: 0x105 });
+      },
+    ]) {
+      stubFetch(failure);
+      tick.at += client.warmAfter;
+      assert.equal(await client.keepWarm(BOX), true);
+    }
+  });
+  await lines.result;
+
+  assert.equal(client.warmAfter, WARM_AFTER_MS);
+  assert.equal(lines.of('INFO').length, 0);
+});
+
+test('every box is kept warm, each after its own silence', async () => {
+  // Two boxes are two radios: the first one woken used to make the second
+  // look busy, and its traffic made the second look recently used.
+  const tick = { at: 0 };
+  const client = clientOnClock(tick);
+  const second = {
+    ...BOX,
+    name: 'Garage box',
+    platformId: '1-garage',
+    spurl: 'sp://pass@[fe80::2]?rhost=192.168.1.51',
+  };
+  stubFetch(() => jsonResponse(200, { type: 3, thingnotes: { notes: [] } }));
+
+  tick.at += WARM_AFTER_MS;
+  // Called the way index.js does: same tick, not awaited one after the other.
+  assert.deepEqual(await Promise.all([client.keepWarm(BOX), client.keepWarm(second)]), [
+    true,
+    true,
+  ]);
+  const reached = calls.map((call) => call.options.headers.Authorization);
+  assert.equal(new Set(reached).size, 2);
+
+  // Orders through the first box are no news for the second one.
+  tick.at += WARM_AFTER_MS - 1000;
+  await client.transfer(DEVICE, [stateNote(STATE_VALUES.ON)]);
+  tick.at += 1000;
+  assert.deepEqual(await Promise.all([client.keepWarm(BOX), client.keepWarm(second)]), [
+    false,
+    true,
+  ]);
+});
+
+test('a box that does not answer holds up only its own orders', async () => {
+  // Two boxes, the first one unplugged: each request to it hangs until the
+  // timeout. The STOP that ends a timed travel through the second box used to
+  // wait behind it, and the shutter ran on.
+  const garage = {
+    ...DEVICE,
+    name: 'Garage door',
+    platformId: '300-3',
+    channel: { id: 300 },
+    spurl: 'sp://pass@[fe80::2]?rhost=192.168.1.51',
+  };
+  stubFetch((url, options) => {
+    if (options.headers.Authorization.includes('fe80::1')) {
+      return new Promise(() => {});
+    }
+    return jsonResponse(200, { type: 3 });
+  });
+  const client = clientWith();
+
+  client.bind(5, 'http://127.0.0.1:9999/', BOX).catch(() => {});
+  await new Promise(setImmediate);
+  await client.transfer(garage, [stateNote(STATE_VALUES.STOP)]);
+
+  assert.equal(calls.length, 2);
+  assert.match(calls[1].url, /airsend\/transfer$/);
+  // And the integration knows a box is still busy: listening waits for it.
+  assert.equal(client.busy, true);
 });

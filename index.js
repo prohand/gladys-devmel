@@ -36,6 +36,7 @@ import { CallbackServer } from './src/devmel/callback.js';
 import { indexChannels, planListening } from './src/devmel/listening.js';
 import { createListenLoop } from './src/devmel/listenLoop.js';
 import { heardChannels } from './src/devmel/heard.js';
+import { sentOrders } from './src/devmel/orders.js';
 import { attachHeardRemote } from './src/devmel/remotes.js';
 import { findProtocol } from './src/devmel/protocols.js';
 import { failureReason, SCENE_ACTIONS, sceneEvents } from './src/capabilities/scenes.js';
@@ -214,7 +215,17 @@ gladys.onDeviceUpdated((device) => onDeviceSaved(device, 'onDeviceUpdated'));
 // dated with the box timestamp, because relayed events can arrive out of
 // order; the state of what a remote drives is not (see helpers.js).
 async function handleRadioEvents(events, route) {
-  const applied = await applyEvents(gladys, config, events);
+  // The client too: an order heard from a wall remote cancels the repeats of
+  // the Gladys order it overrides.
+  const applied = await applyEvents(
+    gladys,
+    config,
+    events,
+    heardChannels,
+    sentOrders,
+    sceneEvents,
+    client,
+  );
   logger.debug(`${route}: ${events?.length ?? 0} event(s), ${applied} device(s) updated`);
   refreshWidget();
 }

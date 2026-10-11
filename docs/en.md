@@ -249,12 +249,16 @@ Three things answer it, with nothing to set:
 - **orders go out one at a time.** A box has one radio: while it transmits it
   hears nothing, and a second order fired straight after reaches a box that is
   still busy. Orders therefore queue up, a quarter of a second apart, in the
-  order you gave them;
+  order you gave them — one queue per box, so a box that does not answer never
+  holds up the orders sent through another one;
 - **an order the box could not carry is sent again.** A refusal is not: a
   rejected connection string and an unknown channel answer exactly the same way
-  the second time. A push button TOGGLE is only sent again when it certainly
-  never went out (the service unreachable, the box busy): after a timeout it may
-  well have opened the gate, and a second one would close it;
+  the second time. A push button TOGGLE, or a Stop, is only sent again when it
+  certainly never went out (the service unreachable, the box busy): after a
+  timeout it may well have opened the gate, and a second one would close it.
+  Nor is an order sent again once you gave the device a newer one — from Gladys
+  or from its wall remote: an Open sent again after your Stop would set the
+  shutter off again;
 - **an order is repeated on the air**, the way a real remote repeats it for as
   long as the button is held. By default every order goes out twice.
 
@@ -267,9 +271,12 @@ others:
 { "devices": { "Patio door": { "type": 4098, "pid": 25455, "addr": 8295, "repeat": 3 } } }
 ```
 
-Only orders that mean the same thing twice are repeated — Open, Stop, Close, a
+Only orders that mean the same thing twice are repeated — Open, Close, a
 position. A push button TOGGLE goes out once: heard twice, it is back where it
-started.
+started. So does Stop: on Somfy RTS, STOP and the "my" button are the same
+frame, and a second one reaching a shutter the first has just stopped sends it
+to its favourite position. A repeat still waiting its turn is dropped when the
+device is given a newer order, from Gladys or from its wall remote.
 
 Those repeats do **not** make the interface wait: Gladys is answered as soon as
 the order is on the air, and the repeats keep going behind it, in their place in
@@ -305,7 +312,10 @@ faster than it was being kept warm… Touching it every 2 min from now on.
 ```
 
 It only ever shortens: a fast wake proves the interval it was made at works,
-never that a longer one would.
+never that a longer one would. And only a box that answered teaches it anything:
+the first contact after start-up builds the session and is slow whatever the
+interval, and a box that is switched off makes every wake last the whole timeout.
+Each box is kept warm after its own silence.
 
 When an order still takes more than a second and a half to leave, the logs say
 so, and say **where the time went**:
