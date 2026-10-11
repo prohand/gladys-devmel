@@ -35,7 +35,8 @@ import {
 import { boxDevices, describeConnection, testConnection } from './src/devmel/connection.js';
 import { AirSendService } from './src/devmel/service.js';
 import { CallbackServer } from './src/devmel/callback.js';
-import { indexChannels, planListening } from './src/devmel/listening.js';
+import { indexChannels } from './src/devmel/listening.js';
+import { armListening, rearmedChannel, renewListening } from './src/devmel/subscription.js';
 import { createListenLoop } from './src/devmel/listenLoop.js';
 import { heardChannels } from './src/devmel/heard.js';
 import { sentOrders } from './src/devmel/orders.js';
@@ -96,9 +97,7 @@ const LISTEN_REFRESH_MS = 10 * 60 * 1000;
 const listenLoop = createListenLoop({
   intervalMs: LISTEN_REFRESH_MS,
   renew: () =>
-    bindBoxes(radioCallbackUrl(), { renewal: true }).catch((err) =>
-      logger.error('Could not renew the radio listener', err),
-    ),
+    renewSubscription().catch((err) => logger.error('Could not renew the radio listener', err)),
 });
 
 // And re-arms it shortly after the integration has used the radio itself: a box
@@ -469,92 +468,36 @@ function radioCallbackUrl() {
  */
 async function startListening() {
   stopRebind();
-  await listenLoop.start(armListening);
-}
-
-/** @returns {Promise<boolean>} whether a subscription was made, worth renewing */
-async function armListening() {
-  const callbackUrl = radioCallbackUrl();
-  listenState.url = null;
-  listenState.error = null;
-  listenState.plan = planListening(config, await knownChannels());
-
-  if (!listenState.plan.enabled) {
-    logger.info('Listening disabled (listening channel set to 0)');
-    return false;
-  }
-  if (!callbackUrl) {
-    logger.info('No route for the radio frames -> sensors are refreshed by polling only');
-    return false;
-  }
-  if (boxDevices(config).length === 0) {
-    // Nothing to bind through: without a connection string there is no box to
-    // ask, and a renewal timer would bind nothing every ten minutes.
-    logger.info('No AirSend box to listen through: paste the sp:// connection string first');
-    return false;
-  }
-  if (listenState.plan.fallback) {
-    // Binding still happens: generic 433 MHz is the only useful guess before
-    // anything is declared. But it is a default, and a default that cannot
-    // hear an 868 MHz remote at all — which is indistinguishable, from the
-    // outside, from a listener that was never armed.
-    logger.warn(
-      `No radio device declared: listening to generic 433 MHz (channel ${listenState.plan.channel}). ` +
-        'An 868 MHz protocol (Profalux, Somfy io) is not heard on it -> declare a device on it, ' +
-        'or set the listening channel to its pid.',
-    );
-  }
-
-  await bindBoxes(callbackUrl);
-  announceBlindSpots(listenState.plan);
-  return true;
-}
-
-/**
- * What the protocol just bound will NOT bring back.
- *
- * The box has one radio and listens to one protocol at a time, so every choice
- * of channel is also a list of things that will never be heard again. Until now
- * that list only existed in the "Test the connection" report — a screen nobody
- * opens while everything looks fine — and its absence is what makes a perfectly
- * armed listener indistinguishable from a broken one.
- */
-function announceBlindSpots(plan) {
-  if (!plan?.enabled || !listenState.url) {
-    return;
-  }
-  for (const device of plan.uncovered) {
-    logger.warn(
-      `"${device.name}" speaks protocol ${device.channel?.id}, not the ${plan.channel} the box ` +
-        'listens to: nothing it emits will be heard. One radio, one protocol at a time.',
-    );
-  }
-  for (const { device, remote } of plan.unheardRemotes) {
-    logger.warn(
-      `The remote declared on "${device.name}" (pid ${remote.id}) speaks another protocol than ` +
-        `the ${plan.channel} the box listens to: pressing it will do nothing in Gladys. Fill in ` +
-        `${remote.id} as the listening channel to hear it instead.`,
-    );
-  }
-  if (plan.echoOnly) {
-    // The silence this explains is total: the box is listening, the route works,
-    // and nothing will ever come through it — because nothing declared on that
-    // protocol ever speaks first.
-    logger.info(
-      `Nothing declared on channel ${plan.channel} emits by itself: shutters, switches and lamps ` +
-        'are talked to, they do not talk. The box will hear the echo of Gladys own orders and ' +
-        'nothing else. A wall remote has its own protocol and its own address: press it, then ' +
-        'run "Attach a remote" — if nothing turns up, the box is not listening to ITS protocol.',
-    );
-  }
+  // This request's own outcome, for the re-arm to answer from: the shared
+  // state may already belong to the next request by the time it reads it.
+  let outcome = null;
+  await listenLoop.start(async () => {
+    outcome = await armListening({
+      config,
+      callbackUrl: radioCallbackUrl(),
+      table: await knownChannels(),
+      client,
+    });
+    // Stored once the attempt is over, never half-way: "Test the connection"
+    // and the widget read it at any moment.
+    listenState.plan = outcome.plan;
+    listenState.url = outcome.url;
+    listenState.error = outcome.error;
+    return outcome.renewable;
+  });
+  return outcome;
 }
 
 /**
  * The protocol table of the service, or an empty one when it cannot be read: a
  * protocol whose decoder is unknown is then listened to on its own channel,
  * which is what the table says for most of them anyway.
+ *
+ * @param {object} [options]
+ * @param {boolean} [options.quiet] a failure said at debug level only — the
+ *   renewals ask again after every order, and the arm already said it once
  */
-async function knownChannels() {
+async function knownChannels({ quiet = false } = {}) {
   if (channelTable.size > 0 || !config.effectiveServiceUrl) {
     return channelTable;
   }
@@ -562,32 +505,32 @@ async function knownChannels() {
     channelTable = indexChannels(await client.listChannels());
     logger.debug(`${channelTable.size} radio protocol(s) known by the AirSend Web Service`);
   } catch (err) {
-    logger.warn(`Could not read the radio protocols of the AirSend Web Service: ${err.message}`);
+    logger[quiet ? 'debug' : 'warn'](
+      `Could not read the radio protocols of the AirSend Web Service: ${err.message}`,
+    );
   }
   return channelTable;
 }
 
-async function bindBoxes(callbackUrl, { renewal = false } = {}) {
-  const channel = listenState.plan?.channel;
-  if (!callbackUrl || !(channel > 0)) {
-    return;
-  }
-  for (const box of boxDevices(config)) {
-    try {
-      await client.bind(channel, callbackUrl, box);
-      listenState.url = callbackUrl;
-      listenState.error = null;
-      // A renewal says nothing new: it repeats, every ten minutes and after
-      // every order, a line the user already read when listening was armed.
-      logger[renewal ? 'debug' : 'info'](
-        `Listening on channel ${channel} through "${box.name}" -> ${callbackUrl}`,
-      );
-    } catch (err) {
-      if (!listenState.url) {
-        listenState.error = err.message;
-      }
-      logger.warn(`Could not listen through "${box.name}": ${err.message}`);
-    }
+/**
+ * Bind the boxes again (renewal timer, after an order), and record what came
+ * of it — a failure included: the reports describe the last attempt.
+ */
+async function renewSubscription() {
+  const plan = listenState.plan;
+  const renewed = await renewListening({
+    config,
+    plan,
+    callbackUrl: radioCallbackUrl(),
+    table: await knownChannels({ quiet: true }),
+    client,
+  });
+  // An arm that completed meanwhile says more than this renewal of the plan
+  // it replaced.
+  if (renewed && listenState.plan === plan) {
+    listenState.plan = renewed.plan;
+    listenState.url = renewed.url;
+    listenState.error = renewed.error;
   }
 }
 
@@ -630,7 +573,7 @@ function rebindNow() {
     scheduleRebind();
     return;
   }
-  bindBoxes(radioCallbackUrl(), { renewal: true }).catch((err) =>
+  renewSubscription().catch((err) =>
     logger.debug(`Could not re-arm the radio listener after a command: ${err.message}`),
   );
 }
@@ -642,24 +585,9 @@ function rebindNow() {
  * @returns {Promise<number>} the channel listened to
  */
 async function rearmListening() {
-  await startListening();
-  const plan = listenState.plan;
-  if (!plan?.enabled) {
-    throw new Error('Listening is turned off (listening channel set to 0)');
-  }
-  if (boxDevices(config).length === 0) {
-    // Said as what it is: "no route" sent the user after a relay that was
-    // working, when what is missing is the connection string.
-    throw new Error('No AirSend box to listen through: paste the sp:// connection string first');
-  }
-  if (listenState.error) {
-    throw new Error(`The box refused the subscription: ${listenState.error}`);
-  }
-  if (!listenState.url) {
-    throw new Error('No route for the radio frames: nothing to bind');
-  }
+  const channel = rearmedChannel(await startListening(), config);
   refreshWidget();
-  return plan.channel;
+  return channel;
 }
 
 /** Nudge the dashboard widget, at most once per window. */

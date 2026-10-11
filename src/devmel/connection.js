@@ -8,7 +8,7 @@
 //     demand, in more detail.
 // -----------------------------------------------------------------------------
 
-import { describeSpurl, DEVICE_TYPES } from '../config.js';
+import { describeSpurl, DEVICE_TYPES, hostFromSpurl } from '../config.js';
 import { planListening } from './listening.js';
 import { describeEmitter } from './heard.js';
 import { hearsChannel } from '../devices/index.js';
@@ -19,16 +19,23 @@ import { hearsChannel } from '../devices/index.js';
  * A box declared in the device list wins (it may carry its own connection
  * string); when the user only filled the global credentials, the box is
  * implicit and rebuilt here.
+ *
+ * Rebuilt too when the boxes declared all carry ANOTHER string: that is a
+ * second box, and the one behind the global string still carries every order
+ * of every device without a string of its own. Left out, it was never listened
+ * through nor kept warm, while the second box's subscription made every report
+ * say listening worked.
  */
 export function boxDevices(config) {
   const boxes = config.devmelDevices.filter((device) => device.rtype === DEVICE_TYPES.BOX);
-  if (boxes.length > 0) {
+  if (boxes.some((box) => isGlobalBox(box, config))) {
     return boxes;
   }
   if (!config.spurl || !config.effectiveServiceUrl) {
-    return [];
+    return boxes;
   }
   return [
+    ...boxes,
     {
       name: 'AirSend box',
       rtype: DEVICE_TYPES.BOX,
@@ -37,6 +44,16 @@ export function boxDevices(config) {
       spurl: config.spurl,
     },
   ];
+}
+
+/** Is this declared box the one behind the global connection string? */
+function isGlobalBox(box, config) {
+  // No string of its own: it is reached with the global one (client.spurlOf).
+  if (!box.spurl || box.spurl === config.spurl) {
+    return true;
+  }
+  const host = hostFromSpurl(box.spurl);
+  return Boolean(host) && host === hostFromSpurl(config.spurl);
 }
 
 /**

@@ -236,6 +236,10 @@ A box declared without `sensors: true` creates no device in Gladys — it is
 only there to carry the connection string. When the global **Connection
 string** field is empty, the one declared on the box serves every device.
 
+A box declared with a connection string **other** than the global one is a
+second box: the one behind the global string is still listened through and kept
+warm, alongside it.
+
 ## Getting an order through
 
 Nothing acknowledges a radio order. A 433 MHz shutter has no way back: the box
@@ -529,6 +533,11 @@ Leave the **Listening channel** field empty.
 Fill it in only to listen to something else: the `pid` of a protocol you have
 not declared yet, or `0` to turn listening off.
 
+A `pid` typed there goes through the same table as a deduced one: a protocol the
+service decodes with the generic 433 MHz decoder is listened to on channel `1`,
+which is what hears it. And with `0`, the frames the box still pushes from the
+subscription made before are ignored until it stops sending them.
+
 **`1` and an empty field mean the same thing: "deduce it".** That is the value
 the field defaulted to before the deduction existed, and it is read as such — a
 `1` does not ask for generic 433 MHz listening. Generic listening is what the
@@ -555,6 +564,10 @@ When two protocols are declared equally — a shutter on one side, the wall remo
 attached to it on the other — the one that **emits** wins. A shutter, a switch,
 a lamp do not talk: they are talked to. A remote declared in `remotes` is there
 precisely to be heard, so that is what the box is subscribed to.
+
+Each emitter counts once, however many devices declare it: a general remote
+written into the `remotes` of every shutter is one remote, and does not outvote
+three sensors on another protocol.
 
 #### A protocol nobody speaks on
 

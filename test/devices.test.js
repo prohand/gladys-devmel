@@ -314,6 +314,36 @@ test('a radio frame updates the device sharing its channel', async () => {
   ]);
 });
 
+test('with listening turned off, a frame still pushed by the box moves nothing', async () => {
+  // The subscription made before the user set the listening channel to 0
+  // outlives the change: the box keeps pushing what it hears.
+  const gladys = createFakeGladys();
+  const config = normalizeConfig({
+    devices: DEVICES,
+    spurl: 'sp://pass@[fe80::1]?rhost=192.168.1.50',
+    listen_channel: '0',
+  });
+  const registry = new HeardChannels();
+  const applied = await applyEvents(
+    gladys,
+    config,
+    [
+      {
+        type: 3,
+        reliability: 0x20,
+        timestamp: 1700000000000,
+        channel: { id: 600, source: 6, counter: 12 },
+        thingnotes: { notes: [{ type: NOTE_TYPES.TEMPERATURE, value: 280.65 }] },
+      },
+    ],
+    registry,
+    new SentOrders(),
+  );
+
+  assert.equal(applied, 0);
+  assert.deepEqual(gladys.published, []);
+});
+
 test('the wall remote of a shutter drives it like Gladys does', async () => {
   // The AirSend emits on the shutter's protocol from its own address; the
   // remote screwed on the wall emits on the same protocol from another one.

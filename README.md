@@ -121,6 +121,7 @@ them.
 │  │  ├─ travel.js                   #   shutter position, computed from the travel times
 │  │  ├─ callback.js                 #   where the service posts the frames it hears
 │  │  ├─ listening.js                #   which radio protocol the box is asked to listen to
+│  │  ├─ subscription.js             #   arming, renewing and re-arming that subscription
 │  │  ├─ heard.js                    #   the emitters heard on the air, remembered
 │  │  ├─ remotes.js                  #   the "Attach a remote" action: writes the device list
 │  │  └─ connection.js               #   connection status + the "Test the connection" action

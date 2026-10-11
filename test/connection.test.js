@@ -365,6 +365,45 @@ test('the implicit box follows the service that actually serves the local channe
   );
 });
 
+test('a second box declared with its own string does not hide the box behind the global one', () => {
+  const config = normalizeConfig({
+    spurl: SPURL,
+    devices: JSON.stringify({
+      devices: [
+        {
+          name: 'Box garage',
+          type: 0,
+          spurl: 'sp://other@[fe80::2]?gw=0&rhost=192.168.1.60',
+          sensors: true,
+        },
+        { name: 'Volet salon', type: 4098, pid: 25455, addr: 8295 },
+      ],
+    }),
+  });
+
+  // The shutter's orders go through the global string: that box must be
+  // listened through and kept warm too.
+  assert.deepEqual(
+    boxDevices(config).map((box) => box.spurl),
+    ['sp://other@[fe80::2]?gw=0&rhost=192.168.1.60', SPURL],
+  );
+  // The global box declared in the list, with or without its string: once.
+  for (const box of [
+    { name: 'Box salon', type: 0 },
+    { name: 'Box salon', type: 0, spurl: SPURL },
+    { name: 'Box salon', type: 0, spurl: 'sp://pass@[fe80::9]?gw=0&rhost=192.168.1.50' },
+  ]) {
+    const declared = normalizeConfig({
+      spurl: SPURL,
+      devices: JSON.stringify({ devices: [box] }),
+    });
+    assert.deepEqual(
+      boxDevices(declared).map((found) => found.name),
+      ['Box salon'],
+    );
+  }
+});
+
 test('silence is told apart from a route that carries nothing back', async () => {
   // "Nothing heard" is three problems wearing the same face. The counters of
   // the registry are what separates them, and the answer differs every time.

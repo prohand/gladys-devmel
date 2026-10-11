@@ -275,6 +275,16 @@ export async function applyEvents(
       continue;
     }
 
+    // Listening turned off (listening channel 0) stops the renewals, but there
+    // is no call to end a subscription already made: the box keeps pushing
+    // what it hears until it leaves reception. Those frames are what the user
+    // asked not to follow any more — a remote still moving shutters while
+    // every screen says listening is off. Our own answers above still count.
+    if (config.listen_channel === 0) {
+      logger.debug(`Listening is off: ignored a frame from ${describeChannel(event?.channel)}`);
+      continue;
+    }
+
     const unusable = whyUnusable(event, config);
     registry.received({ dropped: unusable });
     if (unusable) {

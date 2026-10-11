@@ -246,6 +246,10 @@ il n'est là que pour porter la chaîne de connexion. Quand le champ global
 **Chaîne de connexion** est vide, celle déclarée sur le boîtier sert à tous les
 appareils.
 
+Un boîtier déclaré avec une chaîne de connexion **différente** de la chaîne
+globale est un second boîtier : celui de la chaîne globale reste écouté et
+maintenu éveillé, à côté de lui.
+
 ## Faire passer un ordre
 
 Rien n'accuse réception d'un ordre radio. Un volet 433 MHz n'a pas de voie de
@@ -561,6 +565,12 @@ Laissez le champ **Canal d'écoute** vide.
 Renseignez-le seulement pour écouter autre chose : le `pid` d'un protocole que
 vous n'avez pas encore déclaré, ou `0` pour couper l'écoute.
 
+Un `pid` tapé là passe par la même table qu'un canal déduit : un protocole que
+le service décode avec le décodeur générique 433 MHz est écouté sur le canal
+`1`, celui qui l'entend. Et avec `0`, les trames que le boîtier pousse encore au
+titre de l'abonnement d'avant sont ignorées jusqu'à ce qu'il cesse de les
+envoyer.
+
 **`1` et un champ vide veulent dire la même chose : « déduis-le ».** C'est la
 valeur que le champ prenait par défaut avant que la déduction n'existe, et elle
 est lue comme telle — un `1` ne demande donc pas l'écoute générique 433 MHz.
@@ -588,6 +598,11 @@ télécommande murale qu'on lui a rattachée de l'autre —, c'est **celui qui �
 qui l'emporte. Un volet, un interrupteur, une lampe ne parlent pas : on leur
 parle. Une télécommande déclarée dans `remotes` est là, elle, précisément pour
 être entendue : c'est donc elle que le boîtier écoute.
+
+Chaque émetteur compte une fois, quel que soit le nombre d'appareils qui le
+déclarent : une télécommande générale recopiée dans les `remotes` de chaque
+volet reste une seule télécommande, et ne l'emporte pas sur trois capteurs d'un
+autre protocole.
 
 #### Un protocole où personne ne parle
 
