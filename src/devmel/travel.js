@@ -216,6 +216,42 @@ export class ShutterTravel {
     return true;
   }
 
+  /**
+   * How long until the next STOP a movement under way has to send (its
+   * `arrive`), in milliseconds, or null when none is waiting for one. That STOP
+   * waits here, in a timer, not in the radio queue: whoever wants the radio for
+   * something slow has to ask (see `rebindNow` in index.js).
+   */
+  untilArrival() {
+    let soonest = null;
+    for (const state of this.states.values()) {
+      if (state.move?.arrive) {
+        const left = Math.max(0, state.move.endAt - this.now());
+        soonest = soonest === null ? left : Math.min(soonest, left);
+      }
+    }
+    return soonest;
+  }
+
+  /**
+   * Bring every movement under way to the end it is going to have (integration
+   * shutdown): its timers are about to go, and with them the STOP of a shutter
+   * driven to 40 % and the publication of where it lands. Cleared as they
+   * were, the motor ran into its end stop, Gladys kept the last tick of the
+   * way, and the next start timed every positioning from that stale value.
+   *
+   * A movement stopped by an order (`arrive`) is stopped now, where it is: the
+   * radio still works, and an early STOP beats none. Any other one is heading
+   * for a place the motor finds by itself (an end stop, its own favourite):
+   * that is where it is published.
+   */
+  async settle() {
+    const moving = [...this.states.values()].filter((state) => state.move);
+    // Every STOP is queued before anything is published: radio first, as at
+    // any arrival (see `arrive`).
+    await Promise.all(moving.map((state) => this.settleOne(state)));
+  }
+
   /** Cancel every pending timer (integration shutdown). */
   clear() {
     for (const state of this.states.values()) {
@@ -228,10 +264,44 @@ export class ShutterTravel {
   stateOf(device) {
     let state = this.states.get(device.platformId);
     if (!state) {
-      state = { position: null, move: null, handle: null };
+      state = { position: null, move: null, handle: null, device };
       this.states.set(device.platformId, state);
     }
+    state.device = device;
     return state;
+  }
+
+  /** One movement of `settle`. */
+  async settleOne(state) {
+    const { move, device } = state;
+    const name = device.name ?? device.platformId;
+    let position = move.target;
+    if (move.arrive) {
+      position = move.from === null ? null : positionAt(move, this.now());
+    }
+    // Still before the STOP: a STOP sent to a shutter the travel says is
+    // moving is dropped as stale (see `driveTo`).
+    this.cancel(state);
+    state.position = position;
+    if (move.arrive) {
+      try {
+        await move.arrive();
+      } catch (error) {
+        // Nothing stopped the motor: it runs on to its end stop (see `arrive`).
+        position = move.direction === DIRECTIONS.UP ? 100 : 0;
+        state.position = position;
+        logger.warn(`"${name}" could not be stopped before shutting down: ${error.message}`);
+      }
+    }
+    if (position === null) {
+      return;
+    }
+    try {
+      await move.publishing;
+      await move.publish(position, { done: true });
+    } catch (error) {
+      logger.warn(`Position of "${name}" not published: ${error.message}`);
+    }
   }
 
   cancel(state) {

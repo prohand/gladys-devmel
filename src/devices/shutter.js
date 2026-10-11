@@ -453,36 +453,36 @@ async function drive(gladys, device, ids, target, { client, callbackUrl, uid }) 
     await freeze(gladys, device, ids);
     return;
   }
+  // At an end stop the motor stops on its own; anywhere else it has to be told,
+  // at the very moment the travel says it is there. Only the second has an
+  // arrival: the travel tells whoever needs the radio when a STOP is due (see
+  // `untilArrival`), and a shutdown stops what has one.
+  const stopHere = async () => {
+    try {
+      await sendNotes(client, device, [stateNote(STATE_VALUES.STOP)], {
+        uid,
+        callbackUrl,
+        // Dropped if, by its turn on the radio, a newer order has set the
+        // shutter off again (a wall remote pressed meanwhile): it would stop
+        // the shutter the user just sent somewhere else.
+        stale: () => shutter.travel.isMoving(device),
+      });
+    } catch (err) {
+      // The one failure of this order that matters most, and the only one
+      // nobody was waiting for: Gladys was answered when the travel started.
+      await shutter.scenes.orderFailed(gladys, {
+        externalId: ids.device,
+        name: device.name,
+        reason: failureReason(err),
+        message: err.message,
+      });
+      throw err;
+    }
+  };
   await goTo(gladys, device, ids, destination, {
     announced: state,
     direction,
-    onArrival: async () => {
-      // At an end stop the motor stops on its own; anywhere else it has to be
-      // told, at the very moment the travel says it is there.
-      if (destination <= 0 || destination >= 100) {
-        return;
-      }
-      try {
-        await sendNotes(client, device, [stateNote(STATE_VALUES.STOP)], {
-          uid,
-          callbackUrl,
-          // Dropped if, by its turn on the radio, a newer order has set the
-          // shutter off again (a wall remote pressed meanwhile): it would stop
-          // the shutter the user just sent somewhere else.
-          stale: () => shutter.travel.isMoving(device),
-        });
-      } catch (err) {
-        // The one failure of this order that matters most, and the only one
-        // nobody was waiting for: Gladys was answered when the travel started.
-        await shutter.scenes.orderFailed(gladys, {
-          externalId: ids.device,
-          name: device.name,
-          reason: failureReason(err),
-          message: err.message,
-        });
-        throw err;
-      }
-    },
+    onArrival: destination <= 0 || destination >= 100 ? null : stopHere,
   });
 }
 

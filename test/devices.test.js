@@ -11,6 +11,8 @@ import {
   identifyDevice,
   replayDeviceStates,
   restoreDeviceStates,
+  stopDeviceTracking,
+  stopDueIn,
 } from '../src/devices/index.js';
 import { shutter } from '../src/devices/shutter.js';
 import { isRadioFailure } from '../src/devices/helpers.js';
@@ -1748,6 +1750,72 @@ test('a reconnection in the middle of a timed travel does not cancel its STOP', 
   // 40 % of a 20 s opening is 8 s: stopped on time, and known to be there.
   assert.equal(client.noteAt(2).value, STATE_VALUES.STOP);
   assert.equal(positionsOf('Timed shutter').at(-1), 40);
+});
+
+test('a shutdown in the middle of a timed positioning stops the shutter and says where', async (t) => {
+  const { gladys, config, client, clock, send, positionsOf, statesOf } = setupTimed(t);
+  const device = deviceNamed(config, 'Timed shutter');
+
+  await send('Timed shutter', 'state', -1);
+  await clock.advance(10000);
+  await send('Timed shutter', 'position', 40);
+  await clock.advance(5000);
+
+  // SIGTERM (an update, a restart of Gladys): the radio still works, so the
+  // shutter is stopped now rather than left to run into the top end stop...
+  await stopDeviceTracking();
+  assert.equal(client.sent.length, 3);
+  assert.equal(client.noteAt(2).value, STATE_VALUES.STOP);
+  // ...and Gladys keeps where it was stopped, which the next start restores.
+  assert.equal(positionsOf('Timed shutter').at(-1), 25);
+  assert.equal(statesOf('Timed shutter').at(-1), 0);
+  assert.equal(shutter.travel.positionOf(device), 25);
+  assert.equal(shutter.travel.isMoving(device), false);
+
+  const published = gladys.published.length;
+  await clock.advance(60000);
+  assert.equal(client.sent.length, 3);
+  assert.equal(gladys.published.length, published);
+});
+
+test('a shutdown in the middle of a full opening publishes the end stop the motor runs to', async (t) => {
+  const { client, clock, send, positionsOf, statesOf } = setupTimed(t);
+
+  await send('Timed shutter', 'state', -1);
+  await clock.advance(10000);
+  await send('Timed shutter', 'state', 1);
+  await clock.advance(5000);
+
+  await stopDeviceTracking();
+
+  // The motor stops at the top by itself: nothing to send, and the top is
+  // where it is, not the 25 % of the last tick.
+  assert.equal(client.sent.length, 2);
+  assert.equal(positionsOf('Timed shutter').at(-1), 100);
+  assert.deepEqual(statesOf('Timed shutter'), [-1, 1]);
+});
+
+test('a timed shutter says when its STOP falls due, so a bind does not hold the radio then', async (t) => {
+  const { client, clock, send } = setupTimed(t);
+
+  // Heading for an end stop: the motor stops itself, there is no STOP to wait for.
+  await send('Timed shutter', 'state', -1);
+  assert.equal(stopDueIn(), null);
+  await clock.advance(10000);
+
+  // 40 % of a 20 s opening: the STOP is due in 8 s, and nowhere in the radio
+  // queue until then.
+  await send('Timed shutter', 'position', 40);
+  assert.equal(stopDueIn(), 8000);
+  await clock.advance(5000);
+  assert.equal(stopDueIn(), 3000);
+
+  await clock.advance(3000);
+  assert.equal(client.noteAt(2).value, STATE_VALUES.STOP);
+  assert.equal(stopDueIn(), null);
+
+  await send('Timed shutter', 'position', 100);
+  assert.equal(stopDueIn(), null);
 });
 
 test('a position known in memory wins over the older one Gladys kept', async (t) => {

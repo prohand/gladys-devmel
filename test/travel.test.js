@@ -253,3 +253,26 @@ test('a STOP that could not go out leaves the shutter running to its end stop', 
   assert.equal(positions.at(-1), '100!');
   assert.equal(travel.positionOf(SHUTTER), 100);
 });
+
+test('a shutdown whose STOP cannot go out publishes the end stop the motor runs to', async () => {
+  const { clock, travel, positions, publish } = setup();
+  travel.set(SHUTTER, 0);
+  travel.move(SHUTTER, {
+    direction: DIRECTIONS.UP,
+    target: 40,
+    publish,
+    arrive: async () => {
+      throw new Error('fetch failed');
+    },
+  });
+  await clock.advance(2000);
+
+  await travel.settle();
+
+  // Nothing stopped the motor: the top is where it ends up, not the 10 %
+  // where the STOP was attempted.
+  assert.equal(positions.at(-1), '100!');
+  assert.equal(travel.positionOf(SHUTTER), 100);
+  assert.equal(travel.isMoving(SHUTTER), false);
+  assert.equal(clock.armed, 0);
+});

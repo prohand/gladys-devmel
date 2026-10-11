@@ -30,6 +30,7 @@ import {
   restoreDeviceStates,
   setKnownPosition,
   stopDeviceTracking,
+  stopDueIn,
 } from './src/devices/index.js';
 import { boxDevices, describeConnection, testConnection } from './src/devmel/connection.js';
 import { AirSendService } from './src/devmel/service.js';
@@ -106,6 +107,15 @@ const listenLoop = createListenLoop({
 // above — ten minutes of a Gladys that stopped following the house.
 let rebindTimer = null;
 const REBIND_AFTER_COMMAND_MS = 2000;
+// How close the STOP of a timed travel may be before a bind is held back for it
+// (see `rebindNow`): a bind lasts well under a second on a warm link, a few on
+// a cold one.
+const BIND_CLEARANCE_MS = 5000;
+
+// How long a graceful shutdown gives the shutters under way to be stopped and
+// published (see `stopDeviceTracking`) before it stops the service anyway:
+// `docker stop` kills the container after ten seconds.
+const SETTLE_TIMEOUT_MS = 5000;
 
 // Keeps the link to the box from going cold. Nothing here is on a schedule: it
 // only looks at how long the box has been left alone, which is why it ticks
@@ -610,7 +620,13 @@ function rebindNow() {
   // An order queued behind a subscription is an order the user waits for: the
   // box has one radio, and a bind holds it for as long as it takes. Listening
   // can wait — it has nobody watching a slider.
-  if (client.busy) {
+  //
+  // Nor in front of the STOP of a timed travel: it waits in a travel timer, not
+  // in the queue, and falling due during the bind it went out a bind late — a
+  // shutter asked 88 % stopped at 84 %. One further away than a bind lasts
+  // leaves the box listening meanwhile; once sent, it asks for its own rebind.
+  const stopIn = stopDueIn();
+  if (client.busy || (stopIn !== null && stopIn < BIND_CLEARANCE_MS)) {
     scheduleRebind();
     return;
   }
@@ -752,7 +768,16 @@ gladys.handleShutdown(async (signal) => {
   logger.info(`Received ${signal} -> graceful shutdown`);
   stopListening();
   stopKeepingWarm();
-  stopDeviceTracking();
+  // While the radio and the service still work: a shutter driven to 40 % gets
+  // its STOP, and Gladys where it is left (see `stopDeviceTracking`).
+  let settleTimer = null;
+  await Promise.race([
+    stopDeviceTracking().catch((err) => logger.warn(`Shutters not settled: ${err.message}`)),
+    new Promise((resolve) => {
+      settleTimer = setTimeout(resolve, SETTLE_TIMEOUT_MS);
+    }),
+  ]);
+  clearTimeout(settleTimer);
   if (widgetRefreshTimer) {
     clearTimeout(widgetRefreshTimer);
     widgetRefreshTimer = null;

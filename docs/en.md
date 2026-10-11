@@ -283,7 +283,10 @@ the order is on the air, and the repeats keep going behind it, in their place in
 the queue. They are a second chance for a frame lost in the noise, not part of
 the answer — and re-arming the listener, which needs the radio too, now waits
 for the queue to empty instead of slipping between two orders. That is what made
-a "Close" clicked right after an "Open" take a few seconds to go out.
+a "Close" clicked right after an "Open" take a few seconds to go out. It also
+waits for the Stop of a shutter driven to a position when that Stop is due in
+the next few seconds: held behind the re-arm, it went out late, and the shutter
+stopped past the position asked for.
 
 ### The first order after a long pause
 
@@ -467,7 +470,11 @@ Two more things worth knowing:
   integration started gets the position already known straight away, and a
   position Gladys missed while it was unreachable (restarted, updated) is
   published again when it comes back. Correcting `invert` mirrors the
-  remembered position: the shutter itself did not move;
+  remembered position: the shutter itself did not move. A shutter still
+  moving when the integration stops (update, restart of Gladys) is not lost
+  either: one driven to a position gets its Stop there and then, and Gladys
+  keeps where it was stopped; one opening or closing fully is published at the
+  end stop it is heading for;
 - a shutter driven to a position is **stopped on time even when Gladys is
   briefly unreachable or slow to answer**: the STOP goes out before the
   position is published, and never waits for Gladys. A STOP the box could not

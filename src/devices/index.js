@@ -139,9 +139,22 @@ export async function replayDeviceStates(gladys, gladysDevice, context) {
   return true;
 }
 
-/** Drop every timer the device modules hold (integration shutdown). */
-export function stopDeviceTracking() {
+/**
+ * Settle what the device modules have under way, then drop every timer they
+ * hold (integration shutdown): a shutter driven to a position gets its STOP
+ * now, and Gladys the position it is left at (see `ShutterTravel.settle`).
+ */
+export async function stopDeviceTracking() {
+  await shutter.travel.settle();
   shutter.travel.clear();
+}
+
+/**
+ * Milliseconds until a timed shutter has a STOP to send, or null when none is
+ * waiting for one (see `ShutterTravel.untilArrival`).
+ */
+export function stopDueIn() {
+  return shutter.travel.untilArrival();
 }
 
 /**

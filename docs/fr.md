@@ -298,7 +298,10 @@ la file. C'est une seconde chance pour une trame perdue dans le bruit, pas une
 partie de la réponse — et le réabonnement à l'écoute, qui a lui aussi besoin de
 la radio, attend maintenant que la file soit vide au lieu de se glisser entre
 deux ordres. C'est ce qui faisait qu'un « Fermer » cliqué juste après un
-« Ouvrir » mettait quelques secondes à partir.
+« Ouvrir » mettait quelques secondes à partir. Il attend aussi le Stop d'un
+volet envoyé à une position quand ce Stop doit partir dans les secondes qui
+viennent : retenu derrière le réabonnement, il partait en retard, et le volet
+s'arrêtait au-delà de la position demandée.
 
 ### Le premier ordre après une longue pause
 
@@ -496,7 +499,11 @@ Deux détails qui comptent :
   l'intégration reçoit tout de suite la position déjà connue, et une position
   que Gladys a manquée pendant qu'elle était injoignable (redémarrage, mise à
   jour) lui est republiée à son retour. Corriger `invert` inverse la position
-  retenue : le volet, lui, n'a pas bougé ;
+  retenue : le volet, lui, n'a pas bougé. Un volet encore en mouvement quand
+  l'intégration s'arrête (mise à jour, redémarrage de Gladys) n'est pas perdu
+  non plus : celui envoyé à une position reçoit son Stop sur-le-champ, et
+  Gladys garde l'endroit où il s'est arrêté ; celui qui s'ouvre ou se ferme
+  complètement est publié à la butée vers laquelle il va ;
 - un volet envoyé à une position est **arrêté à temps même si Gladys ne répond
   plus un instant ou tarde à répondre** : le STOP part avant que la position
   soit publiée, et n'attend jamais Gladys. Un STOP que le boîtier n'a pas pu
