@@ -465,11 +465,18 @@ export async function applyEvents(
           }
           continue;
         }
+        // A frame that did decode to an order (a TOGGLE heard by a switch) is
+        // the first case, and blaming partial decoding sent the user after the
+        // wrong fix.
         const unfollowed =
           `Heard ${describeChannel(event.channel)} for "${device.name}", but it says nothing ` +
-          `this device can follow: ${describeReadings(readings)}. A rolling-code 868 MHz ` +
-          'remote (Profalux, Somfy io) is only partially decoded: its frames prove the radio ' +
-          'works, they carry no order to replay.';
+          `this device can follow: ${describeReadings(readings)}. ` +
+          (pressed.length > 0
+            ? 'That order was decoded, and this device type does nothing with it: check the ' +
+              'type declared on airsend.cloud (a remote sending TOGGLE drives a Button, type ' +
+              '4096), or that the right remote is attached.'
+            : 'A rolling-code 868 MHz remote (Profalux, Somfy io) is only partially decoded: ' +
+              'its frames prove the radio works, they carry no order to replay.');
         if (registry.announce(heard, `unfollowed:${device.platformId}:${shapeOf(readings)}`)) {
           logger.info(unfollowed);
         } else {

@@ -375,6 +375,156 @@ test('the wall remote of a shutter drives it like Gladys does', async () => {
   shutter.travel.clear();
 });
 
+// Each light test gets a lamp of its own: the brightness to restore is kept
+// per device for the life of the process.
+function setupLamp(id, remotes = []) {
+  const gladys = createFakeGladys();
+  const config = normalizeConfig({
+    devices: JSON.stringify({
+      devices: { Lamp: { type: 4100, channel: { id, source: 5 }, remotes } },
+    }),
+  });
+  const client = createFakeClient({ config });
+  const found = findDeviceByExternalId(gladys, config, `light:${id}-5`);
+  const set = (key, value, using = client) =>
+    found.blueprint.onSetValue(gladys, {
+      device: found.device,
+      feature: { external_id: `light:${id}-5:${key}` },
+      value,
+      client: using,
+    });
+  return { gladys, config, client, set };
+}
+
+test('switching a light on while a brightness order waits for the radio keeps that brightness', async () => {
+  // Gladys runs two orders for one lamp side by side (a scene group, a
+  // HomeKit write of Brightness and On together): the On read the brightness
+  // before the slider's order had gone, and put the lamp back at the old one.
+  const { gladys, client, set } = setupLamp(510);
+  await set('brightness', 60);
+  await set('on-off', 0);
+
+  await Promise.all([set('brightness', 30), set('on-off', 1)]);
+
+  assert.deepEqual(client.noteAt(2), { method: 1, type: NOTE_TYPES.LEVEL, value: 30 });
+  assert.deepEqual(client.noteAt(3), { method: 1, type: NOTE_TYPES.LEVEL, value: 30 });
+  assert.equal(gladys.statesOf('light:510-5:brightness').at(-1), 30);
+});
+
+test('a brightness the radio never carried is not the one the light switches back on at', async () => {
+  const { client, set } = setupLamp(511);
+  await set('brightness', 60);
+  await set('on-off', 0);
+  const failing = {
+    ...client,
+    async transfer() {
+      throw new Error('box unreachable');
+    },
+  };
+
+  await assert.rejects(set('brightness', 30, failing), /box unreachable/);
+  await set('on-off', 1);
+
+  assert.deepEqual(client.noteAt(2), { method: 1, type: NOTE_TYPES.LEVEL, value: 60 });
+});
+
+test('a wall remote switching a dimmer on leaves the brightness to restore alone', async () => {
+  // A plain ON names no level: the dimmer goes back to its own. Read as
+  // 100 %, Gladys showed full brightness and its next On sent the lamp there.
+  const { gladys, config, client, set } = setupLamp(512, [77]);
+  await set('brightness', 30);
+  await set('on-off', 0);
+  const wall = (value) => ({
+    type: 3,
+    reliability: 0x20,
+    channel: { id: 512, source: 77 },
+    thingnotes: { notes: [{ type: NOTE_TYPES.STATE, value }] },
+  });
+
+  await applyEvents(
+    gladys,
+    config,
+    [wall(STATE_VALUES.ON), wall(STATE_VALUES.OFF)],
+    new HeardChannels(),
+    new SentOrders(),
+  );
+  await set('on-off', 1);
+
+  assert.deepEqual(gladys.statesOf('light:512-5:brightness'), [30, 0, 30, 0, 30]);
+  assert.deepEqual(gladys.statesOf('light:512-5:on-off'), [1, 0, 1, 0, 1]);
+  assert.deepEqual(client.noteAt(2), { method: 1, type: NOTE_TYPES.LEVEL, value: 30 });
+});
+
+test('the brightness to restore survives a restart of the integration', async () => {
+  // Kept in memory only, it was lost on every restart: the first On sent the
+  // lamp to 100 % while Gladys still showed 30 %.
+  const { gladys, config, client, set } = setupLamp(513);
+  await restoreDeviceStates(gladys, config, [
+    {
+      external_id: 'light:513-5',
+      features: [
+        { external_id: 'light:513-5:on-off', last_value: 1 },
+        { external_id: 'light:513-5:brightness', last_value: 30 },
+      ],
+    },
+  ]);
+
+  await set('on-off', 0);
+  await set('on-off', 1);
+
+  assert.deepEqual(client.noteAt(1), { method: 1, type: NOTE_TYPES.LEVEL, value: 30 });
+});
+
+test('a brightness known in memory wins over the older one Gladys kept', async () => {
+  // Restoring also runs on every reconnection and saved configuration.
+  const { gladys, config, client, set } = setupLamp(514);
+  await set('brightness', 70);
+  await restoreDeviceStates(gladys, config, [
+    {
+      external_id: 'light:514-5',
+      features: [{ external_id: 'light:514-5:brightness', last_value: 30 }],
+    },
+  ]);
+
+  await set('on-off', 1);
+
+  assert.deepEqual(client.noteAt(1), { method: 1, type: NOTE_TYPES.LEVEL, value: 70 });
+});
+
+test('a decoded order a device ignores is not blamed on partial decoding', async () => {
+  // A one-button remote attached to a plug sends TOGGLE, fully decoded: the
+  // fix is the device type or the remote attached, never the protocol.
+  const gladys = createFakeGladys();
+  const config = normalizeConfig({
+    devices: JSON.stringify({
+      devices: { Plug: { type: 4097, channel: { id: 210, source: 2 }, remotes: [88] } },
+    }),
+  });
+
+  const lines = captureLogs(async () =>
+    applyEvents(
+      gladys,
+      config,
+      [
+        {
+          type: 3,
+          reliability: 0x20,
+          channel: { id: 210, source: 88 },
+          thingnotes: { notes: [{ type: NOTE_TYPES.STATE, value: STATE_VALUES.TOGGLE }] },
+        },
+      ],
+      new HeardChannels(),
+      new SentOrders(),
+    ),
+  );
+
+  assert.equal(await lines.result, 0);
+  assert.equal(lines.of('INFO').length, 1);
+  assert.match(lines.of('INFO')[0], /"Plug", but it says nothing this device can follow: toggle/);
+  assert.match(lines.of('INFO')[0], /Button, type 4096/);
+  assert.doesNotMatch(lines.of('INFO')[0], /partially decoded/);
+});
+
 test('what a wall remote does is published as the current state, not a past one', async () => {
   // Gladys only makes a dated state the current value when it is newer than
   // the one it holds — and that one was stamped by the Gladys host, through an

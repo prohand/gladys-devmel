@@ -12,6 +12,7 @@ import { describeSpurl, DEVICE_TYPES, hostFromSpurl } from '../config.js';
 import { planListening } from './listening.js';
 import { describeEmitter } from './heard.js';
 import { hearsChannel } from '../devices/index.js';
+import { ordersOf } from '../capabilities/scenes.js';
 
 /**
  * The AirSend boxes to talk to when listening for radio frames.
@@ -559,6 +560,18 @@ export function describeFate(config, entry, language) {
           'à ses « features »'
       : `declared on ${claimed}, which does not declare what it decoded: add ${features} to ` +
           'its "features"';
+  }
+  // Decoded to an order all the same (a TOGGLE heard by a switch): the
+  // protocol is fine, the device type or the remote attached is not, and
+  // pointing at partial decoding sent the user after the wrong fix.
+  if (ordersOf(entry.readings).length > 0) {
+    return language === 'fr'
+      ? `déclaré sur ${claimed}, qui ne fait rien de l'ordre décodé : vérifiez le type ` +
+          'déclaré sur airsend.cloud (une télécommande qui envoie TOGGLE commande un Bouton, ' +
+          'type 4096), ou que la bonne télécommande est rattachée'
+      : `declared on ${claimed}, which does nothing with the order decoded: check the type ` +
+          'declared on airsend.cloud (a remote sending TOGGLE drives a Button, type 4096), or ' +
+          'that the right remote is attached';
   }
   return language === 'fr'
     ? `déclaré sur ${claimed}, mais ses trames ne portent aucun ordre rejouable (protocole ` +

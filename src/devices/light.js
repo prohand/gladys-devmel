@@ -72,12 +72,29 @@ export const light = {
     if (feature.external_id === ids.feature(FEATURE.BRIGHTNESS)) {
       const level = clampLevel(value);
       logger.info(`"${device.name}" -> ${level} %`);
-      await sendNotes(client, device, [levelNote(level)], {
-        uid: feature.external_id,
-        callbackUrl,
-      });
+      // Written down before the radio carries it. Gladys runs the orders for
+      // one lamp side by side and the radio sends them in arrival order: an On
+      // that arrived while this level still waited for the air restored the
+      // level before it, and sent it right after this one.
+      const previous = lastBrightness.get(device.platformId);
       if (level > 0) {
         lastBrightness.set(device.platformId, level);
+      }
+      try {
+        await sendNotes(client, device, [levelNote(level)], {
+          uid: feature.external_id,
+          callbackUrl,
+        });
+      } catch (err) {
+        // Never on the air: the lamp is still at the level before.
+        if (level > 0 && lastBrightness.get(device.platformId) === level) {
+          if (previous === undefined) {
+            lastBrightness.delete(device.platformId);
+          } else {
+            lastBrightness.set(device.platformId, previous);
+          }
+        }
+        throw err;
       }
       await publishState(gladys, feature.external_id, level);
       await publishState(gladys, ids.feature(FEATURE.ON_OFF), level > 0 ? 1 : 0);
@@ -98,6 +115,28 @@ export const light = {
   },
 
   /**
+   * Pick the brightness to restore back up from the one Gladys kept: held in
+   * memory only, it was lost on every restart, and the first On afterwards
+   * sent the lamp to 100 %. Only when memory knows nothing — this also runs on
+   * every reconnection and every saved configuration, when memory is newer.
+   */
+  restoreStates(gladys, { device, features }) {
+    if (lastBrightness.has(device.platformId)) {
+      return;
+    }
+    const ids = idsFor(gladys, KEY, device);
+    const stored = features?.find(
+      (feature) => feature.external_id === ids.feature(FEATURE.BRIGHTNESS),
+    );
+    // An Off publishes 0 %: a lamp off at the restart has nothing to give back.
+    const level = clampLevel(stored?.last_value);
+    if (level > 0) {
+      lastBrightness.set(device.platformId, level);
+      logger.debug(`"${device.name}" will switch back on at ${level} %`);
+    }
+  },
+
+  /**
    * Published at the time they are heard: see `LIVE_STATE` in helpers.js.
    *
    * @returns {Promise<number>} how many readings this light acted on.
@@ -110,6 +149,19 @@ export const light = {
         continue;
       }
       handled += 1;
+      if (reading.switched && reading.value > 0) {
+        // A plain ON from a wall remote: a dimmer goes back to the level it
+        // had, and the one remembered here is the best guess of it. Taken as
+        // 100 %, Gladys showed full brightness and the next On it sent did put
+        // the lamp at full brightness.
+        await publishState(
+          gladys,
+          ids.feature(FEATURE.BRIGHTNESS),
+          lastBrightness.get(device.platformId) ?? 100,
+        );
+        await publishState(gladys, ids.feature(FEATURE.ON_OFF), 1);
+        continue;
+      }
       if (reading.value > 0) {
         lastBrightness.set(device.platformId, reading.value);
       }

@@ -742,7 +742,7 @@ knowingly.
 Once the emitter is declared the frame does reach the device — what remains is
 whether it **carries an order**. Start with **Test the connection**: its _Heard_
 line answers without going through the logs (see "What the box actually heard").
-It tells apart three cases that look alike and are unrelated:
+It tells apart four cases that look alike and are unrelated:
 
 - `declared on Living room shutter, but its frames carry no order to replay` —
   the frame arrived, the device has no use for it. That is the fate of
@@ -751,6 +751,11 @@ It tells apart three cases that look alike and are unrelated:
   cannot follow**, and attaching the remote cannot change that; on the first
   frame from that emitter the integration says so in the logs too, at info level
   (`no note the service could decode`);
+- `declared on Plug, which does nothing with the order decoded` — the frame is
+  fully decoded, but into an order that device type does not act on: a TOGGLE
+  from a one-button remote attached to a switch or a light, say. The protocol is
+  fine; check the type declared on airsend.cloud (a remote sending TOGGLE drives
+  a Button, type `4096`) or that the right remote is attached;
 - `no device declares it` — the emitter is heard, it is simply attached to
   nothing: run **Attach a remote** again;
 - the emitter is not listed at all — the frame no longer arrives. When the remote
@@ -837,12 +842,13 @@ actually decoded the frame.
 
 Four possible verdicts per emitter:
 
-| Verdict                    | What it means                                                              |
-| -------------------------- | -------------------------------------------------------------------------- |
-| `followed by <device>`     | it works: those frames do drive the device                                 |
-| `no device declares it`    | the emitter is heard but attached to nothing — **Attach a remote**         |
-| `does not declare`         | a sensor decoded fine, into readings missing from its `features`: add them |
-| `carry no order to replay` | the frame reaches its device and carries nothing to replay (rolling code)  |
+| Verdict                               | What it means                                                                  |
+| ------------------------------------- | ------------------------------------------------------------------------------ |
+| `followed by <device>`                | it works: those frames do drive the device                                     |
+| `no device declares it`               | the emitter is heard but attached to nothing — **Attach a remote**             |
+| `does not declare`                    | a sensor decoded fine, into readings missing from its `features`: add them     |
+| `does nothing with the order decoded` | the order is decoded, but that device type does not act on it — check its type |
+| `carry no order to replay`            | the frame reaches its device and carries nothing to replay (rolling code)      |
 
 The line quotes **every** distinct note an emitter has been heard saying, not
 just its last frame — that is what tells a remote whose buttons the service

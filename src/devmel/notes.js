@@ -189,7 +189,8 @@ export function clampLevel(level) {
  *
  * An ON/OFF additionally carries `switched`. To a switch it is where it now
  * is; to a shutter driven by an on/off protocol (Chacon DiO) it is which way
- * it was sent, and the motor takes its whole travel to get there.
+ * it was sent, and the motor takes its whole travel to get there; to a
+ * dimmer an ON is "on", not a level (it goes back to the level it had).
  *
  * @param {Array<{type: number|string, value: unknown}>} notes
  * @returns {Array<{ kind: string, value: number|string, command?: string, switched?: boolean }>}
@@ -248,6 +249,8 @@ function decodeStateNote(raw) {
     case STATE_VALUES.OFF:
       return { kind: READINGS.LEVEL, value: 0, switched: true };
     case STATE_VALUES.ON:
+      // `switched`: ON names no level. A dimmer goes back to the one it had,
+      // so the 100 here only means "on" and must not be remembered as a level.
       return { kind: READINGS.LEVEL, value: 100, switched: true };
     case STATE_VALUES.DOWN:
     case STATE_VALUES.CLOSE:

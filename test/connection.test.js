@@ -255,6 +255,22 @@ test('test_connection tells an attached remote that moves nothing from one that 
   assert.match(workingReport.fr, /suivi par Baie vitree/);
 });
 
+test('test_connection does not blame partial decoding for an order the device ignores', async () => {
+  // A TOGGLE is fully decoded: a shutter that does nothing with it has the
+  // wrong type or the wrong remote attached, and the protocol is not at fault.
+  const config = normalizeConfig({ spurl: SPURL, devices: DEVICES_WITH_REMOTE });
+  const heard = new HeardChannels();
+  heard.record(WALL_REMOTE, { readings: [{ kind: 'toggle', value: 'TOGGLE' }], claimed: true });
+
+  const report = await testConnection(fakeClient(), config, RUNNING, null, heard);
+
+  assert.match(report.en, /declared on Baie vitree, which does nothing with the order decoded/);
+  assert.match(report.en, /Button, type 4096/);
+  assert.doesNotMatch(report.en, /partially decodes/);
+  assert.match(report.fr, /qui ne fait rien de l'ordre décodé/);
+  assert.doesNotMatch(report.fr, /partiellement décodé\)/);
+});
+
 test('test_connection names the protocol a pid stands for', async () => {
   // "pid 14177" identifies a protocol without saying which one, and the name
   // is what a user compares to the brand written on their remote — a thing no

@@ -785,7 +785,7 @@ votre volet. À n'utiliser qu'en connaissance de cause.
 Une fois l'émetteur déclaré, la trame arrive bien à l'appareil — reste à savoir
 si elle **porte un ordre**. Commencez par **Tester la connexion** : la ligne
 _Entendu_ répond sans passer par les logs (voir « Ce que le boîtier a entendu »).
-Elle distingue trois cas qui se ressemblent et n'ont rien à voir :
+Elle distingue quatre cas qui se ressemblent et n'ont rien à voir :
 
 - `déclaré sur « Baie vitrée », mais ses trames ne portent aucun ordre
 rejouable` — la trame est arrivée, l'appareil ne sait qu'en faire. C'est le lot
@@ -794,6 +794,12 @@ rejouable` — la trame est arrivée, l'appareil ne sait qu'en faire. C'est le l
   rejouer. **La position ne peut pas suivre**, et le rattachement n'y changera
   rien : à la première trame de cet émetteur, l'intégration le dit aussi dans ses
   logs, au niveau info (`no note the service could decode`) ;
+- `déclaré sur « Prise », qui ne fait rien de l'ordre décodé` — la trame est
+  entièrement décodée, mais en un ordre que ce type d'appareil ne suit pas : un
+  TOGGLE de télécommande à un bouton rattachée à une prise ou à une lampe, par
+  exemple. Le protocole n'y est pour rien ; vérifiez le type déclaré sur
+  airsend.cloud (une télécommande qui envoie TOGGLE commande un Bouton, type
+  `4096`) ou que c'est la bonne télécommande qui est rattachée ;
 - `aucun appareil ne le déclare` — l'émetteur est bien entendu, il n'est
   simplement rattaché à rien : relancez **Rattacher une télécommande** ;
 - l'émetteur n'apparaît pas du tout — la trame n'arrive plus. Si la télécommande
@@ -885,12 +891,13 @@ que le nom donné ici est celui du décodeur qui a réellement décodé la trame
 
 Quatre verdicts possibles pour un émetteur :
 
-| Verdict                            | Ce que ça veut dire                                                           |
-| ---------------------------------- | ----------------------------------------------------------------------------- |
-| `suivi par <appareil>`             | tout marche : ses trames pilotent bien l'appareil                             |
-| `aucun appareil ne le déclare`     | l'émetteur est entendu, mais rattaché à rien — **Rattacher une télécommande** |
-| `ne déclare pas`                   | un capteur bien décodé, en mesures absentes de ses `features` : ajoutez-les   |
-| `ne portent aucun ordre rejouable` | la trame arrive à l'appareil et ne porte rien à rejouer (code tournant)       |
+| Verdict                            | Ce que ça veut dire                                                            |
+| ---------------------------------- | ------------------------------------------------------------------------------ |
+| `suivi par <appareil>`             | tout marche : ses trames pilotent bien l'appareil                              |
+| `aucun appareil ne le déclare`     | l'émetteur est entendu, mais rattaché à rien — **Rattacher une télécommande**  |
+| `ne déclare pas`                   | un capteur bien décodé, en mesures absentes de ses `features` : ajoutez-les    |
+| `ne fait rien de l'ordre décodé`   | l'ordre est décodé, mais ce type d'appareil ne le suit pas — vérifiez son type |
+| `ne portent aucun ordre rejouable` | la trame arrive à l'appareil et ne porte rien à rejouer (code tournant)        |
 
 La ligne cite **toutes** les notes différentes entendues d'un même émetteur, pas
 seulement la dernière — c'est ce qui distingue une télécommande dont le service
