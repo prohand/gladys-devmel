@@ -79,6 +79,25 @@ export const DEVICE_TYPES = {
 };
 
 /**
+ * The two settings the logger obeys, read the way `normalizeConfig` reads them.
+ *
+ * Apart because they have to be applied BEFORE the rest is normalized: parsing
+ * the configuration logs, and its "Connection string: …" debug line is the one
+ * a user ticking "Detailed logs" after a 401 is looking for. Applied after, it
+ * was filtered by the level of the previous save — missing on the save that
+ * turned debug on, printed on the one that turned it off.
+ *
+ * @param {Record<string, unknown>} raw config returned by the SDK
+ * @returns {{debug_logs: boolean, log_timezone: string}}
+ */
+export function logSettingsOf(raw = {}) {
+  return {
+    debug_logs: toBoolean(raw?.debug_logs, DEFAULT_CONFIG.debug_logs),
+    log_timezone: String(raw?.log_timezone ?? DEFAULT_CONFIG.log_timezone).trim(),
+  };
+}
+
+/**
  * Merge the user config with the defaults and parse the device list.
  * @param {Record<string, unknown>} raw config returned by the SDK
  */
@@ -97,8 +116,7 @@ export function normalizeConfig(raw = {}) {
     poll_frequency: toPositiveNumber(raw.poll_frequency, DEFAULT_CONFIG.poll_frequency),
     use_embedded_service: raw.use_embedded_service !== false,
     accept_unreliable: toBoolean(raw.accept_unreliable, DEFAULT_CONFIG.accept_unreliable),
-    debug_logs: toBoolean(raw.debug_logs, DEFAULT_CONFIG.debug_logs),
-    log_timezone: String(raw.log_timezone ?? DEFAULT_CONFIG.log_timezone).trim(),
+    ...logSettingsOf(raw),
   };
 
   // Who serves the local channel. A URL typed by the user wins: someone who
@@ -130,6 +148,20 @@ export function normalizeConfig(raw = {}) {
   // answer 401 about it. Kept on the config so every screen that has to explain
   // the local channel says the same thing (see src/devmel/connection.js).
   config.spurlProblems = checkSpurl(config.spurl);
+  // The strings written on the devices themselves (a second box, a device
+  // reached through it) are sent as they are (client.spurlOf), and refused the
+  // same way: each gets the same early check, naming where it was written.
+  // Unchecked, a mistyped second box left the status "connected" while every
+  // order through it answered 401.
+  const others = otherSpurls(config);
+  for (const { name, spurl } of others) {
+    for (const problem of checkSpurl(spurl)) {
+      config.spurlProblems.push({
+        en: `on "${name}", ${problem.en}`,
+        fr: `sur « ${name} », ${problem.fr}`,
+      });
+    }
+  }
   for (const problem of config.spurlProblems) {
     logger.warn(`Connection string: ${problem.en}`);
   }
@@ -138,7 +170,29 @@ export function normalizeConfig(raw = {}) {
     // read by someone already looking at why the box refuses them.
     logger.debug(`Connection string: ${describeSpurl(config.spurl)}`);
   }
+  for (const { name, spurl } of others) {
+    logger.debug(`Connection string of "${name}": ${describeSpurl(spurl)}`);
+  }
   return config;
+}
+
+/**
+ * The connection strings of the device list other than the global one, each
+ * once, with the name of the first device that carries it.
+ *
+ * @param {object} config normalized configuration
+ * @returns {Array<{name: string, spurl: string}>}
+ */
+export function otherSpurls(config) {
+  const seen = new Set([config.spurl]);
+  const others = [];
+  for (const device of config.devmelDevices ?? []) {
+    if (device.spurl && !seen.has(device.spurl)) {
+      seen.add(device.spurl);
+      others.push({ name: device.name, spurl: device.spurl });
+    }
+  }
+  return others;
 }
 
 /**
@@ -230,7 +284,21 @@ function parseDeviceSource(source) {
     }
     return parsed;
   } catch (err) {
-    logger.error(`Could not parse the device list: ${err.message}`);
+    // The connection string pasted into this field instead of its own: said
+    // as such, and quoted nowhere — it is a secret.
+    if (/^sp:\/\//i.test(text)) {
+      logger.error(
+        'Could not parse the device list: it holds an sp:// connection string, which belongs ' +
+          'in the Connection string field',
+      );
+      return null;
+    }
+    // V8 quotes the input around the failing spot (`Unexpected token 's',
+    // "sp://Xk9pQ"... is not valid JSON`), and that spot can be a box `spurl`
+    // whose quotes a note-taking app turned typographic: the start of the
+    // password, at ERROR, on every save. Only the reason is kept — and the
+    // position, when V8 gives one.
+    logger.error(`Could not parse the device list: ${err.message.split(/,\s*(?:\.\.\.)?"/)[0]}`);
     return null;
   }
 }
@@ -619,11 +687,15 @@ export function hostFromSpurl(spurl) {
   if (!spurl) {
     return null;
   }
-  const rhost = /rhost=([^&\s]+)/.exec(spurl);
+  // After the LAST `@`, as in `checkSpurl`: the password may contain one, and
+  // its tail used to become the address — in the box's Gladys external id.
+  const at = spurl.lastIndexOf('@');
+  const rest = spurl.slice(at + 1);
+  const rhost = /rhost=([^&\s]+)/.exec(rest);
   if (rhost) {
     return rhost[1];
   }
-  const address = /@\[?([^\]/?]+)\]?/.exec(spurl);
+  const address = at < 0 ? null : /^\[?([^\]/?]+)\]?/.exec(rest);
   return address ? address[1] : null;
 }
 
@@ -637,7 +709,9 @@ function normalizeFeatures(features) {
   const list = (Array.isArray(features) ? features : String(features).split(','))
     .map((feature) => String(feature).trim().toLowerCase())
     .filter((feature) => SENSOR_FEATURES.includes(feature));
-  return list.length > 0 ? list : ['click'];
+  // Once each: a feature listed twice ("Temperature, temperature") became two
+  // features with one external id, and Gladys could not create the sensor.
+  return list.length > 0 ? [...new Set(list)] : ['click'];
 }
 
 function toBoolean(value, fallback) {

@@ -154,3 +154,25 @@ test('the Gladys Plus webhook reads a lone event, like the loopback callback', a
     logs.of('INFO').join('\n'),
   );
 });
+
+test('the save that turns detailed logs on already logs the connection string it parsed', async () => {
+  const spurl = 'sp://secret@192.168.1.50?gw=0';
+  const save = (debug) =>
+    captureLogs(() =>
+      fromGladys('external-integration.config-updated', {
+        config: { ...BASE_CONFIG, spurl, debug_logs: debug },
+      }),
+    );
+
+  const on = save(true);
+  await on.result;
+  // Then off again, with debug lines still captured if any slipped through.
+  const off = save(false);
+  await off.result;
+
+  const described = (logs) =>
+    logs.of('DEBUG').filter((line) => line.includes('Connection string: sp://<6 characters>@'));
+  assert.equal(described(on).length, 1, on.of('DEBUG').join('\n'));
+  assert.deepEqual(described(off), []);
+  assert.ok(on.of('DEBUG').every((line) => !line.includes('secret')));
+});

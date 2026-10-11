@@ -495,6 +495,35 @@ test('test_connection shows the connection string, without the password in it', 
   assert.doesNotMatch(report.en, /0123456789abcdef/);
 });
 
+test('a mistyped string on a second box is named too, with the box it is on', async () => {
+  const config = normalizeConfig({
+    spurl: SPURL,
+    devices: JSON.stringify({
+      devices: [
+        { name: 'Box salon', type: 0, spurl: SPURL },
+        { name: 'Box garage', type: 0, spurl: 'sp://pass2@fe80:2:3?gw=0&rhost=192.168.1.60' },
+      ],
+    }),
+  });
+
+  // Every order and every bind through the garage box answers 401: the
+  // status cannot say "connected".
+  const status = await describeConnection(fakeClient(), config, RUNNING);
+  assert.equal(status.connected, false);
+  assert.match(status.message.en, /^Connection string: on "Box garage", "fe80:2:3" is not a valid/);
+  assert.match(status.message.fr, /^Chaîne de connexion : sur « Box garage », « fe80:2:3 »/);
+
+  // And the report shows both strings, passwords out.
+  const report = await testConnection(fakeClient(), config, RUNNING);
+  assert.match(report.en, /Connection string: sp:\/\/<4 characters>@\[fe80::1\]/);
+  assert.match(
+    report.en,
+    /Connection string of "Box garage": sp:\/\/<5 characters>@fe80:2:3\?gw=0&rhost=192\.168\.1\.60/,
+  );
+  assert.match(report.fr, /Chaîne de connexion de « Box garage » : sp:\/\/<5 characters>@/);
+  assert.doesNotMatch(report.en, /pass2/);
+});
+
 test('a connection string pasted on the box alone is a configured connection', async () => {
   const devices = JSON.stringify({
     devices: { Box: { type: 0, spurl: SPURL }, ...JSON.parse(DEVICES) },

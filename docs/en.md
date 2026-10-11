@@ -118,6 +118,9 @@ nobody asked for, an `rhost` left on the old IP. The password itself is never
 shown and never logged — only its length is, which is enough to spot a mask
 pasted in its place.
 
+A string written on a device of the list (a second box) is checked the same way,
+and shown on a line of its own: `Connection string of "Box garage": sp://<…>`.
+
 #### Using a service you already run
 
 If the AirSend Web Service is already running somewhere on your network — the

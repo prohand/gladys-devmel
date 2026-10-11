@@ -8,7 +8,7 @@
 //     demand, in more detail.
 // -----------------------------------------------------------------------------
 
-import { describeSpurl, DEVICE_TYPES, hostFromSpurl } from '../config.js';
+import { describeSpurl, DEVICE_TYPES, hostFromSpurl, otherSpurls } from '../config.js';
 import { planListening } from './listening.js';
 import { describeEmitter } from './heard.js';
 import { hearsChannel } from '../devices/index.js';
@@ -167,6 +167,10 @@ export async function testConnection(
   if (config.spurl) {
     en.push(`Connection string: ${describeSpurl(config.spurl)}`);
     fr.push(`Chaîne de connexion : ${describeSpurl(config.spurl)}`);
+  }
+  for (const { name, spurl } of otherSpurls(config)) {
+    en.push(`Connection string of "${name}": ${describeSpurl(spurl)}`);
+    fr.push(`Chaîne de connexion de « ${name} » : ${describeSpurl(spurl)}`);
   }
   for (const problem of config.spurlProblems ?? []) {
     en.push(`Connection string: ${problem.en}`);

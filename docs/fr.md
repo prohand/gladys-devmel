@@ -124,6 +124,10 @@ boîtier, un `gw=1` que personne n'a demandé, un `rhost` resté sur l'ancienne 
 Le mot de passe, lui, n'est jamais affiché ni journalisé — seule sa longueur
 l'est, ce qui suffit à repérer un masque collé à sa place.
 
+Une chaîne écrite sur un appareil de la liste (un second boîtier) est vérifiée
+de la même façon, et affichée sur sa propre ligne :
+`Chaîne de connexion de « Box garage » : sp://<…>`.
+
 #### Utiliser un service que vous faites déjà tourner
 
 Si le service web AirSend tourne déjà quelque part sur votre réseau — l'add-on

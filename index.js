@@ -17,7 +17,7 @@
 import { resetGatewayReads } from './src/devices/gateway.js';
 import { isRadioFailure } from './src/devices/helpers.js';
 import { GladysIntegration } from '@gladysassistant/integration-sdk';
-import { normalizeConfig } from './src/config.js';
+import { logSettingsOf, normalizeConfig } from './src/config.js';
 import { applyLogLevel, applyLogTimeZone, createLogger } from './src/logging.js';
 import { AirSendClient } from './src/devmel/client.js';
 import {
@@ -403,11 +403,13 @@ async function initializeOrReport(readConfig, what) {
  * the Configuration screen.
  */
 async function initialize(rawConfig) {
-  config = normalizeConfig(rawConfig);
   // First, so that everything this initialization logs already obeys the level
-  // the user just asked for — the frames of a freshly armed listener included.
-  applyLogLevel(config);
-  applyLogTimeZone(config);
+  // the user just asked for — the parsing of the configuration itself and the
+  // frames of a freshly armed listener included.
+  const logSettings = logSettingsOf(rawConfig);
+  applyLogLevel(logSettings);
+  applyLogTimeZone(logSettings);
+  config = normalizeConfig(rawConfig);
   // A configuration is changed because something did not work, and the frames
   // that would say whether it works now belong to emitters the logs have
   // already had their say about. Re-arm those once-only lines: the next press
