@@ -187,8 +187,12 @@ export function clampLevel(level) {
  * level of an UP is a destination, and a reader that cares about the journey —
  * a shutter — must not mistake it for a measured position.
  *
+ * An ON/OFF additionally carries `switched`. To a switch it is where it now
+ * is; to a shutter driven by an on/off protocol (Chacon DiO) it is which way
+ * it was sent, and the motor takes its whole travel to get there.
+ *
  * @param {Array<{type: number|string, value: unknown}>} notes
- * @returns {Array<{ kind: string, value: number|string, command?: string }>}
+ * @returns {Array<{ kind: string, value: number|string, command?: string, switched?: boolean }>}
  */
 export function decodeNotes(notes) {
   if (!Array.isArray(notes)) {
@@ -242,9 +246,9 @@ function decodeStateNote(raw) {
     case STATE_VALUES.TOGGLE:
       return { kind: READINGS.TOGGLE, value: STATE_LABELS[value] };
     case STATE_VALUES.OFF:
-      return { kind: READINGS.LEVEL, value: 0 };
+      return { kind: READINGS.LEVEL, value: 0, switched: true };
     case STATE_VALUES.ON:
-      return { kind: READINGS.LEVEL, value: 100 };
+      return { kind: READINGS.LEVEL, value: 100, switched: true };
     case STATE_VALUES.DOWN:
     case STATE_VALUES.CLOSE:
       return { kind: READINGS.LEVEL, value: 0, command: COMMANDS.DOWN };

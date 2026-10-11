@@ -440,7 +440,8 @@ les deux durées :
 
 L'intégration suit alors le volet seconde par seconde, que l'ordre vienne de
 Gladys ou d'une télécommande murale entendue à la radio (ce qui suppose le
-canal d'écoute décrit plus bas). Quand beaucoup de volets bougent en même
+canal d'écoute décrit plus bas). Une télécommande dont le protocole ne connaît
+que Marche/Arrêt (Chacon DiO) vaut Monter/Descendre. Quand beaucoup de volets bougent en même
 temps, chacun publie sa position moins souvent : ensemble, ils restent bien
 sous les 300 états par minute qu'accepte Gladys, et chaque butée passe. Trois
 conséquences :
@@ -471,10 +472,18 @@ Deux détails qui comptent :
   chronométré est **inconnue**, et l'intégration ne publie rien plutôt que
   d'inventer une valeur. Ouvrez-le ou fermez-le une fois et c'est réglé.
   Demander une position avant cela envoie le volet à la butée la plus proche,
-  ce qui est précisément ce qui établit la référence ;
+  ce qui est précisément ce qui établit la référence. Il en va de même d'un
+  volet que vous venez de chronométrer, quoi que ses ordres aient dit avant, et
+  d'un volet parti à un endroit que personne ne peut connaître : le bouton
+  « my » sans `favorite_position`, une télécommande à un seul bouton (toggle).
+  Une reconnexion à Gladys ne la remplace pas par la valeur, plus ancienne,
+  conservée par Gladys ;
 - la position **survit aux redémarrages** de l'intégration : elle repart de la
   valeur conservée par Gladys. Un volet ajouté dans Gladys après le démarrage de
-  l'intégration reçoit tout de suite la position déjà connue ;
+  l'intégration reçoit tout de suite la position déjà connue, et une position
+  que Gladys a manquée pendant qu'elle était injoignable (redémarrage, mise à
+  jour) lui est republiée à son retour. Corriger `invert` inverse la position
+  retenue : le volet, lui, n'a pas bougé ;
 - un volet envoyé à une position est **arrêté à temps même si Gladys ne répond
   plus un instant ou tarde à répondre** : le STOP part avant que la position
   soit publiée, et n'attend jamais Gladys. Un STOP que le boîtier n'a pas pu

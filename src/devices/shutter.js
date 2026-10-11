@@ -103,23 +103,41 @@ export const shutter = {
    * Gladys and every saved configuration, and then the value Gladys kept is
    * older than the one in memory: setting it cancelled the movement under way —
    * a shutter driven to 40 % never got its STOP and ran into its end stop,
-   * while Gladys stayed on the last position it had been told.
+   * while Gladys stayed on the last position it had been told. A position the
+   * travel knows to be unknown (the motor's own favourite) is no exception:
+   * filled in from Gladys, the next positioning was timed from a value the
+   * shutter had long left.
+   *
+   * The other way round, Gladys is told again what it missed. A travel that
+   * ended while Gladys was away (restarted, updated) had its arrival refused,
+   * and nothing else would ever publish it: Gladys showed the last tick and
+   * "closing" until the next order, and restored that at the next start.
+   *
+   * @returns {Promise<boolean>} whether the position was published
    */
-  restoreStates(gladys, { device, features }) {
-    if (!hasPosition(device)) {
-      return;
-    }
-    if (shutter.travel.positionOf(device) !== null || shutter.travel.isMoving(device)) {
-      return;
+  async restoreStates(gladys, { device, features }) {
+    reframe(device);
+    if (!hasPosition(device) || shutter.travel.isMoving(device)) {
+      return false;
     }
     const ids = idsFor(gladys, KEY, device);
     const stored = features?.find(
       (feature) => feature.external_id === ids.feature(FEATURE.POSITION),
-    );
-    if (Number.isFinite(stored?.last_value)) {
-      shutter.travel.set(device, stored.last_value);
-      logger.debug(`"${device.name}" restored at ${stored.last_value} %`);
+    )?.last_value;
+    if (!shutter.travel.knows(device)) {
+      if (Number.isFinite(stored)) {
+        shutter.travel.set(device, stored);
+        logger.debug(`"${device.name}" restored at ${stored} %`);
+      }
+      return false;
     }
+    const position = shutter.travel.positionOf(device);
+    if (position === null || position === stored) {
+      return false;
+    }
+    await publishState(gladys, ids.feature(FEATURE.STATE), toShutterState(position));
+    await publishPosition(gladys, device, ids, position);
+    return true;
   },
 
   /**
@@ -132,7 +150,9 @@ export const shutter = {
     if (!hasPosition(device)) {
       return;
     }
-    shutter.restoreStates(gladys, { device, features });
+    if (await shutter.restoreStates(gladys, { device, features })) {
+      return;
+    }
     // A moving shutter publishes its position on every tick anyway.
     const position = shutter.travel.positionOf(device);
     if (position === null || shutter.travel.isMoving(device)) {
@@ -144,6 +164,7 @@ export const shutter = {
   },
 
   async onSetValue(gladys, { device, feature, value, client, callbackUrl }) {
+    reframe(device);
     const ids = idsFor(gladys, KEY, device);
 
     if (feature.external_id === ids.feature(FEATURE.POSITION)) {
@@ -181,7 +202,9 @@ export const shutter = {
   /**
    * Publish what a radio frame said. Orders (a wall remote pressed by hand, the
    * echo of our own command) start the position tracking; only a reading with
-   * no `command` is a position the hardware actually reported.
+   * no `command` is a position the hardware actually reported. Except an
+   * ON/OFF: it is the UP/DOWN of the protocols that only carry on/off (Chacon
+   * DiO).
    *
    * Published at the time they are heard, never dated with the box timestamp:
    * see `LIVE_STATE` in helpers.js.
@@ -190,10 +213,16 @@ export const shutter = {
    *   means the frame was heard and understood by nobody, which is the one
    *   thing the user must be told (see `applyEvents`).
    */
-  async applyReadings(gladys, { device, readings }) {
+  async applyReadings(gladys, { device, readings, echo = false }) {
+    reframe(device);
     const ids = idsFor(gladys, KEY, device);
     let handled = 0;
     for (const reading of readings) {
+      const switched = reading.kind === READINGS.LEVEL && reading.switched === true;
+      if (echo && (switched || reading.kind === READINGS.TOGGLE)) {
+        // Orders, not reports: in the echo of our own order, they are ours.
+        continue;
+      }
       if (reading.command === COMMANDS.STOP) {
         // A remote repeats its frame for as long as the button is held: the
         // second STOP of one press is no new order. Read as one, it would stop
@@ -203,7 +232,10 @@ export const shutter = {
         }
       } else if (reading.command === COMMANDS.FAVORITE) {
         await goToFavorite(gladys, device, ids);
-      } else if (reading.command === COMMANDS.UP || reading.command === COMMANDS.DOWN) {
+      } else if (reading.command === COMMANDS.UP || reading.command === COMMANDS.DOWN || switched) {
+        // An ON is where a switch is, but a shutter only sets off on it: read as
+        // its position, a timed shutter was at the top at once and the next
+        // percentage was timed from there, while the motor was still on its way.
         // The reading is in radio coordinates, like every level here: a shutter
         // wired upside down opens by going down.
         const destination = device.invert ? 100 - reading.value : reading.value;
@@ -212,6 +244,11 @@ export const shutter = {
         const position = device.invert ? 100 - reading.value : reading.value;
         shutter.travel.set(device, position);
         await publishPosition(gladys, device, ids, position);
+      } else if (reading.kind === READINGS.TOGGLE) {
+        // A one-button keyfob: the motor opens, closes or stops, depending on
+        // what it did last — which the radio never said. Kept, the old position
+        // timed the next percentage from where the shutter no longer was.
+        await goSomewhere(gladys, device, ids);
       } else {
         continue;
       }
@@ -231,6 +268,7 @@ export const shutter = {
    * position" of the time-based covers of Home Assistant.
    */
   async setKnownPosition(gladys, { device, position }) {
+    reframe(device);
     if (!hasPosition(device)) {
       throw new Error(
         `"${device.name}" has no position: give it travel_up / travel_down, or declare it as type 4099`,
@@ -296,9 +334,12 @@ async function goTo(
   if (!moving) {
     shutter.travel.set(device, destination);
   }
-  if (announced !== null) {
+  // With no travel to arrive, the state is said now: a 4099 sent to 0 % with
+  // no travel times kept "open" from the order before.
+  const state = announced ?? (moving ? null : toShutterState(destination));
+  if (state !== null) {
     try {
-      await publishState(gladys, ids.feature(FEATURE.STATE), announced);
+      await publishState(gladys, ids.feature(FEATURE.STATE), state);
     } catch (error) {
       logger.warn(`State of "${device.name}" not published: ${error.message}`);
     }
@@ -470,13 +511,18 @@ async function freeze(gladys, device, ids) {
 async function goToFavorite(gladys, device, ids) {
   const favorite = device.favoritePosition;
   if (favorite === null || favorite === undefined) {
-    shutter.travel.set(device, null);
-    await publishState(gladys, ids.feature(FEATURE.STATE), SHUTTER_STATE.STOP);
+    await goSomewhere(gladys, device, ids);
     return;
   }
   // Travelled like any other order, so the position follows the shutter
   // instead of jumping there.
   await goTo(gladys, device, ids, favorite, { announced: toShutterState(favorite) });
+}
+
+/** The shutter went somewhere nobody can tell: unknown until its next end stop. */
+async function goSomewhere(gladys, device, ids) {
+  shutter.travel.set(device, null);
+  await publishState(gladys, ids.feature(FEATURE.STATE), SHUTTER_STATE.STOP);
 }
 
 function hasFavorite(device) {
@@ -489,6 +535,48 @@ function hasFavorite(device) {
  * clock) starts from a clean slate.
  */
 const lastStopHeard = new WeakMap();
+
+/**
+ * What the remembered position of each shutter meant when it was written,
+ * keyed by platform id — per travel, like `lastStopHeard`. A saved
+ * configuration changes the device behind the same platform id, and with it
+ * what that memory says:
+ *   - before the shutter was timed, it held the destination of the last order,
+ *     a STOP half-way included. Taken for a position once travel times were
+ *     added, it was published, and the first percentage was timed from it
+ *     instead of running to an end stop;
+ *   - positions are in Gladys terms, which `invert` turns upside down. Kept as
+ *     they were, Gladys showed the mirror of the shutter, and the next order
+ *     sent the motor into the end stop it was already resting at.
+ */
+const memoryFrames = new WeakMap();
+
+/** Bring the memory of this shutter to its current configuration. */
+function reframe(device) {
+  const travel = shutter.travel;
+  // A movement finishes in the terms it started in: its STOP and its arrival
+  // were computed there, and cancelling it would cancel the STOP. The memory
+  // is brought over at the next call after it.
+  if (travel.isMoving(device)) {
+    return;
+  }
+  if (!memoryFrames.has(travel)) {
+    memoryFrames.set(travel, new Map());
+  }
+  const frames = memoryFrames.get(travel);
+  const frame = { positioned: hasPosition(device), invert: Boolean(device.invert) };
+  const before = frames.get(device.platformId);
+  frames.set(device.platformId, frame);
+  if (!before || !travel.knows(device)) {
+    return;
+  }
+  if (frame.positioned && !before.positioned) {
+    travel.set(device, null);
+  } else if (frame.invert !== before.invert) {
+    const position = travel.positionOf(device);
+    travel.set(device, position === null ? null : 100 - position);
+  }
+}
 
 /** Is this STOP the same press as the one heard a moment ago? */
 function isRepeatedStop(device) {

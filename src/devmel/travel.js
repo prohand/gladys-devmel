@@ -96,6 +96,16 @@ export class ShutterTravel {
     return positionAt(state.move, this.now());
   }
 
+  /**
+   * Whether anything was ever recorded for this shutter — `positionOf` cannot
+   * say: its `null` is both "never heard of" and "known to have gone somewhere
+   * nobody can tell" (the motor's own favourite position, a toggle), and only
+   * the first may be filled in from elsewhere.
+   */
+  knows(device) {
+    return this.states.has(device.platformId);
+  }
+
   /** True while a movement is under way. */
   isMoving(device) {
     return Boolean(this.states.get(device.platformId)?.move);

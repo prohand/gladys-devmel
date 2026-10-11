@@ -96,6 +96,10 @@ test('a movement order is told apart from a position the hardware reported', () 
   assert.equal(level.command, undefined);
   assert.equal(up.value, 100);
   assert.equal(level.value, 100);
+  // The ON says which way a shutter on an on/off protocol was sent, though.
+  assert.equal(on.switched, true);
+  assert.equal(up.switched, undefined);
+  assert.equal(level.switched, undefined);
 });
 
 test('unreadable notes are ignored instead of crashing the event loop', () => {

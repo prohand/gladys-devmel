@@ -477,7 +477,14 @@ async function applyOwnEcho(gladys, config, event, echo, scenes = null) {
       continue;
     }
     try {
-      const handled = await blueprint.applyReadings(gladys, { device, readings, createdAt });
+      const handled = await blueprint.applyReadings(gladys, {
+        device,
+        readings,
+        createdAt,
+        // Some readings carry no `command` and are orders all the same to the
+        // device that hears them (an ON to a shutter): in an echo they are ours.
+        echo: true,
+      });
       applied += Number(handled) > 0 ? 1 : 0;
     } catch (err) {
       logger.error(`Could not publish the states of "${device.name}"`, err);

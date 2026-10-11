@@ -1760,10 +1760,11 @@ test('a position known in memory wins over the older one Gladys kept', async (t)
     },
   ]);
 
-  // Opening starts from the bottom it reached, not from a stale 60 %.
+  // Gladys is told again where it is, and opening starts from the bottom it
+  // reached, not from a stale 60 %.
   await send('Timed shutter', 'state', 1);
   await clock.advance(2000);
-  assert.deepEqual(positionsOf('Timed shutter'), [0, 5, 10]);
+  assert.deepEqual(positionsOf('Timed shutter'), [0, 0, 5, 10]);
 });
 
 test('an untimed shutter stopped mid-course is not sent to its favourite position', async (t) => {
@@ -1848,4 +1849,285 @@ test('another button clicks at once, the same one again after the press window',
   await sensor.applyReadings(gladys, { device, readings: toggle, now: 2600 });
 
   assert.equal(gladys.statesOf(`${deviceExternalId(config, 'Keyfob')}:click`).length, 3);
+});
+
+// --- What the remembered position of a shutter means -------------------------
+
+/**
+ * Shutters of their own, with a clock, a travel and a configuration the test
+ * can save again (`reconfigure`), as the Configuration screen does: same
+ * process, same travel, a new device behind the same platform id.
+ */
+function setupShutters(t, devices) {
+  const gladys = createFakeGladys();
+  const configOf = (list) =>
+    normalizeConfig({
+      devices: JSON.stringify({ devices: list }),
+      spurl: 'sp://pass@[fe80::1]?rhost=192.168.1.50',
+    });
+  const context = { config: configOf(devices) };
+  const client = createFakeClient({ config: context.config });
+  const clock = createFakeClock();
+  const previous = shutter.travel;
+  shutter.travel = new ShutterTravel({ now: clock.now, timers: clock.timers, tickMs: 1000 });
+  t.after(() => {
+    shutter.travel.clear();
+    shutter.travel = previous;
+  });
+
+  const externalIdOf = (name) => deviceExternalId(context.config, name);
+  const send = async (name, key, value) => {
+    const found = findDeviceByExternalId(gladys, context.config, externalIdOf(name));
+    await found.blueprint.onSetValue(gladys, {
+      device: found.device,
+      feature: featureOf(gladys, context.config, name, key),
+      value,
+      client,
+    });
+  };
+  /** A saved configuration: initialize() restores from what Gladys kept. */
+  const reconfigure = async (list, stored = {}) => {
+    context.config = configOf(list);
+    await restoreDeviceStates(
+      gladys,
+      context.config,
+      Object.keys(list).map((name) => ({
+        external_id: externalIdOf(name),
+        features: [{ external_id: `${externalIdOf(name)}:position`, last_value: stored[name] }],
+      })),
+    );
+  };
+  const positionsOf = (name) => gladys.statesOf(`${externalIdOf(name)}:position`);
+  const statesOf = (name) => gladys.statesOf(`${externalIdOf(name)}:state`);
+  const sentValues = () => client.sent.map((entry) => entry.notes[0].value);
+
+  return {
+    gladys,
+    context,
+    client,
+    clock,
+    send,
+    reconfigure,
+    positionsOf,
+    statesOf,
+    sentValues,
+    deviceOf: (name) => deviceNamed(context.config, name),
+  };
+}
+
+test('a shutter given travel times starts from an unknown position, not from its last order', async (t) => {
+  const channel = { id: 730, source: 3 };
+  const { gladys, context, client, clock, send, reconfigure, positionsOf, sentValues, deviceOf } =
+    setupShutters(t, { Store: { type: 4098, channel } });
+
+  // Untimed: opened, then stopped a few seconds later, somewhere half-way.
+  await send('Store', 'state', 1);
+  await clock.advance(5000);
+  await send('Store', 'state', 0);
+
+  // The user times it and saves; Gladys creates the Position feature.
+  await reconfigure({ Store: { type: 4098, travel: 20, channel } });
+  await replayDeviceStates(
+    gladys,
+    { external_id: deviceExternalId(context.config, 'Store'), features: [] },
+    { config: context.config, client },
+  );
+  assert.equal(shutter.travel.positionOf(deviceOf('Store')), null);
+  assert.deepEqual(positionsOf('Store'), []);
+
+  // So the first percentage runs to the nearest end stop, to find its reference.
+  await send('Store', 'position', 40);
+  await clock.advance(25000);
+  assert.deepEqual(sentValues(), [STATE_VALUES.UP, STATE_VALUES.STOP, STATE_VALUES.DOWN]);
+  assert.deepEqual(positionsOf('Store'), [0]);
+});
+
+test('correcting invert on a shutter mirrors the position it remembers', async (t) => {
+  const channel = { id: 740, source: 4 };
+  const { clock, send, reconfigure, positionsOf, statesOf, sentValues } = setupShutters(t, {
+    Sail: { type: 4098, travel: 20, channel },
+  });
+
+  // Declared the wrong way round: "close" sends DOWN, which opens this sail.
+  await send('Sail', 'state', -1);
+  await clock.advance(25000);
+  assert.deepEqual(positionsOf('Sail'), [0]);
+
+  // The user adds invert and saves: the sail did not move, it is fully open.
+  await reconfigure({ Sail: { type: 4098, travel: 20, invert: true, channel } }, { Sail: 0 });
+  assert.equal(positionsOf('Sail').at(-1), 100);
+  assert.equal(statesOf('Sail').at(-1), 1);
+
+  // Closing it to 40 % now runs the motor away from the end stop it rests at.
+  await send('Sail', 'position', 40);
+  await clock.advance(25000);
+  assert.deepEqual(sentValues(), [STATE_VALUES.DOWN, STATE_VALUES.UP, STATE_VALUES.STOP]);
+  assert.equal(positionsOf('Sail').at(-1), 40);
+});
+
+test('a position made unknown by the favourite button stays unknown after a reconnection', async (t) => {
+  const { gladys, config, client, clock, send } = setupTimed(t);
+  const externalId = deviceExternalId(config, 'Timed shutter');
+
+  await send('Timed shutter', 'state', -1);
+  await clock.advance(10000);
+  await applyEvents(gladys, config, [radioState(config, 'Timed shutter', STATE_VALUES.MIDDLE)]);
+
+  // Gladys still holds the 0 % from before: it is not where the motor went.
+  await restoreDeviceStates(gladys, config, [
+    {
+      external_id: externalId,
+      features: [{ external_id: `${externalId}:position`, last_value: 0 }],
+    },
+  ]);
+  assert.equal(shutter.travel.positionOf(deviceNamed(config, 'Timed shutter')), null);
+
+  // 30 % from an unknown spot: down to the end stop first, never a timed DOWN.
+  await send('Timed shutter', 'position', 30);
+  await clock.advance(12000);
+  assert.deepEqual(
+    client.sent.map((entry) => entry.notes[0].value),
+    [STATE_VALUES.DOWN, STATE_VALUES.DOWN],
+  );
+});
+
+test('a travel that ended while Gladys was away is published again when it comes back', async (t) => {
+  const { gladys, config, client, clock, send, positionsOf, statesOf } = setupTimed(t);
+  const externalId = deviceExternalId(config, 'Timed shutter');
+
+  await send('Timed shutter', 'state', -1);
+  await clock.advance(10000);
+  await send('Timed shutter', 'position', 40);
+  await clock.advance(3000);
+
+  // Gladys restarts: every publication is refused, the STOP still goes out.
+  const publishState = gladys.publishState;
+  gladys.publishState = async () => {
+    throw new Error('connect ECONNREFUSED');
+  };
+  await clock.advance(10000);
+  gladys.publishState = publishState;
+  assert.equal(client.noteAt(2).value, STATE_VALUES.STOP);
+  assert.equal(positionsOf('Timed shutter').at(-1), 15);
+
+  // Back: the initialization finds the stale 15 % and "closing", and fixes them.
+  await restoreDeviceStates(gladys, config, [
+    {
+      external_id: externalId,
+      features: [{ external_id: `${externalId}:position`, last_value: 15 }],
+    },
+  ]);
+  assert.equal(positionsOf('Timed shutter').at(-1), 40);
+  assert.equal(statesOf('Timed shutter').at(-1), 0);
+
+  // Nothing missed, nothing said again.
+  gladys.published.length = 0;
+  await restoreDeviceStates(gladys, config, [
+    {
+      external_id: externalId,
+      features: [{ external_id: `${externalId}:position`, last_value: 40 }],
+    },
+  ]);
+  assert.deepEqual(gladys.published, []);
+});
+
+test('a position order to a shutter with no travel times says its state too', async (t) => {
+  const { send, positionsOf, statesOf } = setupShutters(t, {
+    Store: { type: 4099, channel: { id: 750, source: 5 } },
+  });
+
+  await send('Store', 'state', 1);
+  await send('Store', 'position', 0);
+  await send('Store', 'position', 40);
+
+  assert.deepEqual(positionsOf('Store'), [100, 0, 40]);
+  assert.deepEqual(statesOf('Store'), [1, -1, 0]);
+});
+
+test('a one-button keyfob heard by a timed shutter makes its position unknown', async (t) => {
+  const { gladys, config, client, clock, send, statesOf } = setupTimed(t);
+  await send('Timed shutter', 'state', -1);
+  await clock.advance(10000);
+
+  const toggle = {
+    type: 3,
+    channel: { id: 700, source: 42 },
+    thingnotes: { notes: [{ type: NOTE_TYPES.STATE, value: STATE_VALUES.TOGGLE }] },
+  };
+  const lines = captureLogs(async () =>
+    applyEvents(gladys, config, [toggle], new HeardChannels(), new SentOrders()),
+  );
+  assert.equal(await lines.result, 1);
+  assert.ok(lines.of('INFO').some((line) => line.includes('followed it: toggle')));
+  assert.ok(!lines.of('INFO').some((line) => line.includes('partially decoded')));
+
+  // Opened, closed or stopped: nobody can tell, and nothing is invented.
+  assert.equal(shutter.travel.positionOf(deviceNamed(config, 'Timed shutter')), null);
+  assert.equal(statesOf('Timed shutter').at(-1), 0);
+  await send('Timed shutter', 'position', 60);
+  assert.equal(client.noteAt(1).value, STATE_VALUES.UP);
+  await clock.advance(25000);
+  assert.equal(client.sent.length, 2, 'no timed STOP: run to the end stop');
+});
+
+test('the ON of an on/off remote sets a timed shutter off, it does not put it at the top', async (t) => {
+  const { gladys, config, clock, send, positionsOf, statesOf } = setupTimed(t);
+  await send('Timed shutter', 'state', -1);
+  await clock.advance(10000);
+
+  const on = {
+    type: 3,
+    channel: { id: 700, source: 42 },
+    thingnotes: { notes: [{ type: NOTE_TYPES.STATE, value: STATE_VALUES.ON }] },
+  };
+  await applyEvents(gladys, config, [on], new HeardChannels(), new SentOrders());
+  await clock.advance(2000);
+
+  // Opening, 20 s end to end: 10 % after two seconds, announced "open".
+  assert.deepEqual(positionsOf('Timed shutter'), [0, 5, 10]);
+  assert.equal(statesOf('Timed shutter').at(-1), 1);
+  assert.equal(shutter.travel.isMoving(deviceNamed(config, 'Timed shutter')), true);
+});
+
+test('the ON of an on/off remote is followed by an untimed shutter', async () => {
+  const { gladys, config } = setup();
+  const on = {
+    type: 3,
+    channel: { id: 300, source: 3 },
+    thingnotes: { notes: [{ type: NOTE_TYPES.STATE, value: STATE_VALUES.OFF }] },
+  };
+
+  await applyEvents(gladys, config, [on], new HeardChannels(), new SentOrders());
+
+  assert.deepEqual(
+    gladys.statesOf(`${deviceExternalId(config, 'Living room shutter')}:state`),
+    [-1],
+  );
+});
+
+test('the echo of our own order, heard as ON, does not retarget a timed shutter', async (t) => {
+  const { gladys, config, client, clock, send, positionsOf } = setupTimed(t);
+  await send('Timed shutter', 'state', -1);
+  await clock.advance(10000);
+  await send('Timed shutter', 'position', 40);
+  const orders = new SentOrders();
+  orders.remember('0xbeef', deviceNamed(config, 'Timed shutter'));
+
+  await applyEvents(
+    gladys,
+    config,
+    [
+      {
+        type: 3,
+        channel: { ...deviceNamed(config, 'Timed shutter').channel },
+        thingnotes: { uid: '0xbeef', notes: [{ type: NOTE_TYPES.STATE, value: STATE_VALUES.ON }] },
+      },
+    ],
+    new HeardChannels(),
+    orders,
+  );
+  await clock.advance(10000);
+
+  assert.equal(client.noteAt(2).value, STATE_VALUES.STOP);
+  assert.equal(positionsOf('Timed shutter').at(-1), 40);
 });

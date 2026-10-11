@@ -418,7 +418,8 @@ moment it stops by itself, and write the two durations down:
 
 From then on the integration follows the shutter second by second, whether the
 order came from Gladys or from a wall remote it heard on the radio (which needs
-the listening channel below). When many shutters move at once, each publishes
+the listening channel below). A remote whose protocol only knows On/Off
+(Chacon DiO) counts as Up/Down. When many shutters move at once, each publishes
 its position less often, so together they stay well under the 300 states a
 minute Gladys accepts and every end stop gets through. Three things follow:
 
@@ -445,10 +446,16 @@ Two more things worth knowing:
   the integration publishes nothing rather than inventing a value. Open or
   close it once and it is set. Asking for a position before that sends the
   shutter to the nearest end stop, which is exactly what establishes the
-  reference;
+  reference. The same goes for a shutter you have just timed, whatever its
+  orders said before, and for one sent somewhere nobody can tell: the "my"
+  button without `favorite_position`, a one-button keyfob (toggle). A
+  reconnection to Gladys does not fill it in with the older value Gladys kept;
 - the position is **remembered across restarts** of the integration: it starts
   again from the value Gladys kept. A shutter you add in Gladys after the
-  integration started gets the position already known straight away;
+  integration started gets the position already known straight away, and a
+  position Gladys missed while it was unreachable (restarted, updated) is
+  published again when it comes back. Correcting `invert` mirrors the
+  remembered position: the shutter itself did not move;
 - a shutter driven to a position is **stopped on time even when Gladys is
   briefly unreachable or slow to answer**: the STOP goes out before the
   position is published, and never waits for Gladys. A STOP the box could not

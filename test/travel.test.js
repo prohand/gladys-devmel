@@ -102,6 +102,17 @@ test('a shutter at an unknown position stays unknown until an end stop', async (
   assert.equal(travel.positionOf(SHUTTER), 100);
 });
 
+test('a position known to be unknown is told apart from one never heard of', () => {
+  const { travel } = setup();
+  assert.equal(travel.knows(SHUTTER), false);
+
+  // The motor's own favourite position: somewhere, nobody can say where.
+  travel.set(SHUTTER, null);
+
+  assert.equal(travel.positionOf(SHUTTER), null);
+  assert.equal(travel.knows(SHUTTER), true);
+});
+
 test('a shutter told to go where it already is does not move', () => {
   const { travel, positions, publish } = setup();
   travel.set(SHUTTER, 40);
