@@ -13,7 +13,13 @@
 // fields, plus the remote — and the user pastes it back.
 // -----------------------------------------------------------------------------
 
-import { channelOfEntry, parseDeviceEntries, parseDevices } from '../config.js';
+import {
+  DEVICE_TYPES,
+  GENERIC_433_CHANNEL,
+  channelOfEntry,
+  parseDeviceEntries,
+  parseDevices,
+} from '../config.js';
 import { isSameChannel } from './notes.js';
 import { describeEmitter } from './heard.js';
 import { channelName, decoderOf, planListening } from './listening.js';
@@ -135,6 +141,21 @@ export function attachHeardRemote({ config, device, heard, now = Date.now(), tab
       fr: 'Choisissez l’appareil que pilote cette télécommande : le volet qu’elle ouvre, la lampe qu’elle allume.',
     };
   }
+  // The box is in the device select (a box with `sensors: true` is a Gladys
+  // device), but no remote drives it: the devices never route a frame to a box
+  // (see `hearsChannel`), and every box shares the placeholder channel {id: 1},
+  // so the line would even have landed on the first box of the list.
+  if (device.rtype === DEVICE_TYPES.BOX) {
+    return {
+      en:
+        `"${device.name}" is the AirSend box itself, which no remote drives. Pick the device ` +
+        'this remote drives: the shutter it opens, the light it switches.',
+      fr:
+        `« ${device.name} » est le boîtier AirSend lui-même, qu’aucune télécommande ne pilote. ` +
+        'Choisissez l’appareil que pilote cette télécommande : le volet qu’elle ouvre, la lampe ' +
+        'qu’elle allume.',
+    };
+  }
 
   if (candidates.length === 0) {
     return heard.list().length === 0 ? nothingHeard() : everythingClaimed(config);
@@ -185,18 +206,46 @@ export function attachHeardRemote({ config, device, heard, now = Date.now(), tab
       `The box decoded no address for it, only protocol ${remote.id}: that line makes ` +
         `"${device.name}" follow EVERY frame of that protocol the box cannot attribute, a ` +
         "neighbour's remote included. It is the last resort — first set the listening channel " +
-        `to ${remote.id}, which is how the box is told to decode that protocol properly.`,
+        `to ${toType(remote.id, 'en')}, which is how the box is told to decode that protocol ` +
+        'properly.',
     );
     fr.push(
       `Le boîtier n'en a décodé aucune adresse, seulement le protocole ${remote.id} : cette ligne ` +
         `fait suivre à « ${device.name} » TOUTES les trames de ce protocole que le boîtier ` +
         "n'attribue à personne, celles d'un voisin comprises. C'est le dernier recours : " +
-        `renseignez d'abord ${remote.id} comme canal d'écoute, c'est ainsi qu'on demande au ` +
-        'boîtier de décoder ce protocole correctement.',
+        `renseignez d'abord ${toType(remote.id, 'fr')} comme canal d'écoute, c'est ainsi qu'on ` +
+        'demande au boîtier de décoder ce protocole correctement.',
     );
   }
 
-  if (remote.claimed === false && remote.understood === false && remote.readings?.length === 0) {
+  if (remote.dropped) {
+    // Thrown away before anything read its notes (heard.js records a dropped
+    // frame without its readings): "no decodable note" would be a guess, and a
+    // wrong one for a remote graded at the edge of the window — its frames do
+    // carry an order, and once attached by its address they are no longer
+    // dropped for their grade (see `isDeclaredRemote`).
+    en.push(
+      `Its frames were dropped before any device (${remote.dropped}), so what they carry is ` +
+        'not known here: the "Ignored a radio frame" log line says it. ' +
+        (hasAddress(remote)
+          ? 'Once this line is saved, a frame of this remote is no longer dropped for its grade.'
+          : 'A line without an address does not waive the grade: "Accept unreliable frames" ' +
+            'lets them through.'),
+    );
+    fr.push(
+      `Ses trames ont été écartées avant tout appareil (${remote.dropped}), ce qu'elles portent ` +
+        "n'est donc pas connu ici : la ligne de journal « Ignored a radio frame » le dit. " +
+        (hasAddress(remote)
+          ? "Une fois cette ligne enregistrée, une trame de cette télécommande n'est plus " +
+            'écartée pour sa note.'
+          : 'Une ligne sans adresse ne lève pas cette exigence : « Accepter les trames peu ' +
+            'fiables » les laisse passer.'),
+    );
+  } else if (
+    remote.claimed === false &&
+    remote.understood === false &&
+    remote.readings?.length === 0
+  ) {
     en.push(
       'Its frames carry no note the service could decode: attaching it makes the emitter known, ' +
         'but a partially decoded protocol carries no order to replay, so the device state will ' +
@@ -252,13 +301,16 @@ function pickRemote(candidates) {
  * remotes is declared, or heard, with an address. A `{pid}` line alone is then
  * never the right answer: it would make the device follow every half-decoded
  * frame of that protocol — the other remotes of the house included.
+ *
+ * Remotes only, never a device's own channel: its `addr` is the one the box
+ * TRANSMITS with, in every export, and says nothing about what the box decodes
+ * when it listens. Counted, it made any device on the protocol — the very one
+ * the remote drives — refuse the `{pid}` line for good.
  */
 function protocolHasAddresses(config, heard, remote) {
   const id = Number(remote.id);
   const declared = config.devmelDevices.some((device) =>
-    [device.channel, ...(device.remotes ?? [])].some(
-      (channel) => Number(channel?.id) === id && hasAddress(channel),
-    ),
+    (device.remotes ?? []).some((channel) => Number(channel?.id) === id && hasAddress(channel)),
   );
   return declared || heard.list().some((entry) => Number(entry.id) === id && hasAddress(entry));
 }
@@ -296,10 +348,10 @@ function describeListeningAfter(config, line, remote, table) {
     return {
       en:
         'Listening is turned off (Listening channel set to 0): the box will not hear this ' +
-        `remote. Put ${wanted} in that field, or empty it, to hear it.`,
+        `remote. Put ${toType(wanted, 'en')} in that field, or empty it, to hear it.`,
       fr:
         "L'écoute est désactivée (Canal d'écoute à 0) : le boîtier n'entendra pas cette " +
-        `télécommande. Mettez ${wanted} dans ce champ, ou videz-le, pour l'entendre.`,
+        `télécommande. Mettez ${toType(wanted, 'fr')} dans ce champ, ou videz-le, pour l'entendre.`,
     };
   }
   const listened = named(after.channel, table);
@@ -316,12 +368,25 @@ function describeListeningAfter(config, line, remote, table) {
     en:
       `Warning: once saved, the box listens to ${listened} (${why.en}), not to ` +
       `${named(wanted, table)} of this remote: it will not be heard. The box listens to one ` +
-      `protocol at a time — put ${wanted} in the Listening channel field.`,
+      `protocol at a time — put ${toType(wanted, 'en')} in the Listening channel field.`,
     fr:
       `Attention : une fois enregistré, le boîtier écoute le ${listened} (${why.fr}), pas le ` +
       `${named(wanted, table)} de cette télécommande : elle ne sera pas entendue. Le boîtier ` +
-      `n'écoute qu'un protocole à la fois — mettez ${wanted} dans le champ Canal d'écoute.`,
+      `n'écoute qu'un protocole à la fois — mettez ${toType(wanted, 'fr')} dans le champ Canal ` +
+      "d'écoute.",
   };
+}
+
+/**
+ * What to type in the Listening channel field to listen to a channel: its pid,
+ * except for the generic 433 MHz decoder — `1` there has always meant "deduce"
+ * (see `toListenChannel`), so advising it changed nothing.
+ */
+function toType(channel, language) {
+  if (Number(channel) === GENERIC_433_CHANNEL) {
+    return language === 'fr' ? '« générique »' : '"generic"';
+  }
+  return String(channel);
 }
 
 /** `pid 14177 "X2D868"`, or the bare pid when the service did not name it. */

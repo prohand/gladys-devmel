@@ -4,6 +4,7 @@ import { normalizeConfig } from '../src/config.js';
 import { HeardChannels } from '../src/devmel/heard.js';
 import { attachHeardRemote, attachRemote, unclaimedEmitters } from '../src/devmel/remotes.js';
 import { READINGS } from '../src/devmel/notes.js';
+import { indexChannels, planListening } from '../src/devmel/listening.js';
 
 // The line a user actually pastes: the airsend.cloud export, one shutter, one
 // line. Every test below starts from it, because that is what the action has
@@ -310,4 +311,91 @@ test('attaching a remote keeps the one declared without a list, or as "remote"',
     const again = attachRemote(source, device, { id: 25455, source: 42 });
     assert.deepEqual(configOf(again).devmelDevices[0].remotes, [{ id: 25455, source: 42 }]);
   }
+});
+
+test('a remote decoded by the generic 433 MHz channel is asked for by name, not as 1', () => {
+  // `1` in the Listening channel field means "deduce": advising it brought the
+  // same deduction back, and the remote stayed unheard.
+  const table = indexChannels([
+    { id: 1, name: 'Generic 433MHz' },
+    { id: 1368, name: 'Chacon', getDecoder: 1 },
+    { id: 25455, name: 'Somfy RTS', getDecoder: 25455 },
+  ]);
+  const heard = heardRemote({ id: 1368, source: 777 });
+
+  const forced = normalizeConfig({ devices: EXPORT, listen_channel: '25455' });
+  const warning = attachHeardRemote({
+    config: forced,
+    device: forced.devmelDevices[0],
+    heard,
+    table,
+  });
+  assert.match(warning.en, /put "generic" in the Listening channel field/);
+  assert.match(warning.fr, /mettez « générique » dans le champ Canal d'écoute/);
+  assert.doesNotMatch(warning.en, /put 1 /);
+
+  const off = normalizeConfig({ devices: EXPORT, listen_channel: '0' });
+  const turnedOff = attachHeardRemote({ config: off, device: off.devmelDevices[0], heard, table });
+  assert.match(turnedOff.en, /Put "generic" in that field, or empty it/);
+  assert.match(turnedOff.fr, /Mettez « générique » dans ce champ/);
+
+  // And the word advised is the one that does select the remote's decoder.
+  const followed = normalizeConfig({ devices: EXPORT, listen_channel: 'generic' });
+  assert.equal(planListening(followed, table).channel, 1);
+});
+
+test('no address, and the only one on the protocol is its own device: the last-resort line', () => {
+  // The device's `addr` is the one the box transmits with, not proof that the
+  // box decodes addresses on that protocol: "press again" was answered forever.
+  const config = configOf(
+    JSON.stringify({
+      devices: [{ name: 'Volet Profalux', type: 4098, pid: 14177, addr: 3359265281 }],
+    }),
+  );
+  const heard = new HeardChannels({ now: () => 1_000_000 });
+  heard.record({ id: 14177 }, { timestamp: 1_000_000 });
+
+  const message = attachHeardRemote({ config, device: config.devmelDevices[0], heard });
+
+  assert.match(message.fr, /"remotes":\[\{"pid":14177\}\]/);
+  assert.match(message.fr, /C'est le dernier recours/);
+  assert.doesNotMatch(message.fr, /vos autres télécommandes/);
+});
+
+test('a remote heard only in dropped frames is not said to carry no order', () => {
+  // A wall remote graded at the edge of the window (71): its frames are
+  // dropped unread, and followed once it is attached by its address.
+  const config = configOf(EXPORT);
+  const heard = new HeardChannels({ now: () => 1_000_000 });
+  heard.record(
+    { id: 25455, source: 94311 },
+    { dropped: 'unreliable, graded 71', timestamp: 1_000_000 },
+  );
+
+  const message = attachHeardRemote({ config, device: config.devmelDevices[0], heard });
+
+  assert.match(message.fr, /"remotes":\[\{"pid":25455,"addr":94311\}\]/);
+  assert.doesNotMatch(message.fr, /aucune note décodable/);
+  assert.doesNotMatch(message.en, /will not follow/);
+  assert.match(message.en, /dropped before any device \(unreliable, graded 71\)/);
+  assert.match(message.en, /no longer dropped for its grade/);
+  assert.match(message.fr, /n'est plus écartée pour sa note/);
+});
+
+test('the AirSend box is refused as the device a remote drives', () => {
+  const config = configOf(
+    JSON.stringify({
+      devices: [
+        { name: 'AirSend', type: 0, sensors: true },
+        { name: 'Baie vitree', type: 4098, pid: 25455, addr: 8295 },
+      ],
+    }),
+  );
+  const heard = heardRemote({ id: 25455, source: 94311 });
+
+  const message = attachHeardRemote({ config, device: config.devmelDevices[0], heard });
+
+  assert.match(message.en, /"AirSend" is the AirSend box itself/);
+  assert.match(message.fr, /Choisissez l’appareil que pilote cette télécommande/);
+  assert.doesNotMatch(message.en, /"remotes"|Attached/);
 });

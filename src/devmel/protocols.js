@@ -21,7 +21,7 @@
 //   getDecoder === 0     only partially decoded  -> frames arrive, orders do not
 // -----------------------------------------------------------------------------
 
-import { GENERIC_433_CHANNEL } from '../config.js';
+import { DEVICE_TYPES, GENERIC_433_CHANNEL } from '../config.js';
 
 /** How many protocols a search spells out before it counts the rest. */
 export const SHOWN = 12;
@@ -175,6 +175,12 @@ function decoding(channel, language) {
 function devicesOn(config, id) {
   const names = [];
   for (const device of config.devmelDevices ?? []) {
+    // A box is not a radio device: its channel is the placeholder {id: 1} (see
+    // config.js), which read as "declared on" the generic 433 MHz protocol for
+    // every export, the box itself being in it.
+    if (device.rtype === DEVICE_TYPES.BOX) {
+      continue;
+    }
     const channels = [device.channel, ...(device.remotes ?? [])];
     if (channels.some((channel) => Number(channel?.id) === id)) {
       names.push(`"${device.name}"`);

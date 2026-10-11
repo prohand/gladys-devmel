@@ -114,3 +114,19 @@ test('an unreachable service is said as such, not as an empty list', () => {
   assert.match(report.en, /did not answer with its protocol list.*Test the connection/s);
   assert.match(report.fr, /Tester la connexion/);
 });
+
+test('the AirSend box is not counted as a device declared on the generic protocol', () => {
+  // Every box carries the placeholder channel {id: 1}, and an airsend.cloud
+  // export always lists the box itself.
+  const config = configWith({
+    devices:
+      '{"devices":[{"name":"AirSend salon","type":0,"localip":"fe80::1"},' +
+      '{"name":"Baie vitree","type":4098,"pid":25455,"addr":8295}]}',
+  });
+
+  const report = findProtocol({ table: TABLE, config, search: 'generic' });
+
+  assert.match(report.en, /pid 1 — Generic 433MHz/);
+  assert.doesNotMatch(report.en, /AirSend salon/);
+  assert.doesNotMatch(report.fr, /déclaré sur/);
+});
