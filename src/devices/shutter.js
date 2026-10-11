@@ -257,6 +257,33 @@ export const shutter = {
     return handled;
   },
 
+  /**
+   * The box said, after Gladys was answered, that the last order never reached
+   * the air (see `applyEvents`): the travel it started is taken back, and
+   * Gladys shown the shutter where it stayed.
+   *
+   * @param {number} since when that order was first sent
+   * @returns {Promise<boolean>} whether anything was taken back
+   */
+  async notCarried(gladys, { device, since }) {
+    reframe(device);
+    if (!shutter.travel.revert(device, since)) {
+      return false;
+    }
+    const ids = idsFor(gladys, KEY, device);
+    const position = shutter.travel.positionOf(device);
+    logger.info(`"${device.name}" did not move: its travel is taken back`);
+    await publishState(
+      gladys,
+      ids.feature(FEATURE.STATE),
+      position === null ? SHUTTER_STATE.STOP : toShutterState(position),
+    );
+    if (position !== null) {
+      await publishPosition(gladys, device, ids, position);
+    }
+    return true;
+  },
+
   async identify(_gladys, { device, client, callbackUrl }) {
     await sendNotes(client, device, [stateNote(STATE_VALUES.PING)], { callbackUrl });
   },

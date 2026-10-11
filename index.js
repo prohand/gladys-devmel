@@ -15,6 +15,7 @@
 // -----------------------------------------------------------------------------
 
 import { resetGatewayReads } from './src/devices/gateway.js';
+import { isRadioFailure } from './src/devices/helpers.js';
 import { GladysIntegration } from '@gladysassistant/integration-sdk';
 import { normalizeConfig } from './src/config.js';
 import { applyLogLevel, applyLogTimeZone, createLogger } from './src/logging.js';
@@ -151,13 +152,16 @@ gladys.onSetValue(async (device, feature, value) => {
     });
   } catch (err) {
     // The one failure of a radio order anything can report: a scene may want
-    // to know (a notification, a retry later).
-    await sceneEvents.orderFailed(gladys, {
-      externalId: device.external_id,
-      name: found.device.name,
-      reason: failureReason(err),
-      message: err.message,
-    });
+    // to know (a notification, a retry later). Only the order's own: a state
+    // Gladys refused once it was on the air is not a radio order that failed.
+    if (isRadioFailure(err)) {
+      await sceneEvents.orderFailed(gladys, {
+        externalId: device.external_id,
+        name: found.device.name,
+        reason: failureReason(err),
+        message: err.message,
+      });
+    }
     throw err;
   } finally {
     // A failed order is exactly when the badge has something new to say: the
@@ -216,7 +220,9 @@ gladys.onDeviceUpdated((device) => onDeviceSaved(device, 'onDeviceUpdated'));
 // order; the state of what a remote drives is not (see helpers.js).
 async function handleRadioEvents(events, route) {
   // The client too: an order heard from a wall remote cancels the repeats of
-  // the Gladys order it overrides.
+  // the Gladys order it overrides, and an order the box says it never carried
+  // turns the badge of its device to unreachable.
+  const badges = JSON.stringify([...client.transports]);
   const applied = await applyEvents(
     gladys,
     config,
@@ -227,6 +233,11 @@ async function handleRadioEvents(events, route) {
     client,
   );
   logger.debug(`${route}: ${events?.length ?? 0} event(s), ${applied} device(s) updated`);
+  if (JSON.stringify([...client.transports]) !== badges) {
+    await publishDeviceTransports().catch((err) =>
+      logger.debug(`Could not publish the transports: ${err.message}`),
+    );
+  }
   refreshWidget();
 }
 

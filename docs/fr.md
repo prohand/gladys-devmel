@@ -372,14 +372,27 @@ minute après son dernier ordre : une télécommande recopiée dans l'appli AirS
 (même adresse que l'appareil, l'usage pour un portail à code fixe) est de
 nouveau suivie une fois cette minute passée.
 
-Deux conséquences visibles :
+Il en va de même d'un pourcentage ou d'un ON/OFF envoyé par Gladys : son écho
+n'est pas pris pour l'appareil qui dirait où il en est. Lu ainsi, un 4099
+chronométré envoyé à 30 % affichait 30 % une seconde après son départ, et l'écho
+tardif d'un ON rallumait une prise éteinte entre-temps.
+
+Conséquences visibles :
 
 - une télécommande murale émet depuis une **autre adresse** : elle n'est jamais
   prise pour cet écho, et continue de piloter le volet dans Gladys ;
-- quand le boîtier répond qu'il **n'a pas porté l'ordre**, l'intégration l'écrit
-  dans ses journaux, en nommant l'appareil et ce que le boîtier a dit. C'est la
-  seule trace d'un ordre parti dans le vide, et elle vaut le coup d'œil si vous
-  cliquez souvent deux fois.
+- un appareil qui liste ce canal dans ses `remotes` (un canal de groupe qui le
+  pilote avec d'autres) **suit** l'ordre : il n'y a pas réagi, et pour lui la
+  trame est un ordre comme un autre ;
+- quand le boîtier répond qu'il **n'a pas porté l'ordre** — aucune de ses
+  émissions, répétitions comprises : une répétition refusée après le départ de
+  l'ordre ne change rien —, l'intégration l'écrit dans ses journaux, en nommant
+  l'appareil et ce que le boîtier a dit. C'est la seule trace d'un ordre parti
+  dans le vide, et elle vaut le coup d'œil si vous cliquez souvent deux fois.
+  Quand le boîtier dit que rien n'est parti sur les ondes (`NETWORK`, `BUSY`…),
+  le badge de l'appareil passe à `unreachable`, et la course d'un volet
+  chronométré est annulée, avec le Stop qu'elle aurait envoyé à l'arrivée —
+  envoyé à un volet Somfy immobile, ce Stop est le bouton « my ».
 
 ### Quand le boîtier dit non
 
@@ -848,12 +861,13 @@ marque inscrite sur le boîtier plastique ne le dit pas toujours — un volet ve
 sous une marque française peut embarquer la radio d'un autre fabricant — alors
 que le nom donné ici est celui du décodeur qui a réellement décodé la trame.
 
-Trois verdicts possibles pour un émetteur :
+Quatre verdicts possibles pour un émetteur :
 
 | Verdict                            | Ce que ça veut dire                                                           |
 | ---------------------------------- | ----------------------------------------------------------------------------- |
 | `suivi par <appareil>`             | tout marche : ses trames pilotent bien l'appareil                             |
 | `aucun appareil ne le déclare`     | l'émetteur est entendu, mais rattaché à rien — **Rattacher une télécommande** |
+| `ne déclare pas`                   | un capteur bien décodé, en mesures absentes de ses `features` : ajoutez-les   |
 | `ne portent aucun ordre rejouable` | la trame arrive à l'appareil et ne porte rien à rejouer (code tournant)       |
 
 La ligne cite **toutes** les notes différentes entendues d'un même émetteur, pas
@@ -975,7 +989,9 @@ Dans l'éditeur de scènes, rubrique **Intégrations** :
   Gladys : injoignable, chaîne de connexion refusée, boîtier occupé… La scène
   peut lire `device_name`, `reason` (`NETWORK`, `SECURITY`, `BUSY`, `HTTP_401`,
   `UNREACHABLE`…) et `message`. Un seul événement par appareil et par raison
-  et par minute : fait pour une notification.
+  et par minute : fait pour une notification. Seulement l'ordre radio lui-même :
+  une répétition refusée alors que l'ordre est parti, ou un état refusé par
+  Gladys une fois l'ordre sur les ondes, ne le déclenche pas.
 
 ### Actions de scène
 

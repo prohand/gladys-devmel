@@ -610,6 +610,32 @@ test('an order is remembered, so its echo is not replayed as a fresh one', async
   assert.equal(client.orders.match(echo)?.name, DEVICE.name);
 });
 
+test('an order repeated is one order to the box, refused only when every emission is', async () => {
+  // The verdict of each emission comes back later, all under one uid: a repeat
+  // the box refused must not make an order that went out a failed one.
+  stubFetch(() => jsonResponse(200, { type: 0 }));
+  const client = clientWith({ command_repeat: 1 });
+  const uid = toThingUid('feature-1');
+
+  await client.transfer(DEVICE, [stateNote(STATE_VALUES.ON)], { uid: 'feature-1' });
+  await client.idle();
+  const order = client.orders.match({ thingnotes: { uid } });
+  assert.equal(order.emissions, 2);
+  assert.equal(client.orders.settle(order, 1).failed, false);
+  assert.equal(client.orders.settle(order, 0x104).failed, false);
+
+  // The OFF given next starts over: the ON going out says nothing about it.
+  await client.transfer(DEVICE, [stateNote(STATE_VALUES.OFF)], { uid: 'feature-1' });
+  await client.idle();
+  assert.equal(client.orders.settle(order, 0x104).failed, false);
+  assert.deepEqual(client.orders.settle(order, 0x104), {
+    failed: true,
+    uncarried: true,
+    latest: true,
+    since: order.since,
+  });
+});
+
 test('an order that took its time says where the time went', async () => {
   // "It reacts, but three seconds later" has two causes that look identical
   // from the sofa: the queue, which is ours, and the box, which is not.

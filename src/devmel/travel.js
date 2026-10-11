@@ -144,6 +144,7 @@ export class ShutterTravel {
     // Where we start from is where we are right now — mid-course included, so
     // reversing a movement does not lose the ground already covered.
     const from = this.positionOf(device);
+    const turned = Boolean(state.move);
     this.cancel(state);
 
     const destination = clamp(target ?? (direction === DIRECTIONS.UP ? 100 : 0));
@@ -164,6 +165,8 @@ export class ShutterTravel {
       endAt: startedAt + (distance / 100) * travelMs,
       publish,
       arrive,
+      /** It replaced a movement under way, rather than setting off a still shutter. */
+      turned,
       /** The mid-course publication still in flight, if any. */
       publishing: null,
       /** The last mid-course position Gladys was given. */
@@ -187,6 +190,30 @@ export class ShutterTravel {
     this.cancel(state);
     state.position = position;
     return position;
+  }
+
+  /**
+   * Take back a movement the motor never made: the box said the order that
+   * started it never reached the air. Its STOP goes with it — sent to a still
+   * Somfy shutter, a STOP is the "my" button, and the shutter that had not
+   * moved set off for its favourite position.
+   *
+   * Only a movement started at `since` or later (an older one was another
+   * order's, and that one went out), and only one that set off a still
+   * shutter: one that turned a moving shutter around leaves it running the
+   * way it was, which nothing here can rebuild.
+   *
+   * @returns {boolean} whether a movement was taken back
+   */
+  revert(device, since) {
+    const state = this.states.get(device.platformId);
+    const move = state?.move;
+    if (!move || move.turned || move.startedAt < since) {
+      return false;
+    }
+    this.cancel(state);
+    state.position = move.from;
+    return true;
   }
 
   /** Cancel every pending timer (integration shutdown). */

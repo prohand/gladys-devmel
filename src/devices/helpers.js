@@ -21,12 +21,34 @@ export function idsFor(gladys, blueprintKey, device) {
  * pushes the confirmation back, in which case the state is refreshed again.
  */
 export async function sendNotes(client, device, notes, options = {}) {
-  return client.transfer(device, notes, {
-    uid: options.uid ?? device.platformId,
-    wait: options.wait ?? device.wait,
-    callbackUrl: options.callbackUrl,
-    stale: options.stale,
-  });
+  try {
+    return await client.transfer(device, notes, {
+      uid: options.uid ?? device.platformId,
+      wait: options.wait ?? device.wait,
+      callbackUrl: options.callbackUrl,
+      stale: options.stale,
+    });
+  } catch (err) {
+    if (err && typeof err === 'object') {
+      err[RADIO_FAILURE] = true;
+    }
+    throw err;
+  }
+}
+
+/** Marks an error thrown by the radio order itself (see `isRadioFailure`). */
+const RADIO_FAILURE = Symbol('radio failure');
+
+/**
+ * Did this error come from the radio order, rather than from what followed it?
+ *
+ * A command sends its order, then publishes the new state. Gladys refusing that
+ * state (429 once timed shutters fill the states allowed per minute, a 500)
+ * fired `order_failed` with an HTTP_429 reason, "the box did not carry an
+ * order", for a shutter that had moved.
+ */
+export function isRadioFailure(err) {
+  return Boolean(err?.[RADIO_FAILURE]);
 }
 
 /** `true` when the value published by Gladys means "on". */

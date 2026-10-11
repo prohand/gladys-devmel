@@ -112,6 +112,22 @@ export const sensor = {
   },
 
   /**
+   * The features these readings would have fed, had the device declared them.
+   * An airsend.cloud export carries no `features`, so a weather sensor pasted
+   * from it gets the default click and drops every reading it sends: the fix
+   * is a word in the configuration, and the log has to name it.
+   *
+   * @returns {Array<string>}
+   */
+  undeclared(device, readings) {
+    const declared = new Set(device.features);
+    const missing = readings
+      .map((reading) => FEATURE_BY_READING[reading.kind])
+      .filter((feature) => feature && !declared.has(feature));
+    return [...new Set(missing)];
+  },
+
+  /**
    * Publish what a frame said. `now` is the clock the presses are dated with,
    * injectable for the tests.
    *

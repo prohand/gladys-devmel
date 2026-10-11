@@ -259,7 +259,14 @@ export class AirSendClient {
     const pace = { waited: 0, box: 0, attempts: 0 };
     let answer;
     try {
-      answer = await this.emit(device, notes, options, { pace, order });
+      // How many times it goes out, so a refused emission is not taken for a
+      // failed order while a repeat of it may still be carried.
+      answer = await this.emit(
+        device,
+        notes,
+        { ...options, emissions: repeats + 1 },
+        { pace, order },
+      );
     } catch (err) {
       if (err instanceof SupersededOrder) {
         // Dropped by the caller's own `stale` check: nothing went on the air,
@@ -406,7 +413,9 @@ export class AirSendClient {
             if (options.stale?.()) {
               throw new SupersededOrder(`The order to "${device.name}" no longer applies`);
             }
-            return this.transferLocal(device, notes, options);
+            // The first emission starts a new order for the box's verdicts;
+            // a retry or a repeat is that order again (see orders.js).
+            return this.transferLocal(device, notes, { ...options, fresh: !checked });
           },
           pace,
         );
@@ -620,7 +629,11 @@ export class AirSendClient {
   }
 
   /** Send notes through the local AirSend Web Service. */
-  async transferLocal(device, notes, { uid, wait = false, callbackUrl } = {}) {
+  async transferLocal(
+    device,
+    notes,
+    { uid, wait = false, callbackUrl, fresh = true, emissions = null } = {},
+  ) {
     const thingUid = toThingUid(uid ?? device.platformId);
     // Remembered BEFORE the request: the answer to a fire-and-forget transfer
     // can be pushed to the callback before the HTTP call even returns, and an
@@ -634,7 +647,7 @@ export class AirSendClient {
     // then be taken for an order of Gladys coming back: a remote that stops
     // working the day the box gets warmed or polled.
     if (device.rtype !== DEVICE_TYPES.BOX) {
-      this.orders?.remember(thingUid, device);
+      this.orders?.remember(thingUid, device, { notes, fresh, emissions });
     }
     const body = {
       wait,

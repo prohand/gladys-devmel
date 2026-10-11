@@ -352,14 +352,26 @@ mistaken for a hand on a remote — which was enough to send a shutter stopped a
 a remote copied into the AirSend app (same address as the device, the usual
 way for a fixed-code gate) is followed again once that minute has passed.
 
-Two visible consequences:
+The same goes for a percentage or an ON/OFF Gladys sent: its echo is not taken
+for the device reporting where it is. Read that way, a timed 4099 sent to 30 %
+showed 30 % a second after it set off, and a late echo of an ON switched a plug
+back on after the OFF given since.
+
+Visible consequences:
 
 - a wall remote emits from **another address**: it is never taken for that echo,
   and goes on driving the shutter in Gladys;
-- when the box answers that it **did not carry the order**, the integration
-  writes it in its logs, naming the device and what the box said. It is the only
-  trace of an order that went nowhere, and it is worth a look if you often click
-  twice.
+- a device that lists that channel in its `remotes` (a group channel driving it
+  with others) **does** follow the order: it never acted on it, and for it the
+  frame is an order like any other;
+- when the box answers that it **did not carry the order** — every emission of
+  it, repeats included: a repeat refused after the order went out changes
+  nothing — the integration writes it in its logs, naming the device and what
+  the box said. It is the only trace of an order that went nowhere, and it is
+  worth a look if you often click twice. When the box says nothing went out on
+  the air (`NETWORK`, `BUSY`…), the device's badge turns to `unreachable`, and a
+  timed shutter's travel is taken back, with the Stop it would have sent at the
+  end — sent to a still Somfy shutter, that Stop is the "my" button.
 
 ### When the box says no
 
@@ -803,13 +815,14 @@ brand printed on the plastic does not always say — a shutter sold under one na
 may carry another manufacturer's radio — while the name here is the decoder that
 actually decoded the frame.
 
-Three possible verdicts per emitter:
+Four possible verdicts per emitter:
 
-| Verdict                    | What it means                                                             |
-| -------------------------- | ------------------------------------------------------------------------- |
-| `followed by <device>`     | it works: those frames do drive the device                                |
-| `no device declares it`    | the emitter is heard but attached to nothing — **Attach a remote**        |
-| `carry no order to replay` | the frame reaches its device and carries nothing to replay (rolling code) |
+| Verdict                    | What it means                                                              |
+| -------------------------- | -------------------------------------------------------------------------- |
+| `followed by <device>`     | it works: those frames do drive the device                                 |
+| `no device declares it`    | the emitter is heard but attached to nothing — **Attach a remote**         |
+| `does not declare`         | a sensor decoded fine, into readings missing from its `features`: add them |
+| `carry no order to replay` | the frame reaches its device and carries nothing to replay (rolling code)  |
 
 The line quotes **every** distinct note an emitter has been heard saying, not
 just its last frame — that is what tells a remote whose buttons the service
@@ -921,7 +934,9 @@ In the scene editor, under **Integrations**:
   unreachable, connection string refused, box busy… The scene can read
   `device_name`, `reason` (`NETWORK`, `SECURITY`, `BUSY`, `HTTP_401`,
   `UNREACHABLE`…) and `message`. One event per device and reason per minute:
-  made for a notification.
+  made for a notification. Only the radio order itself: a repeat refused while
+  the order went out, or a state Gladys refused once the order was on the air,
+  does not fire it.
 
 ### Scene actions
 

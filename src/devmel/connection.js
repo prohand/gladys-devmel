@@ -533,6 +533,16 @@ export function describeFate(config, entry, language) {
       ? `suivi par ${claimed}${describeOneNote(entry, language)}`
       : `followed by ${claimed}${describeOneNote(entry, language)}`;
   }
+  // Decoded fine, into readings the device does not declare (a weather sensor
+  // pasted from the airsend.cloud export, which carries no `features`).
+  if (entry.undeclared?.length > 0) {
+    const features = entry.undeclared.map((feature) => `"${feature}"`).join(', ');
+    return language === 'fr'
+      ? `déclaré sur ${claimed}, qui ne déclare pas ce qu'il a décodé : ajoutez ${features} ` +
+          'à ses « features »'
+      : `declared on ${claimed}, which does not declare what it decoded: add ${features} to ` +
+          'its "features"';
+  }
   return language === 'fr'
     ? `déclaré sur ${claimed}, mais ses trames ne portent aucun ordre rejouable (protocole ` +
         'seulement partiellement décodé) : la position ne peut pas suivre'

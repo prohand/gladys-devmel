@@ -42,9 +42,16 @@
 // (a remote copied into the AirSend app, the usual way for a fixed-code gate)
 // speaks with that voice too, and a voice that never expired turned every press
 // of that remote, an hour after a single order from Gladys, into an echo.
+//
+// It also keeps the box's verdict on each order. With `wait: false` the HTTP
+// answer only says the service took the order; whether the box carried it
+// comes back later, once per emission — the first one and every repeat, all
+// under the same uid. One emission refused while another went out is an order
+// that went out: only an order whose every emission was refused failed.
 // -----------------------------------------------------------------------------
 
 import { isSameChannel } from './notes.js';
+import { describeFailure, isErrorEvent } from './events.js';
 
 /** How long the answer to a transfer may take to come back, in ms. */
 export const DEFAULT_TTL_MS = 30000;
@@ -66,6 +73,9 @@ export const DEFAULT_VOICE_WINDOW_MS = 60000;
 
 /** How many orders are remembered at once, oldest evicted first. */
 export const DEFAULT_LIMIT = 64;
+
+/** How many recent orders are kept per voice, to recognize them in an echo. */
+const SAID_LIMIT = 8;
 
 export class SentOrders {
   /**
@@ -101,6 +111,13 @@ export class SentOrders {
      * @type {Map<string, object>}
      */
     this.voices = new Map();
+    /**
+     * The uid of the last order given to each device, keyed by platform id: a
+     * verdict on an older one says nothing about where the device is now.
+     *
+     * @type {Map<string, string>}
+     */
+    this.latest = new Map();
   }
 
   /**
@@ -108,8 +125,14 @@ export class SentOrders {
    *
    * @param {string} uid the `thingnotes.uid` the transfer carried
    * @param {object} device the normalized Devmel device it was sent to
+   * @param {object} [order]
+   * @param {Array<object>} [order.notes] the notes it carried
+   * @param {boolean} [order.fresh] a new order rather than a repeat or a retry
+   *   of the one before: the verdicts start over
+   * @param {number} [order.emissions] how many times it is to go out, repeats
+   *   included: the verdicts it takes to call it failed
    */
-  remember(uid, device = {}) {
+  remember(uid, device = {}, { notes = null, fresh = false, emissions = null } = {}) {
     const key = String(uid ?? '');
     if (!key) {
       return null;
@@ -122,6 +145,21 @@ export class SentOrders {
       channel: device.channel,
       emissions: 0,
     };
+    // A uid names a feature, not an order: the CLOSE after an OPEN carries the
+    // same one. Its verdicts are the new order's, not added to the old one's.
+    if (!known || fresh) {
+      Object.assign(entry, {
+        since: this.now(),
+        expected: null,
+        carried: 0,
+        failed: 0,
+        uncarried: 0,
+      });
+      this.latest.set(entry.platformId, key);
+    }
+    if (Number.isFinite(emissions)) {
+      entry.expected = emissions;
+    }
     // A repeat of the same order refreshes it rather than adding another one:
     // the echoes of both emissions must be recognized, and they are the same
     // order twice.
@@ -138,18 +176,77 @@ export class SentOrders {
     // runs: an echo that comes back after the window above is still ours.
     const voice = channelKey(device.channel);
     if (voice) {
+      // What was said with it, too. The echo of a percentage or of an ON comes
+      // back as a plain reading, with no order to tell it from a report — and
+      // a late one landed over the order given since (see `said`).
+      const said = (this.voices.get(voice)?.said ?? []).filter(
+        (spoken) => entry.at - spoken.at <= this.voiceWindowMs,
+      );
+      if (notes) {
+        said.push({ notes, at: entry.at });
+      }
       this.voices.delete(voice);
       this.voices.set(voice, {
         name: entry.name,
         platformId: entry.platformId,
         channel: voice,
         at: entry.at,
+        said: said.slice(-SAID_LIMIT),
       });
       while (this.voices.size > this.limit) {
         this.voices.delete(this.voices.keys().next().value);
       }
     }
     return entry;
+  }
+
+  /**
+   * The notes recently sent on this channel, oldest first: whatever an echo
+   * heard on it says that matches one of them is our own order coming back.
+   *
+   * @returns {Array<object>}
+   */
+  said(channel) {
+    const voice = this.voices.get(channelKey(channel));
+    const now = this.now();
+    return (voice?.said ?? [])
+      .filter((spoken) => now - spoken.at <= this.voiceWindowMs)
+      .flatMap((spoken) => spoken.notes);
+  }
+
+  /**
+   * Record the box's verdict on one emission of an order, and say what it
+   * means for the order as a whole.
+   *
+   * @param {object} order what `match` returned for the event
+   * @param {number} type the event type: below 0x100 it went out
+   * @returns {{failed: boolean, uncarried: boolean, latest: boolean, since: ?number}}
+   *   `failed` once every emission it was to make was refused and none went
+   *   out; `uncarried` when, on top of that, the box said each time that
+   *   nothing reached the air; `latest` when it is still the device's last
+   *   order; `since` when it was first sent
+   */
+  settle(order, type) {
+    // A voice, not an order: older than any verdict should be. Taken at its
+    // word, as a failure of its own, and nothing more.
+    if (!order || !Number.isFinite(order.failed)) {
+      return { failed: isErrorEvent(type), uncarried: false, latest: false, since: null };
+    }
+    if (!isErrorEvent(type)) {
+      order.carried += 1;
+      return { failed: false, uncarried: false, latest: false, since: order.since };
+    }
+    order.failed += 1;
+    if (describeFailure(type).carried === false) {
+      order.uncarried += 1;
+    }
+    const failed = order.carried === 0 && order.failed >= (order.expected ?? order.emissions);
+    return {
+      failed,
+      uncarried: failed && order.uncarried >= order.failed,
+      latest: this.latest.get(order.platformId) === order.uid,
+      since: order.since,
+    };
   }
 
   /**
@@ -201,6 +298,7 @@ export class SentOrders {
   clear() {
     this.entries.clear();
     this.voices.clear();
+    this.latest.clear();
   }
 }
 

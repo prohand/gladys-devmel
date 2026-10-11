@@ -1,5 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { GladysApiError } from '@gladysassistant/integration-sdk';
 import { normalizeConfig } from '../src/config.js';
 import {
   applyEvents,
@@ -12,6 +13,8 @@ import {
   restoreDeviceStates,
 } from '../src/devices/index.js';
 import { shutter } from '../src/devices/shutter.js';
+import { isRadioFailure } from '../src/devices/helpers.js';
+import { describeFate } from '../src/devmel/connection.js';
 import { resetSensorClicks, sensor } from '../src/devices/sensor.js';
 import { resetGatewayReads } from '../src/devices/gateway.js';
 import { NOTE_TYPES, READINGS, STATE_VALUES } from '../src/devmel/notes.js';
@@ -2130,4 +2133,255 @@ test('the echo of our own order, heard as ON, does not retarget a timed shutter'
 
   assert.equal(client.noteAt(2).value, STATE_VALUES.STOP);
   assert.equal(positionsOf('Timed shutter').at(-1), 40);
+});
+
+// --- What an echo says, and what the box says about an order ------------------
+
+/** Remember the last transfer the fake client carried, as the real client does. */
+function rememberLast(orders, config, client, { emissions = null } = {}) {
+  const last = client.sent.at(-1);
+  const uid = toThingUid(last.options.uid);
+  orders.remember(uid, deviceNamed(config, last.device), {
+    notes: last.notes,
+    fresh: true,
+    emissions,
+  });
+  return uid;
+}
+
+test('the echo of a percentage we sent does not cut short the travel it started', async (t) => {
+  const { gladys, config, client, clock, send, positionsOf } = setupTimed(t);
+  const orders = new SentOrders({ now: clock.now });
+  const device = deviceNamed(config, 'Sun sail');
+
+  // Opened all the way first, so the travel knows where it starts from.
+  await send('Sun sail', 'state', 1);
+  await clock.advance(10000);
+  await send('Sun sail', 'position', 30);
+  const uid = rememberLast(orders, config, client);
+  await clock.advance(1000);
+
+  // The box answers with the very percentage it carried (70: the sail is inverted).
+  await applyEvents(
+    gladys,
+    config,
+    [
+      {
+        type: 1,
+        channel: { ...device.channel },
+        thingnotes: { uid, notes: [{ type: NOTE_TYPES.LEVEL, value: 70 }] },
+      },
+    ],
+    new HeardChannels(),
+    orders,
+  );
+
+  // Still on its way, not landed at 30 % a second after it set off.
+  assert.ok(shutter.travel.isMoving(device));
+  await clock.advance(10000);
+  assert.deepEqual(positionsOf('Sun sail'), [100, 90, 80, 70, 60, 50, 40, 30]);
+});
+
+test('a late echo of ON does not switch back on a plug switched off since', async () => {
+  const { gladys, config, client } = setup();
+  const orders = new SentOrders();
+  const plug = (value) =>
+    findDeviceByExternalId(
+      gladys,
+      config,
+      deviceExternalId(config, 'Kitchen plug'),
+    ).blueprint.onSetValue(gladys, {
+      device: deviceNamed(config, 'Kitchen plug'),
+      feature: featureOf(gladys, config, 'Kitchen plug', 'on-off'),
+      value,
+      client,
+    });
+
+  await plug(1);
+  const uid = rememberLast(orders, config, client);
+  await plug(0);
+  rememberLast(orders, config, client);
+
+  // The answer to the ON comes back after the OFF went out.
+  await applyEvents(
+    gladys,
+    config,
+    [
+      {
+        type: 1,
+        channel: { id: 200, source: 2 },
+        thingnotes: { uid, notes: [{ type: NOTE_TYPES.STATE, value: STATE_VALUES.ON }] },
+      },
+    ],
+    new HeardChannels(),
+    orders,
+  );
+
+  assert.deepEqual(gladys.statesOf(`${deviceExternalId(config, 'Kitchen plug')}:on-off`), [1, 0]);
+});
+
+test('a shutter following a group channel follows the order Gladys sent to that group', async (t) => {
+  const { gladys, context, client, clock, send, positionsOf } = setupShutters(t, {
+    'All shutters': { type: 4098, channel: { id: 900, source: 100 } },
+    'Living room': { type: 4098, travel: 20, channel: { id: 900, source: 1 }, remotes: [100] },
+  });
+  const orders = new SentOrders({ now: clock.now });
+  await send('Living room', 'state', 1);
+  await clock.advance(21000);
+
+  // Gladys closes the whole group; the box hears itself on the group channel.
+  await send('All shutters', 'state', -1);
+  rememberLast(orders, context.config, client);
+  await applyEvents(
+    gladys,
+    context.config,
+    [
+      {
+        type: 3,
+        channel: { id: 900, source: 100 },
+        thingnotes: { notes: [{ type: NOTE_TYPES.STATE, value: STATE_VALUES.DOWN }] },
+      },
+    ],
+    new HeardChannels(),
+    orders,
+  );
+  await clock.advance(2000);
+
+  // The motor of the living room went down with the others, and so does Gladys.
+  assert.deepEqual(positionsOf('Living room'), [100, 95, 90]);
+});
+
+test('a timed shutter whose order the box never carried does not move, nor get its STOP', async (t) => {
+  const { gladys, config, client, clock, send, positionsOf, statesOf } = setupTimed(t);
+  const orders = new SentOrders({ now: clock.now });
+  const transports = new AirSendClient({ orders: new SentOrders() });
+  await send('Timed shutter', 'state', -1);
+  await clock.advance(10000);
+
+  await send('Timed shutter', 'position', 40);
+  const uid = rememberLast(orders, config, client);
+  // Another client had the box locked: the UP never went out.
+  await applyEvents(
+    gladys,
+    config,
+    [{ type: 0x104, channel: { id: 700, source: 7 }, thingnotes: { uid, notes: [] } }],
+    new HeardChannels(),
+    orders,
+    new SceneEvents(),
+    transports,
+  );
+  await clock.advance(20000);
+
+  // No STOP sent to a still motor (a Somfy one would set off for "my").
+  assert.deepEqual(
+    client.sent.map((entry) => entry.notes[0].value),
+    [STATE_VALUES.DOWN, STATE_VALUES.UP],
+  );
+  assert.equal(shutter.travel.positionOf(deviceNamed(config, 'Timed shutter')), 0);
+  assert.equal(positionsOf('Timed shutter').at(-1), 0);
+  assert.equal(statesOf('Timed shutter').at(-1), -1);
+  assert.equal(
+    transports.transportOf(deviceNamed(config, 'Timed shutter'))?.transport,
+    'unreachable',
+  );
+});
+
+test('a repeat the box refused is no failed order when the order itself went out', async (t) => {
+  const { gladys, config, client, clock, send } = setupTimed(t);
+  const orders = new SentOrders({ now: clock.now });
+  const scenes = new SceneEvents();
+  await send('Timed shutter', 'state', 1);
+  // Sent, then repeated once: two emissions under one uid.
+  const uid = rememberLast(orders, config, client, { emissions: 2 });
+  orders.remember(uid, deviceNamed(config, 'Timed shutter'));
+
+  const lines = captureLogs(async () =>
+    applyEvents(
+      gladys,
+      config,
+      [
+        { type: 1, channel: { id: 700, source: 7 }, thingnotes: { uid, notes: [] } },
+        { type: 0x105, channel: { id: 700, source: 7 }, thingnotes: { uid, notes: [] } },
+      ],
+      new HeardChannels(),
+      orders,
+      scenes,
+    ),
+  );
+  await lines.result;
+
+  assert.deepEqual(lines.of('INFO'), []);
+  assert.deepEqual(gladys.sceneEvents, []);
+  // Every emission refused, on the other hand, is an order that failed.
+  await send('Timed shutter', 'state', -1);
+  const next = rememberLast(orders, config, client, { emissions: 2 });
+  orders.remember(next, deviceNamed(config, 'Timed shutter'));
+  const refused = { type: 0x105, channel: { id: 700, source: 7 }, thingnotes: { uid: next } };
+  await applyEvents(gladys, config, [refused], new HeardChannels(), orders, scenes);
+  assert.deepEqual(gladys.sceneEvents, []);
+  await applyEvents(gladys, config, [refused], new HeardChannels(), orders, scenes);
+  assert.deepEqual(
+    gladys.sceneEvents.map((event) => [event.key, event.data.reason]),
+    [['order_failed', 'TIMEOUT']],
+  );
+});
+
+test('a state Gladys refuses once the order is on the air is not a failed radio order', async () => {
+  const { gladys, config, client } = setup();
+  const found = findDeviceByExternalId(gladys, config, deviceExternalId(config, 'Kitchen plug'));
+  const command = () =>
+    found.blueprint.onSetValue(gladys, {
+      device: found.device,
+      feature: featureOf(gladys, config, 'Kitchen plug', 'on-off'),
+      value: 1,
+      client,
+    });
+
+  gladys.publishState = async () => {
+    throw new GladysApiError(429, 'TOO_MANY_REQUESTS', 'Too many states');
+  };
+  const refused = await command().catch((err) => err);
+  assert.equal(client.sent.length, 1);
+  assert.equal(refused.status, 429);
+  assert.equal(isRadioFailure(refused), false);
+
+  // The radio order failing is, and that one does fire order_failed.
+  client.transfer = async () => {
+    throw new Error('fetch failed');
+  };
+  assert.equal(isRadioFailure(await command().catch((err) => err)), true);
+});
+
+test('a weather sensor pasted without its features is told so, not blamed on its protocol', async () => {
+  const gladys = createFakeGladys();
+  const config = normalizeConfig({
+    devices: JSON.stringify([{ name: 'Thermometer', type: 1, pid: 1368, addr: 542 }]),
+  });
+  const heard = new HeardChannels();
+  const frame = {
+    type: 3,
+    channel: { id: 1368, source: 542 },
+    thingnotes: {
+      notes: [
+        { type: NOTE_TYPES.TEMPERATURE, value: 294.65 },
+        { type: NOTE_TYPES.R_HUMIDITY, value: 63 },
+      ],
+    },
+  };
+
+  const lines = captureLogs(async () =>
+    applyEvents(gladys, config, [frame], heard, new SentOrders()),
+  );
+  await lines.result;
+
+  assert.equal(lines.of('INFO').length, 1);
+  assert.match(lines.of('INFO')[0], /temperature 21\.5, humidity 63/);
+  assert.match(lines.of('INFO')[0], /Add "temperature", "humidity" to its "features"/);
+  assert.doesNotMatch(lines.of('INFO')[0], /rolling-code/);
+  const [entry] = heard.list();
+  assert.match(
+    describeFate(config, entry, 'en'),
+    /add "temperature", "humidity" to its "features"/,
+  );
+  assert.match(describeFate(config, entry, 'fr'), /ajoutez "temperature", "humidity"/);
 });

@@ -15,8 +15,11 @@
 //   - applyReadings(gladys, {...})   (optional): publish decoded radio notes
 //   - restoreStates(gladys, {...})   (optional): resume from the states Gladys kept
 //   - identify(gladys, {...})        (optional): make the device signal itself
+//   - notCarried(gladys, {...})      (optional): undo an order the box never carried
+//   - undeclared(device, readings)   (optional): what the device would publish, if declared
 // -----------------------------------------------------------------------------
 
+import { DEVICE_TRANSPORTS } from '@gladysassistant/integration-sdk';
 import { createLogger } from '../logging.js';
 import { gateway } from './gateway.js';
 import { sensor } from './sensor.js';
@@ -255,7 +258,7 @@ export async function applyEvents(
       // route back into the integration, which is half of "my remote does not
       // show up" answered before anyone touches a configuration screen.
       registry.received({ own: true });
-      applied += await applyOwnEcho(gladys, config, event, echo, scenes);
+      applied += await applyOwnEcho(gladys, config, event, echo, { orders, scenes, client });
       continue;
     }
 
@@ -399,6 +402,28 @@ export async function applyEvents(
         // attached, and the user has just attached it. So say what the frame
         // decoded to — that is what tells "wrong device declared" apart from
         // "this protocol carries no order Gladys can replay".
+        //
+        // And when it decoded fine into readings the device merely does not
+        // declare, say that instead: blaming a rolling-code protocol sent the
+        // owner of a thermometer pasted without `features` looking for a
+        // decoder problem that was a missing word.
+        const missing = blueprint.undeclared?.(device, readings) ?? [];
+        if (missing.length > 0) {
+          if (heard) {
+            heard.undeclared = missing;
+          }
+          const undeclared =
+            `Heard ${describeChannel(event.channel)} for "${device.name}": ` +
+            `${describeReadings(readings)}, which this device does not declare. Add ` +
+            `${missing.map((feature) => `"${feature}"`).join(', ')} to its "features" to ` +
+            `publish ${missing.length === 1 ? 'it' : 'them'}.`;
+          if (registry.announce(heard, `undeclared:${device.platformId}:${shapeOf(readings)}`)) {
+            logger.info(undeclared);
+          } else {
+            logger.debug(undeclared);
+          }
+          continue;
+        }
         const unfollowed =
           `Heard ${describeChannel(event.channel)} for "${device.name}", but it says nothing ` +
           `this device can follow: ${describeReadings(readings)}. A rolling-code 868 MHz ` +
@@ -422,9 +447,17 @@ export async function applyEvents(
  * taken out.
  *
  * The orders it carries are not news — the integration published them, and
- * started the travel of the shutter, at the moment it sent them. What may be
- * news is anything else the frame holds: a device that reports where it
+ * started the travel of the shutter, at the moment it sent them. That includes
+ * the percentage and the ON/OFF it sent, which come back as plain readings: read
+ * as a report, the echo of a 4099 sent to 30 % cancelled its travel a second
+ * after it set off, and a late one landed over the order given since. What may
+ * be news is anything else the frame holds: a device that reports where it
  * actually is answers on this very route, and that reading is worth publishing.
+ *
+ * Only to the device the order was sent to. Another device that lists that
+ * channel in its `remotes` (a group channel driving it with others) never acted
+ * on the order: for it, the frame is an order like any other, and dropping it
+ * left it showing open while its motor closed.
  *
  * The one echo worth an info line is the one that says the order never made it
  * to the air. Nothing moved, and until now nothing said so: a command that
@@ -433,47 +466,45 @@ export async function applyEvents(
  *
  * @returns {Promise<number>} how many devices acted on the leftovers
  */
-async function applyOwnEcho(gladys, config, event, echo, scenes = null) {
+async function applyOwnEcho(gladys, config, event, echo, { orders, scenes, client } = {}) {
+  const verdict = orders?.settle?.(echo, event?.type) ?? {
+    failed: isErrorEvent(event?.type),
+    uncarried: false,
+    latest: false,
+  };
   if (isErrorEvent(event?.type)) {
-    // Named, not numbered. The box says WHERE the order died — refused
-    // connection string, link out of step, another client holding the radio —
-    // and each of those is a different thing to go and check. A line that
-    // called them all "could not transmit" sent every one of them to "Command
-    // repeats", which answers none.
-    logger.info(
-      `The box did not carry the order sent to "${echo.name}". ${explainFailure(event.type)}`,
-    );
-    const device = config.devmelDevices.find(
-      (candidate) => candidate.platformId === echo.platformId,
-    );
-    const blueprint = device && findBlueprintByType(device.rtype);
-    if (blueprint && scenes) {
-      await scenes.orderFailed(gladys, {
-        externalId: idsFor(gladys, blueprint.key, device).device,
-        name: device.name,
-        reason: eventReason(event.type),
-        message: explainFailure(event.type),
-      });
+    if (!verdict.failed) {
+      // One emission refused while another went out, or may still: a repeat
+      // that fails changes nothing, the order is on the air.
+      logger.debug(
+        `One emission of the order sent to "${echo.name}" was not carried, the order is not ` +
+          `failed: ${describeEventType(event.type)}`,
+      );
+      return 0;
     }
+    await orderNotCarried(gladys, config, event, echo, verdict, { scenes, client });
     return 0;
   }
 
-  const readings = decodeNotes(event?.thingnotes?.notes).filter((reading) => !reading.command);
+  const all = decodeNotes(event?.thingnotes?.notes);
+  const said = new Set(
+    decodeNotes(orders?.said?.(event?.channel ?? echo.channel) ?? []).map(readingKey),
+  );
+  const leftovers = all.filter((reading) => !reading.command && !said.has(readingKey(reading)));
   logger.debug(
     `Own order echoed back for "${echo.name}": ${describeChannel(event?.channel)}` +
-      `${readings.length === 0 ? '' : `, also reporting ${describeReadings(readings)}`}`,
+      `${leftovers.length === 0 ? '' : `, also reporting ${describeReadings(leftovers)}`}`,
   );
-  if (readings.length === 0) {
-    return 0;
-  }
 
   const createdAt = toDate(event.timestamp);
   let applied = 0;
   for (const device of config.devmelDevices.filter((candidate) =>
     hearsChannel(candidate, event.channel),
   )) {
+    const own = device.platformId === echo.platformId;
+    const readings = own ? leftovers : all;
     const blueprint = findBlueprintByType(device.rtype);
-    if (!blueprint || typeof blueprint.applyReadings !== 'function') {
+    if (readings.length === 0 || !blueprint || typeof blueprint.applyReadings !== 'function') {
       continue;
     }
     try {
@@ -483,7 +514,7 @@ async function applyOwnEcho(gladys, config, event, echo, scenes = null) {
         createdAt,
         // Some readings carry no `command` and are orders all the same to the
         // device that hears them (an ON to a shutter): in an echo they are ours.
-        echo: true,
+        echo: own,
       });
       applied += Number(handled) > 0 ? 1 : 0;
     } catch (err) {
@@ -491,6 +522,55 @@ async function applyOwnEcho(gladys, config, event, echo, scenes = null) {
     }
   }
   return applied;
+}
+
+/**
+ * The box said an order failed, every emission of it. Said out loud, fired to
+ * the scenes, and — when the box said each time that nothing went out — undone:
+ * Gladys was answered when the service took the order (`wait: false`), so the
+ * badge, and the travel of a timed shutter with the STOP it would send at the
+ * end, still went by an order the motor never heard.
+ */
+async function orderNotCarried(gladys, config, event, echo, verdict, { scenes, client }) {
+  // Named, not numbered. The box says WHERE the order died — refused
+  // connection string, link out of step, another client holding the radio —
+  // and each of those is a different thing to go and check. A line that
+  // called them all "could not transmit" sent every one of them to "Command
+  // repeats", which answers none.
+  logger.info(
+    `The box did not carry the order sent to "${echo.name}". ${explainFailure(event.type)}`,
+  );
+  const device = config.devmelDevices.find((candidate) => candidate.platformId === echo.platformId);
+  const blueprint = device && findBlueprintByType(device.rtype);
+  if (!blueprint) {
+    return;
+  }
+  if (scenes) {
+    await scenes.orderFailed(gladys, {
+      externalId: idsFor(gladys, blueprint.key, device).device,
+      name: device.name,
+      reason: eventReason(event.type),
+      message: explainFailure(event.type),
+    });
+  }
+  // Only the device's last order, and only when nothing can have gone out: a
+  // link that dropped mid-exchange (TIMEOUT) may well have moved the motor.
+  if (!verdict.uncarried || !verdict.latest) {
+    return;
+  }
+  client?.rememberTransport(device, DEVICE_TRANSPORTS.UNREACHABLE);
+  if (typeof blueprint.notCarried === 'function') {
+    try {
+      await blueprint.notCarried(gladys, { device, since: verdict.since });
+    } catch (err) {
+      logger.error(`Could not publish the states of "${device.name}"`, err);
+    }
+  }
+}
+
+/** A reading as a key: what an echo says, to compare with what was sent. */
+function readingKey(reading) {
+  return `${reading.kind}:${reading.command ?? ''}:${reading.switched ? 'switched' : ''}:${reading.value}`;
 }
 
 /** Fire the `remote_pressed` trigger for each order a frame gave a device. */
