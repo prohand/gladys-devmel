@@ -381,7 +381,10 @@ n'est donc plus pris pour une main sur une télécommande — c'était de quoi
 renvoyer en haut un volet arrêté à 40 %. Cette voix reste celle de Gladys une
 minute après son dernier ordre : une télécommande recopiée dans l'appli AirSend
 (même adresse que l'appareil, l'usage pour un portail à code fixe) est de
-nouveau suivie une fois cette minute passée.
+nouveau suivie une fois cette minute passée. Pendant cette minute, une prise
+ou une lumière suit tout de même le ON, le OFF ou le niveau d'une telle
+télécommande : seul un appui qui répète ce que Gladys vient de dire, et qui ne
+change rien, est pris pour l'écho.
 
 Il en va de même d'un pourcentage ou d'un ON/OFF envoyé par Gladys : son écho
 n'est pas pris pour l'appareil qui dirait où il en est. Lu ainsi, un 4099
@@ -394,15 +397,18 @@ Conséquences visibles :
   prise pour cet écho, et continue de piloter le volet dans Gladys ;
 - un appareil qui liste ce canal dans ses `remotes` (un canal de groupe qui le
   pilote avec d'autres) **suit** l'ordre : il n'y a pas réagi, et pour lui la
-  trame est un ordre comme un autre ;
+  trame est un ordre comme un autre. Une fois : les échos suivants de cet ordre,
+  et tout écho arrivé après un ordre donné depuis à cet appareil, ne sont pas
+  rejoués — « tout fermer, puis le salon à 50 % » laisse le salon à 50 % ;
 - quand le boîtier répond qu'il **n'a pas porté l'ordre** — aucune de ses
   émissions, répétitions comprises : une répétition refusée après le départ de
   l'ordre ne change rien —, l'intégration l'écrit dans ses journaux, en nommant
   l'appareil et ce que le boîtier a dit. C'est la seule trace d'un ordre parti
   dans le vide, et elle vaut le coup d'œil si vous cliquez souvent deux fois.
   Quand le boîtier dit que rien n'est parti sur les ondes (`NETWORK`, `BUSY`…),
-  le badge de l'appareil passe à `unreachable`, et la course d'un volet
-  chronométré est annulée, avec le Stop qu'elle aurait envoyé à l'arrivée —
+  le badge de l'appareil passe à `unreachable`, une prise ou une lumière
+  retrouve dans Gladys l'état d'avant (sauf si une télécommande l'a changé
+  depuis), et la course d'un volet chronométré est annulée, avec le Stop qu'elle aurait envoyé à l'arrivée —
   envoyé à un volet Somfy immobile, ce Stop est le bouton « my ».
 
 ### Quand le boîtier dit non

@@ -15,7 +15,7 @@ import {
 import { createLogger } from '../logging.js';
 import { DEVICE_TYPES } from '../config.js';
 import { clampLevel, levelNote, READINGS, stateNote, STATE_VALUES } from '../devmel/notes.js';
-import { idsFor, isOn, publishState, sendNotes } from './helpers.js';
+import { idsFor, isOn, publishState, sendNotes, ShownStates } from './helpers.js';
 
 const KEY = 'light';
 
@@ -28,6 +28,11 @@ const FEATURE = {
 
 // Brightness to restore when the light is switched back on, per device.
 const lastBrightness = new Map();
+
+// What Gladys shows of each light, to undo an order the box never carried; and
+// the brightness to restore that the last order replaced, to undo it as well.
+const shown = new ShownStates();
+const replacedBrightness = new Map();
 
 export const light = {
   key: KEY,
@@ -77,6 +82,7 @@ export const light = {
       // that arrived while this level still waited for the air restored the
       // level before it, and sent it right after this one.
       const previous = lastBrightness.get(device.platformId);
+      shown.begin(device.platformId);
       if (level > 0) {
         lastBrightness.set(device.platformId, level);
       }
@@ -96,6 +102,8 @@ export const light = {
         }
         throw err;
       }
+      shown.sent(device.platformId, { onOff: level > 0 ? 1 : 0, brightness: level });
+      replacedBrightness.set(device.platformId, previous);
       await publishState(gladys, feature.external_id, level);
       await publishState(gladys, ids.feature(FEATURE.ON_OFF), level > 0 ? 1 : 0);
       return;
@@ -106,10 +114,13 @@ export const light = {
     // "restore" order, so the level is what turns the lamp on.
     const level = lastBrightness.get(device.platformId) ?? 100;
     logger.info(`"${device.name}" -> ${on ? `ON (${level} %)` : 'OFF'}`);
+    shown.begin(device.platformId);
     await sendNotes(client, device, [on ? levelNote(level) : stateNote(STATE_VALUES.OFF)], {
       uid: feature.external_id,
       callbackUrl,
     });
+    shown.sent(device.platformId, { onOff: on ? 1 : 0, brightness: on ? level : 0 });
+    replacedBrightness.delete(device.platformId);
     await publishState(gladys, feature.external_id, on ? 1 : 0);
     await publishState(gladys, ids.feature(FEATURE.BRIGHTNESS), on ? level : 0);
   },
@@ -121,19 +132,64 @@ export const light = {
    * every reconnection and every saved configuration, when memory is newer.
    */
   restoreStates(gladys, { device, features }) {
-    if (lastBrightness.has(device.platformId)) {
-      return;
-    }
     const ids = idsFor(gladys, KEY, device);
     const stored = features?.find(
       (feature) => feature.external_id === ids.feature(FEATURE.BRIGHTNESS),
     );
-    // An Off publishes 0 %: a lamp off at the restart has nothing to give back.
     const level = clampLevel(stored?.last_value);
+    // And what Gladys shows, so the first order after a restart can be undone
+    // too (see `notCarried`).
+    const onOff = features?.find((feature) => feature.external_id === ids.feature(FEATURE.ON_OFF));
+    if (
+      !shown.get(device.platformId) &&
+      stored?.last_value !== null &&
+      Number.isFinite(Number(stored?.last_value)) &&
+      onOff?.last_value !== null &&
+      Number.isFinite(Number(onOff?.last_value))
+    ) {
+      shown.set(device.platformId, {
+        onOff: Number(onOff.last_value) > 0 ? 1 : 0,
+        brightness: level,
+      });
+    }
+    if (lastBrightness.has(device.platformId)) {
+      return;
+    }
+    // An Off publishes 0 %: a lamp off at the restart has nothing to give back.
     if (level > 0) {
       lastBrightness.set(device.platformId, level);
       logger.debug(`"${device.name}" will switch back on at ${level} %`);
     }
+  },
+
+  /**
+   * The box said, after Gladys was answered and shown the new state, that the
+   * last order never reached the air: Gladys is shown the state from before,
+   * and the next On restores the brightness from before.
+   *
+   * @returns {Promise<boolean>} whether anything was taken back
+   */
+  async notCarried(gladys, { device }) {
+    const before = shown.undo(device.platformId);
+    if (!before) {
+      return false;
+    }
+    if (replacedBrightness.has(device.platformId)) {
+      const previous = replacedBrightness.get(device.platformId);
+      if (previous === undefined) {
+        lastBrightness.delete(device.platformId);
+      } else {
+        lastBrightness.set(device.platformId, previous);
+      }
+      replacedBrightness.delete(device.platformId);
+    }
+    logger.info(
+      `"${device.name}" did not change: shown ${before.onOff ? `ON (${before.brightness} %)` : 'OFF'} again`,
+    );
+    const ids = idsFor(gladys, KEY, device);
+    await publishState(gladys, ids.feature(FEATURE.BRIGHTNESS), before.brightness);
+    await publishState(gladys, ids.feature(FEATURE.ON_OFF), before.onOff);
+    return true;
   },
 
   /**
@@ -154,17 +210,16 @@ export const light = {
         // had, and the one remembered here is the best guess of it. Taken as
         // 100 %, Gladys showed full brightness and the next On it sent did put
         // the lamp at full brightness.
-        await publishState(
-          gladys,
-          ids.feature(FEATURE.BRIGHTNESS),
-          lastBrightness.get(device.platformId) ?? 100,
-        );
+        const brightness = lastBrightness.get(device.platformId) ?? 100;
+        shown.set(device.platformId, { onOff: 1, brightness });
+        await publishState(gladys, ids.feature(FEATURE.BRIGHTNESS), brightness);
         await publishState(gladys, ids.feature(FEATURE.ON_OFF), 1);
         continue;
       }
       if (reading.value > 0) {
         lastBrightness.set(device.platformId, reading.value);
       }
+      shown.set(device.platformId, { onOff: reading.value > 0 ? 1 : 0, brightness: reading.value });
       await publishState(gladys, ids.feature(FEATURE.BRIGHTNESS), reading.value);
       await publishState(gladys, ids.feature(FEATURE.ON_OFF), reading.value > 0 ? 1 : 0);
     }

@@ -2468,6 +2468,40 @@ test('a late echo of ON does not switch back on a plug switched off since', asyn
   assert.deepEqual(gladys.statesOf(`${deviceExternalId(config, 'Kitchen plug')}:on-off`), [1, 0]);
 });
 
+test('a remote copied onto a plug is followed within the minute after an order of Gladys', async () => {
+  // The copied remote speaks with the plug's own voice: its frames reach the
+  // integration as echoes. Only one repeating what Gladys just said is one.
+  const { gladys, config, client } = setup();
+  let now = 0;
+  const orders = new SentOrders({ now: () => now });
+  await findDeviceByExternalId(
+    gladys,
+    config,
+    deviceExternalId(config, 'Kitchen plug'),
+  ).blueprint.onSetValue(gladys, {
+    device: deviceNamed(config, 'Kitchen plug'),
+    feature: featureOf(gladys, config, 'Kitchen plug', 'on-off'),
+    value: 0,
+    client,
+  });
+  rememberLast(orders, config, client);
+  const press = (value) => ({
+    type: 0,
+    channel: { id: 200, source: 2 },
+    thingnotes: { notes: [{ type: NOTE_TYPES.STATE, value }] },
+  });
+
+  now += 10000;
+  await applyEvents(gladys, config, [press(STATE_VALUES.ON)], new HeardChannels(), orders);
+  now += 5000;
+  await applyEvents(gladys, config, [press(STATE_VALUES.OFF)], new HeardChannels(), orders);
+
+  assert.deepEqual(
+    gladys.statesOf(`${deviceExternalId(config, 'Kitchen plug')}:on-off`),
+    [0, 1, 0],
+  );
+});
+
 test('a shutter following a group channel follows the order Gladys sent to that group', async (t) => {
   const { gladys, context, client, clock, send, positionsOf } = setupShutters(t, {
     'All shutters': { type: 4098, channel: { id: 900, source: 100 } },
@@ -2497,6 +2531,66 @@ test('a shutter following a group channel follows the order Gladys sent to that 
 
   // The motor of the living room went down with the others, and so does Gladys.
   assert.deepEqual(positionsOf('Living room'), [100, 95, 90]);
+});
+
+test('a group order is followed once, never over an order the member was given since', async (t) => {
+  const { gladys, context, client, clock, send, positionsOf } = setupShutters(t, {
+    'All shutters': { type: 4098, channel: { id: 910, source: 100 } },
+    'Living room': { type: 4098, travel: 20, channel: { id: 910, source: 1 }, remotes: [100] },
+  });
+  const orders = new SentOrders({ now: clock.now });
+  const groupEcho = (uid) => ({
+    type: 3,
+    channel: { id: 910, source: 100 },
+    thingnotes: { uid, notes: [{ type: NOTE_TYPES.STATE, value: STATE_VALUES.DOWN }] },
+  });
+  await send('Living room', 'state', 1);
+  rememberLast(orders, context.config, client);
+  await clock.advance(21000);
+
+  // A scene: close everything, then the living room to 50 % straight away.
+  await send('All shutters', 'state', -1);
+  const groupUid = rememberLast(orders, context.config, client);
+  await send('Living room', 'position', 50);
+  rememberLast(orders, context.config, client);
+  // The box hears the group's DOWN, then answers its repeat, late.
+  await applyEvents(gladys, context.config, [groupEcho()], new HeardChannels(), orders);
+  await clock.advance(3000);
+  await applyEvents(gladys, context.config, [groupEcho(groupUid)], new HeardChannels(), orders);
+  await clock.advance(20000);
+
+  // Its STOP went out at 50 %: the echoes did not send it to the bottom.
+  assert.equal(client.sent.at(-1).device, 'Living room');
+  assert.equal(client.noteAt(client.sent.length - 1).value, STATE_VALUES.STOP);
+  assert.equal(positionsOf('Living room').at(-1), 50);
+});
+
+test('a group order followed by its member is not replayed by its next echo', async (t) => {
+  const { gladys, context, client, clock, send } = setupShutters(t, {
+    'All shutters': { type: 4098, channel: { id: 911, source: 100 } },
+    'Living room': { type: 4098, travel: 20, channel: { id: 911, source: 1 }, remotes: [100] },
+  });
+  const orders = new SentOrders({ now: clock.now });
+  await send('All shutters', 'state', -1);
+  const uid = rememberLast(orders, context.config, client);
+  const echo = (withUid) => ({
+    type: 3,
+    channel: { id: 911, source: 100 },
+    thingnotes: {
+      ...(withUid ? { uid } : {}),
+      notes: [{ type: NOTE_TYPES.STATE, value: STATE_VALUES.DOWN }],
+    },
+  });
+
+  assert.equal(
+    await applyEvents(gladys, context.config, [echo(false)], new HeardChannels(), orders),
+    1,
+  );
+  await clock.advance(1000);
+  assert.equal(
+    await applyEvents(gladys, context.config, [echo(true)], new HeardChannels(), orders),
+    0,
+  );
 });
 
 test('a timed shutter whose order the box never carried does not move, nor get its STOP', async (t) => {
@@ -2532,6 +2626,88 @@ test('a timed shutter whose order the box never carried does not move, nor get i
     transports.transportOf(deviceNamed(config, 'Timed shutter'))?.transport,
     'unreachable',
   );
+});
+
+test('a plug or a lamp whose order the box never carried is shown as it was before', async () => {
+  const gladys = createFakeGladys();
+  const config = normalizeConfig({
+    devices: JSON.stringify({
+      devices: {
+        Plug: { type: 4097, channel: { id: 230, source: 2 } },
+        Lamp: { type: 4100, channel: { id: 231, source: 5 } },
+      },
+    }),
+  });
+  const client = createFakeClient({ config });
+  const orders = new SentOrders();
+  const transports = new AirSendClient({ orders: new SentOrders() });
+  const send = (name, key, value) =>
+    findDeviceByExternalId(gladys, config, deviceExternalId(config, name)).blueprint.onSetValue(
+      gladys,
+      {
+        device: deviceNamed(config, name),
+        feature: featureOf(gladys, config, name, key),
+        value,
+        client,
+      },
+    );
+  // The service could not reach the box: nothing went out on the air.
+  const notCarried = (name, uid) =>
+    applyEvents(
+      gladys,
+      config,
+      [{ type: 0x101, channel: { ...deviceNamed(config, name).channel }, thingnotes: { uid } }],
+      new HeardChannels(),
+      orders,
+      new SceneEvents(),
+      transports,
+    );
+
+  await send('Plug', 'on-off', 0);
+  rememberLast(orders, config, client);
+  await send('Plug', 'on-off', 1);
+  await notCarried('Plug', rememberLast(orders, config, client, { emissions: 1 }));
+  assert.deepEqual(gladys.statesOf(`${deviceExternalId(config, 'Plug')}:on-off`), [0, 1, 0]);
+  assert.equal(transports.transportOf(deviceNamed(config, 'Plug'))?.transport, 'unreachable');
+
+  await send('Lamp', 'brightness', 30);
+  rememberLast(orders, config, client);
+  await send('Lamp', 'brightness', 70);
+  await notCarried('Lamp', rememberLast(orders, config, client, { emissions: 1 }));
+  assert.deepEqual(gladys.statesOf(`${deviceExternalId(config, 'Lamp')}:brightness`), [30, 70, 30]);
+  // And the next On goes back to the brightness the lamp really has.
+  await send('Lamp', 'on-off', 1);
+  assert.equal(client.noteAt(client.sent.length - 1).value, 30);
+});
+
+test('a plug whose first order after a restart was never carried is shown as Gladys kept it', async () => {
+  const gladys = createFakeGladys();
+  const config = normalizeConfig({
+    devices: JSON.stringify({ devices: { Plug: { type: 4097, channel: { id: 232, source: 2 } } } }),
+  });
+  const client = createFakeClient({ config });
+  const orders = new SentOrders();
+  const externalId = deviceExternalId(config, 'Plug');
+  await restoreDeviceStates(gladys, config, [
+    { external_id: externalId, features: [{ external_id: `${externalId}:on-off`, last_value: 0 }] },
+  ]);
+
+  await findDeviceByExternalId(gladys, config, externalId).blueprint.onSetValue(gladys, {
+    device: deviceNamed(config, 'Plug'),
+    feature: featureOf(gladys, config, 'Plug', 'on-off'),
+    value: 1,
+    client,
+  });
+  const uid = rememberLast(orders, config, client, { emissions: 1 });
+  await applyEvents(
+    gladys,
+    config,
+    [{ type: 0x101, channel: { id: 232, source: 2 }, thingnotes: { uid } }],
+    new HeardChannels(),
+    orders,
+  );
+
+  assert.deepEqual(gladys.statesOf(`${externalId}:on-off`), [1, 0]);
 });
 
 test('a repeat the box refused is no failed order when the order itself went out', async (t) => {

@@ -138,6 +138,9 @@ export class HeardChannels {
     if (!samePress) {
       entry.dropped = dropped;
     }
+    // Told to the caller too, for the same reason: its log line must not give
+    // that advice either (see `applyEvents`).
+    entry.copyOfPress = samePress;
     if (!dropped) {
       entry.usableAt = arrived;
     }

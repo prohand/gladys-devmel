@@ -326,7 +326,12 @@ export async function applyEvents(
       // line per press of a neighbour's gate remote is noise — but a user
       // hunting a remote that never shows up must not have to enable debug
       // logs to learn that something WAS heard.
-      if (registry.announce(dropped, 'dropped')) {
+      // Never for a bad copy of a press another box just delivered well: the
+      // press was followed, and "Accept unreliable frames" would only let the
+      // far box's garbled copies through as well.
+      if (dropped?.copyOfPress) {
+        logger.debug(`${line} Another copy of the same press was usable.`);
+      } else if (registry.announce(dropped, 'dropped')) {
         logger.info(`${line} ${adviseOnDropped(event, unusable)}`);
       } else {
         logger.debug(line);
@@ -400,6 +405,8 @@ export async function applyEvents(
       // goes out it undoes what the wall remote just said.
       if (pressed.length > 0) {
         client?.supersede(device);
+        // Nor may the late echo of a group order sent before this press.
+        orders?.pressed?.(device.platformId);
       }
       // Someone pressed a remote: whatever the device makes of it below, a
       // scene may want to know. A plain BUTTON publishes nothing, and a spare
@@ -512,7 +519,9 @@ export async function applyEvents(
  * Only to the device the order was sent to. Another device that lists that
  * channel in its `remotes` (a group channel driving it with others) never acted
  * on the order: for it, the frame is an order like any other, and dropping it
- * left it showing open while its motor closed.
+ * left it showing open while its motor closed. Once, though: every further echo
+ * of that order, and any echo of it after an order the device was given since,
+ * is old news to it as well.
  *
  * The one echo worth an info line is the one that says the order never made it
  * to the air. Nothing moved, and until now nothing said so: a command that
@@ -542,10 +551,18 @@ async function applyOwnEcho(gladys, config, event, echo, { orders, scenes, clien
   }
 
   const all = decodeNotes(event?.thingnotes?.notes);
-  const said = new Set(
-    decodeNotes(orders?.said?.(event?.channel ?? echo.channel) ?? []).map(readingKey),
-  );
-  const leftovers = all.filter((reading) => !reading.command && !said.has(readingKey(reading)));
+  const channel = event?.channel ?? echo.channel;
+  const said = new Set(decodeNotes(orders?.said?.(channel) ?? []).map(readingKey));
+  const unsaid = all.filter((reading) => !said.has(readingKey(reading)));
+  // A frame on our voice that says something we did not, and is not the answer
+  // to one of our transfers, is a remote sharing the address being pressed: a
+  // press, not an echo, for the devices that follow that channel.
+  const answer = echo.uid !== undefined && String(event?.thingnotes?.uid ?? '') === echo.uid;
+  const overheard = !answer && unsaid.length > 0;
+  if (overheard) {
+    orders?.overheard?.(channel);
+  }
+  const leftovers = unsaid.filter((reading) => !reading.command);
   logger.debug(
     `Own order echoed back for "${echo.name}": ${describeChannel(event?.channel)}` +
       `${leftovers.length === 0 ? '' : `, also reporting ${describeReadings(leftovers)}`}`,
@@ -557,7 +574,16 @@ async function applyOwnEcho(gladys, config, event, echo, { orders, scenes, clien
     hearsChannel(candidate, event.channel),
   )) {
     const own = device.platformId === echo.platformId;
-    const readings = own ? leftovers : all;
+    let readings = leftovers;
+    if (!own) {
+      // A group order is followed once, and never over an order the device
+      // was given since (see `SentOrders.follows`).
+      const follows = overheard || orders?.follows?.(echo, device.platformId) !== false;
+      if (overheard) {
+        orders?.pressed?.(device.platformId);
+      }
+      readings = follows ? all : [];
+    }
     const blueprint = findBlueprintByType(device.rtype);
     if (readings.length === 0 || !blueprint || typeof blueprint.applyReadings !== 'function') {
       continue;

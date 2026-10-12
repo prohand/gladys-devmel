@@ -79,3 +79,72 @@ export async function publishState(gladys, featureExternalId, value, createdAt) 
     createdAt ? { state: value, created_at: createdAt } : value,
   );
 }
+
+/**
+ * What Gladys was last shown for each device, and for its last order what it
+ * showed before and after: the box can say, after Gladys was answered and
+ * shown the new state (`wait: false`), that the order never reached the air —
+ * and a plug shown ON that never heard the order is a plug shown wrong.
+ *
+ * A state is a plain object of feature values (`{ onOff: 1 }`).
+ */
+export class ShownStates {
+  constructor() {
+    /** @type {Map<string, object>} keyed by platform id */
+    this.shown = new Map();
+    /** @type {Map<string, object>} the last order of each device */
+    this.orders = new Map();
+  }
+
+  get(platformId) {
+    return this.shown.get(platformId);
+  }
+
+  /** What Gladys was just shown: a remote followed, a state restored. */
+  set(platformId, state) {
+    this.shown.set(platformId, state);
+  }
+
+  /**
+   * A new order is on its way to the radio. The one before is forgotten first:
+   * waiting in the queue, or answered by the box before the service answered
+   * Gladys, the new order is not recorded yet — and a verdict meant for it
+   * must find nothing to undo rather than undo the order before.
+   */
+  begin(platformId) {
+    this.orders.delete(platformId);
+  }
+
+  /** The service took the order, and Gladys is about to be shown `after`. */
+  sent(platformId, after) {
+    this.orders.set(platformId, { before: this.shown.get(platformId), after });
+    this.shown.set(platformId, after);
+  }
+
+  /**
+   * The box said the last order never went out. Returns the state to show
+   * again, or null when there is none: the state before it was never known,
+   * or a remote changed the state since — that one is right.
+   */
+  undo(platformId) {
+    const order = this.orders.get(platformId);
+    this.orders.delete(platformId);
+    if (
+      !order ||
+      order.before === undefined ||
+      !sameState(this.shown.get(platformId), order.after)
+    ) {
+      return null;
+    }
+    this.shown.set(platformId, order.before);
+    return order.before;
+  }
+}
+
+function sameState(a, b) {
+  if (!a || !b) {
+    return false;
+  }
+  const keys = new Set([...Object.keys(a), ...Object.keys(b)]);
+  return [...keys].every((key) => a[key] === b[key]);
+}

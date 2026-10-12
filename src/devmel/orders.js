@@ -118,6 +118,15 @@ export class SentOrders {
      * @type {Map<string, string>}
      */
     this.latest = new Map();
+    /**
+     * Every new order is numbered, and each device keeps the number of the
+     * newest one it acted on: its own, or a group's it followed (see
+     * `follows`). Numbers, not times: a scene gives two orders in the same
+     * millisecond, and which came second is the whole question.
+     */
+    this.sequence = 0;
+    /** @type {Map<string, number>} keyed by platform id */
+    this.actedOn = new Map();
   }
 
   /**
@@ -154,8 +163,10 @@ export class SentOrders {
         carried: 0,
         failed: 0,
         uncarried: 0,
+        seq: ++this.sequence,
       });
       this.latest.set(entry.platformId, key);
+      this.actedOn.set(entry.platformId, entry.seq);
     }
     if (Number.isFinite(emissions)) {
       entry.expected = emissions;
@@ -191,6 +202,7 @@ export class SentOrders {
         platformId: entry.platformId,
         channel: voice,
         at: entry.at,
+        seq: entry.seq,
         said: said.slice(-SAID_LIMIT),
       });
       while (this.voices.size > this.limit) {
@@ -212,6 +224,53 @@ export class SentOrders {
     return (voice?.said ?? [])
       .filter((spoken) => now - spoken.at <= this.voiceWindowMs)
       .flatMap((spoken) => spoken.notes);
+  }
+
+  /**
+   * Someone else spoke with this voice: a press of a remote sharing the
+   * address, applied as such. What Gladys said with it before is no longer
+   * what the next frame repeats — matched against the whole minute, the
+   * remote's OFF after its ON was dropped as the echo of an OFF Gladys sent
+   * earlier, and Gladys showed the plug on while it was off.
+   */
+  overheard(channel) {
+    const voice = this.voices.get(channelKey(channel));
+    if (voice) {
+      voice.said = [];
+    }
+  }
+
+  /**
+   * Should a device that hears the channel of an order sent to another one (a
+   * group channel in its `remotes`) act on this echo of it?
+   *
+   * Once per order, and only when it is newer than anything that device acted
+   * on since. The order comes back several times, and late: the answer to each
+   * emission and the box hearing itself. Followed every time, a member set to
+   * 50 % right after the group was closed was sent the group's DOWN again by
+   * the next echo, which cancelled the STOP of its own travel: it ran to the
+   * bottom.
+   *
+   * @param {object} order what `match` returned for the event
+   * @param {string} platformId the device that hears it
+   */
+  follows(order, platformId) {
+    if (!Number.isFinite(order?.seq)) {
+      return true;
+    }
+    if (order.seq <= (this.actedOn.get(platformId) ?? 0)) {
+      return false;
+    }
+    this.actedOn.set(platformId, order.seq);
+    return true;
+  }
+
+  /**
+   * A remote gave this device an order: every order of ours sent before it is
+   * older news, and its echo must not undo that press (see `follows`).
+   */
+  pressed(platformId) {
+    this.actedOn.set(platformId, this.sequence);
   }
 
   /**
@@ -299,6 +358,7 @@ export class SentOrders {
     this.entries.clear();
     this.voices.clear();
     this.latest.clear();
+    this.actedOn.clear();
   }
 }
 

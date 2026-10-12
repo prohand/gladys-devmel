@@ -361,6 +361,9 @@ mistaken for a hand on a remote — which was enough to send a shutter stopped a
 40 % back to the top. That voice is Gladys' for a minute after its last order:
 a remote copied into the AirSend app (same address as the device, the usual
 way for a fixed-code gate) is followed again once that minute has passed.
+Within it, a switch or a light still follows the ON, OFF or level of such a
+remote: only a press repeating what Gladys has just said, which changes
+nothing, is taken for the echo.
 
 The same goes for a percentage or an ON/OFF Gladys sent: its echo is not taken
 for the device reporting where it is. Read that way, a timed 4099 sent to 30 %
@@ -373,14 +376,18 @@ Visible consequences:
   and goes on driving the shutter in Gladys;
 - a device that lists that channel in its `remotes` (a group channel driving it
   with others) **does** follow the order: it never acted on it, and for it the
-  frame is an order like any other;
+  frame is an order like any other. Once: the further echoes of that order, and
+  any echo arriving after an order given to that device since, are not
+  replayed — "close all, then the living room to 50 %" leaves the living room
+  at 50 %;
 - when the box answers that it **did not carry the order** — every emission of
   it, repeats included: a repeat refused after the order went out changes
   nothing — the integration writes it in its logs, naming the device and what
   the box said. It is the only trace of an order that went nowhere, and it is
   worth a look if you often click twice. When the box says nothing went out on
-  the air (`NETWORK`, `BUSY`…), the device's badge turns to `unreachable`, and a
-  timed shutter's travel is taken back, with the Stop it would have sent at the
+  the air (`NETWORK`, `BUSY`…), the device's badge turns to `unreachable`, a
+  switch or a light is shown again in the state it had before (unless a remote
+  changed it since), and a timed shutter's travel is taken back, with the Stop it would have sent at the
   end — sent to a still Somfy shutter, that Stop is the "my" button.
 
 ### When the box says no

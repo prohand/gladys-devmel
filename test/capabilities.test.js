@@ -22,6 +22,7 @@ import {
   SceneEvents,
 } from '../src/capabilities/scenes.js';
 import { buildRadioWidget } from '../src/capabilities/widget.js';
+import { captureLogs } from './helpers/captureLogs.js';
 import { createFakeGladys } from './helpers/fakeGladys.js';
 
 const SPURL = 'sp://pass@[fe80::1]?rhost=192.168.1.50';
@@ -526,9 +527,17 @@ test('the radio widget keeps a remote followed when a second box hears the same 
     reliability,
   });
 
-  await applyEvents(gladys, config, [copy(40), copy(3)], heard, orders, scenes);
+  const lines = captureLogs(() =>
+    applyEvents(gladys, config, [copy(40), copy(3)], heard, orders, scenes),
+  );
+  await lines.result;
   assert.equal(emitterRow(widgetOf({ heard }), 'pid 100').badge, 'followed');
   assert.equal(heard.dropped, 1);
+  // Nor does the log advise letting the far box's garbled copies through.
+  assert.deepEqual(
+    lines.of('INFO').filter((line) => line.includes('Accept unreliable frames')),
+    [],
+  );
 
   now += 10000;
   await applyEvents(gladys, config, [copy(3)], heard, orders, scenes);
