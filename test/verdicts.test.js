@@ -26,6 +26,7 @@ import { shutter } from '../src/devices/shutter.js';
 import { AirSendClient } from '../src/devmel/client.js';
 import { HeardChannels } from '../src/devmel/heard.js';
 import { describeEventType } from '../src/devmel/events.js';
+import { NOTE_TYPES, STATE_VALUES } from '../src/devmel/notes.js';
 import { SentOrders } from '../src/devmel/orders.js';
 import { ShutterTravel } from '../src/devmel/travel.js';
 import { createFakeGladys } from './helpers/fakeGladys.js';
@@ -42,7 +43,7 @@ let run = 0;
  * A fresh integration around one device: real driver, real registry, a fake
  * service that records what it is handed and answers later, when told to.
  */
-function rig(t, entry, { repeat }) {
+function rig(t, entry, { repeat, sleep = async () => {} }) {
   // A new channel each run: switch and light keep what they showed per device.
   run += 1;
   const channel = { id: 3000 + run, source: 7 };
@@ -58,7 +59,7 @@ function rig(t, entry, { repeat }) {
   const blueprint = findBlueprintByType(device.rtype);
   const ids = gladys.externalIds(blueprint.key, device.platformId);
   const orders = new SentOrders({ now: clock.now });
-  const client = new AirSendClient({ sleep: async () => {}, now: clock.now, orders });
+  const client = new AirSendClient({ sleep, now: clock.now, orders });
   client.configure(config);
   const failures = [];
   const scenes = {
@@ -66,6 +67,7 @@ function rig(t, entry, { repeat }) {
       failures.push(reason);
       return true;
     },
+    remotePressed: async () => true,
   };
   const handed = [];
   globalThis.fetch = async (url, options) => {
@@ -452,4 +454,208 @@ test('an order refused before its repeat was dropped behind the next one is stil
   assert.deepEqual(h.statesOf('on-off'), [1, 0]);
   assert.deepEqual(h.failures, ['NETWORK', 'BUSY']);
   assert.equal(h.badge(), 'unreachable');
+});
+
+/** Let every promise in flight settle, the fake clock standing still. */
+async function ticks() {
+  for (let i = 0; i < 30; i += 1) {
+    await new Promise(setImmediate);
+  }
+}
+
+/** The answer of the box to one emission handed over. */
+const answerTo = (body, type) => ({
+  type,
+  channel: body.channel,
+  thingnotes: { uid: body.thingnotes.uid, notes: [] },
+});
+
+/** The service restarting: the connection is refused, nothing was received. */
+const refusedConnection = () =>
+  Object.assign(new TypeError('fetch failed'), { cause: { code: 'ECONNREFUSED' } });
+
+/** A sleep that holds the radio gap while `held()` says so: a repeat waits its turn. */
+function gatedSleep() {
+  const gate = { held: true, open: null };
+  gate.sleep = async () => {
+    if (gate.held) {
+      await new Promise((resolve) => {
+        gate.open = resolve;
+      });
+    }
+  };
+  gate.release = () => {
+    gate.held = false;
+    gate.open?.();
+  };
+  return gate;
+}
+
+test('an Open refused whose repeat a wall remote dropped is reported then, not with the next order', async (t) => {
+  // The box refused the Open (BUSY); the STOP pressed on the wall dropped its
+  // repeat. Reported with the next verdict on its uid, it came out with the
+  // SENT of the Close given 10 s later: that carried Close was taken back,
+  // with an order_failed and an "unreachable" badge.
+  isolate(t);
+  const gate = gatedSleep();
+  const h = rig(
+    t,
+    { type: 4098, travel: 20, remotes: [{ pid: 300, addr: 99 }] },
+    { repeat: 1, sleep: gate.sleep },
+  );
+  shutter.travel.set(h.device, 0);
+  await quietly(async () => {
+    const open = h.send('state', 1);
+    await ticks();
+    await h.clock.advance(100);
+    await h.deliver([answerTo(h.handed[0], 0x104)]);
+    await h.clock.advance(400);
+    await h.deliver([
+      {
+        type: 3,
+        channel: { id: 300, source: 99 },
+        reliability: 32,
+        thingnotes: { notes: [{ type: NOTE_TYPES.STATE, value: STATE_VALUES.STOP }] },
+      },
+    ]);
+    gate.release();
+    await open;
+    await ticks();
+  });
+  assert.equal(h.handed.length, 1);
+  // Said when it was known: the Open went nowhere, the remote has the last word.
+  assert.deepEqual(h.failures, ['BUSY']);
+  assert.equal(h.badge(), 'local');
+
+  await quietly(async () => {
+    await h.clock.advance(10000);
+    await h.send('state', -1);
+    for (const body of h.handed.slice(1)) {
+      await h.deliver([answerTo(body, SENT)]);
+    }
+    await h.clock.advance(30000);
+  });
+  assert.equal(shutter.travel.positionOf(h.device), 0);
+  assert.equal(shutter.travel.isMoving(h.device), false);
+  assert.equal(h.statesOf('state').at(-1), -1);
+  assert.deepEqual(h.failures, ['BUSY']);
+  assert.equal(h.badge(), 'local');
+});
+
+test('an Open refused whose repeat the restarting service refused is undone then', async (t) => {
+  // The repeat never reached the service: the Open is judged on its first
+  // emission, refused. Taken back right away, not with the next order's SENT.
+  isolate(t);
+  const gate = gatedSleep();
+  const h = rig(t, { type: 4098, travel: 20 }, { repeat: 1, sleep: gate.sleep });
+  shutter.travel.set(h.device, 0);
+  const answered = globalThis.fetch;
+  let down = false;
+  globalThis.fetch = async (url, options) => {
+    if (down) {
+      throw refusedConnection();
+    }
+    return answered(url, options);
+  };
+  await quietly(async () => {
+    const open = h.send('state', 1);
+    await ticks();
+    await h.clock.advance(100);
+    await h.deliver([answerTo(h.handed[0], 0x104)]);
+    down = true;
+    gate.release();
+    await open;
+    await ticks();
+  });
+  assert.deepEqual(h.failures, ['BUSY']);
+  assert.equal(h.badge(), 'unreachable');
+  assert.equal(shutter.travel.positionOf(h.device), 0);
+  assert.equal(shutter.travel.isMoving(h.device), false);
+
+  await quietly(async () => {
+    down = false;
+    await h.clock.advance(10000);
+    await h.send('state', -1);
+    for (const body of h.handed.slice(1)) {
+      await h.deliver([answerTo(body, SENT)]);
+    }
+    await h.clock.advance(30000);
+  });
+  assert.equal(shutter.travel.positionOf(h.device), 0);
+  assert.deepEqual(h.failures, ['BUSY']);
+  assert.equal(h.badge(), 'local');
+});
+
+test('an order the service never received does not replace the one before it', async (t) => {
+  // ON accepted, then OFF refused twice by a restarting service: Gladys got an
+  // error for the OFF, and shows ON. The box then refuses both emissions of
+  // the ON: still counted as replaced by the OFF, nothing undid it.
+  isolate(t);
+  const h = rig(t, SWITCH.entry, { repeat: 1 });
+  await restoreDeviceStates(h.gladys, h.config, [
+    { external_id: h.ids.device, features: SWITCH.restore(h.ids) },
+  ]);
+  const answered = globalThis.fetch;
+  let down = false;
+  globalThis.fetch = async (url, options) => {
+    if (down) {
+      throw refusedConnection();
+    }
+    return answered(url, options);
+  };
+  await quietly(async () => {
+    await h.send('on-off', 1);
+    down = true;
+    await assert.rejects(() => h.send('on-off', 0));
+    for (const body of h.handed) {
+      await h.deliver([answerTo(body, 0x101)]);
+    }
+  });
+  assert.equal(h.handed.length, 2);
+  assert.deepEqual(h.statesOf('on-off'), [1, 0]);
+  assert.deepEqual(h.failures, ['NETWORK']);
+  assert.equal(h.badge(), 'unreachable');
+});
+
+test('an order refused before the next one, which the service never received, is still undone', async (t) => {
+  // ON refused, its repeat dropped behind the OFF clicked meanwhile: the ON
+  // is judged when the OFF is handed over, and waits for the OFF's verdict to
+  // be reported. The OFF never reaches the service: no verdict of it will
+  // ever come, and the ON is reported then.
+  isolate(t);
+  const h = rig(t, SWITCH.entry, { repeat: 1 });
+  await restoreDeviceStates(h.gladys, h.config, [
+    { external_id: h.ids.device, features: SWITCH.restore(h.ids) },
+  ]);
+  const answered = globalThis.fetch;
+  let release = null;
+  globalThis.fetch = async (url, options) => {
+    const body = JSON.parse(options.body);
+    if (body.thingnotes.notes[0].value === STATE_VALUES.OFF) {
+      throw refusedConnection();
+    }
+    const response = await answered(url, options);
+    if (h.handed.length === 1) {
+      await new Promise((resolve) => {
+        release = resolve;
+      });
+    }
+    return response;
+  };
+  await quietly(async () => {
+    const on = h.send('on-off', 1);
+    const off = h.send('on-off', 0);
+    await new Promise(setImmediate);
+    await h.deliver([answerTo(h.handed[0], 0x101)]);
+    release();
+    await on;
+    await assert.rejects(off);
+    await ticks();
+  });
+  assert.deepEqual(
+    h.handed.map((body) => body.thingnotes.notes[0].value),
+    [20],
+  );
+  assert.deepEqual(h.statesOf('on-off'), [1, 0]);
+  assert.deepEqual(h.failures, ['NETWORK']);
 });

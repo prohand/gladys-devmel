@@ -279,6 +279,20 @@ export async function applyEvents(
   if (!Array.isArray(events)) {
     return 0;
   }
+  // An order is sometimes found failed outside of any verdict: its repeat
+  // dropped behind a remote pressed, or refused by a restarting service (see
+  // `SentOrders.close`). Reported right then, the way a verdict is below —
+  // and this is where Gladys, the configuration and the scenes are known.
+  orders?.reportTo?.(async (entry, verdict) => {
+    try {
+      await orderNotCarried(gladys, config, { type: verdict.type }, entry, verdict, {
+        scenes,
+        client,
+      });
+    } catch (err) {
+      logger.error(`Could not report the failed order sent to "${entry.name}"`, err);
+    }
+  });
   let applied = 0;
   for (const event of events) {
     // Ours, coming back? Asked before anything else: an order that failed to
@@ -535,16 +549,22 @@ export async function applyEvents(
  * @returns {Promise<number>} how many devices acted on the leftovers
  */
 async function applyOwnEcho(gladys, config, event, echo, { orders, scenes, client } = {}) {
-  // Only the answer to one of our transfers is a verdict on an emission: it
-  // carries the uid we gave it. The box hearing itself carries none, and says
-  // nothing about which emission it heard (see `SentOrders.settle`).
-  const answer = echo.uid !== undefined && String(event?.thingnotes?.uid ?? '') === echo.uid;
-  const verdict = (answer ? orders?.settle?.(echo, event?.type) : null) ?? {
+  // Only the answer to one of our transfers carries a uid: the one we gave it.
+  // The box hearing itself carries none, nor does a remote. Told by the frame,
+  // not by what it matched: an answer later than the uid window matches the
+  // voice, which has no uid — taken for a press, the late answer of an UP sent
+  // a shutter positioned at 40 % to the top.
+  const answer = Boolean(event?.thingnotes?.uid);
+  // A verdict on an emission only when it names the order it matched (see
+  // `SentOrders.settle`).
+  const ours = answer && echo.uid !== undefined && String(event.thingnotes.uid) === echo.uid;
+  const verdict = (ours ? orders?.settle?.(echo, event?.type) : null) ?? {
     failed: isErrorEvent(event?.type),
     uncarried: false,
     latest: false,
   };
-  // Orders whose failure was only known once nothing more of them could come.
+  // Orders a newer one replaced before it was known that nothing more of them
+  // would come (see `SentOrders.replace`).
   for (const earlier of verdict.earlier ?? []) {
     await orderNotCarried(gladys, config, { ...event, type: earlier.type }, echo, earlier, {
       scenes,
@@ -580,7 +600,21 @@ async function applyOwnEcho(gladys, config, event, echo, { orders, scenes, clien
   // Handled as an echo for its own device, the copied remote's UP left a gate
   // shown closed while it opened, the repeat of Gladys' ON still queued went
   // out after the remote's OFF, and no remote_pressed fired.
-  const overheard = !answer && unsaid.length > 0;
+  const foreign = !answer && unsaid.length > 0;
+  // Only a frame applyEvents would follow, too: listening on, and graded
+  // within the window it trusts. Within the minute after a Gladys order, a
+  // badly graded frame, or one heard with listening off, otherwise set a gate
+  // off and fired remote_pressed, where the same frame a minute later was
+  // dropped.
+  const overheard = foreign && config.listen_channel !== 0 && !whyUnusable(event, config);
+  if (foreign && !overheard) {
+    logger.debug(
+      `Ignored a frame on the address of "${echo.name}" that is not an order of ours: ` +
+        `${describeChannel(event?.channel)}, ` +
+        (config.listen_channel === 0 ? 'listening is off' : whyUnusable(event, config)),
+    );
+    return 0;
+  }
   if (overheard) {
     orders?.overheard?.(channel);
   }

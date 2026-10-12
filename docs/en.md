@@ -365,7 +365,11 @@ is still followed — the Up, Down or Stop of a shutter or a gate, the ON, OFF o
 level of a switch or a light — drops the repeat of a Gladys order still waiting
 for the radio, and fires **A radio remote is pressed**, like any remote. Only a
 press repeating what Gladys has just said, which changes nothing, or what the
-box has not yet been heard repeating, is taken for the echo.
+box has not yet been heard repeating, is taken for the echo. And only a frame
+the integration would follow at any other time: with listening off, or graded
+too low (see **Accept unreliable frames**), it is dropped within that minute
+too. The answer of the box to one of Gladys' orders is never a press, however
+late it comes back.
 
 The same goes for a percentage or an ON/OFF Gladys sent: its echo is not taken
 for the device reporting where it is. Read that way, a timed 4099 sent to 30 %
@@ -397,7 +401,10 @@ Visible consequences:
   its Stop was sent, it is that Open which is taken back, not the Stop. Each
   answer is counted against the order it is about, however late it comes back:
   ON, OFF, ON clicked faster than the box answers, all refused, leave the plug
-  shown as it was before the three.
+  shown as it was before the three. An order whose repeat never went out (a
+  remote pressed meanwhile, the AirSend Web Service restarting) is reported as
+  soon as that is known, not with the next order; and an order the service
+  never received at all does not count as replacing the one before it.
 
 ### When the box says no
 

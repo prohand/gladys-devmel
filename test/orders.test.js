@@ -229,6 +229,45 @@ test('an order the box judged before it was known nothing more of it would go ou
   assert.deepEqual(orders.settle(order, 1).earlier, []);
 });
 
+test('an order whose repeats will not come is reported at once, overtaken by a press', () => {
+  // ON refused, then a remote pressed: its repeat is dropped. No newer order
+  // of Gladys will carry the report, and what followed the press is not the
+  // ON's to undo.
+  const { orders, advance } = registry();
+  const reported = [];
+  orders.reportTo((entry, verdict) => reported.push({ uid: entry.uid, ...verdict }));
+  const on = orders.remember('0xabc', SHUTTER, { fresh: true, emissions: 2 }).order;
+  const order = orders.match(echo('0xabc'));
+  assert.equal(orders.settle(order, 0x104).failed, false);
+  advance(500);
+  orders.close(on, { overtaken: 1400 });
+
+  assert.equal(reported.length, 1);
+  assert.equal(reported[0].uid, '0xabc');
+  assert.equal(reported[0].failed, true);
+  assert.equal(reported[0].superseded, true);
+  assert.equal(reported[0].until, 1400);
+  assert.equal(reported[0].since, on.since);
+  assert.deepEqual(orders.settle(order, 1).earlier, []);
+});
+
+test('an order none of whose emissions reached the service gives its place back', () => {
+  const { orders } = registry();
+  const reported = [];
+  orders.reportTo((_entry, verdict) => reported.push(verdict));
+  const on = orders.remember('0xabc', SHUTTER, { fresh: true, emissions: 1 }).order;
+  const off = orders.remember('0xabc', SHUTTER, { fresh: true, emissions: 1 }).order;
+  orders.unsent(off);
+  orders.close(off, { silent: true });
+
+  const verdict = orders.settle(orders.match(echo('0xabc')), 0x101);
+  assert.equal(verdict.failed, true);
+  assert.equal(verdict.superseded, false);
+  assert.equal(verdict.until, null);
+  assert.equal(verdict.seq, on.seq);
+  assert.deepEqual(reported, []);
+});
+
 test('an order answered, or replaced long after it went out, is owed nothing', () => {
   const { orders, advance } = registry();
   // Its SENT came back: the next refusal is the next order's.

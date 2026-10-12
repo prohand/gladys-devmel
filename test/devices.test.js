@@ -2810,6 +2810,86 @@ test('a remote copied onto a plug is followed after Gladys sent ON then OFF', as
   );
 });
 
+test('a late answer to a transfer is never a press, even past the uid window', async () => {
+  // Past DEFAULT_TTL_MS the answer matches the voice, which has no uid: taken
+  // for a press of a copied remote, the late answer of the ON switched the
+  // plug back on after Gladys turned it off, and fired remote_pressed.
+  const { gladys, config, client } = setup();
+  let now = 0;
+  const orders = new SentOrders({ now: () => now });
+  const scenes = new SceneEvents({ now: () => now });
+  const frame = (value, uid) => ({
+    type: uid ? 1 : 3,
+    channel: { id: 200, source: 2 },
+    thingnotes: { ...(uid ? { uid } : {}), notes: [{ type: NOTE_TYPES.STATE, value }] },
+  });
+  const hear = (event) => applyEvents(gladys, config, [event], new HeardChannels(), orders, scenes);
+  const uids = [];
+  for (const value of [1, 0]) {
+    await findDeviceByExternalId(
+      gladys,
+      config,
+      deviceExternalId(config, 'Kitchen plug'),
+    ).blueprint.onSetValue(gladys, {
+      device: deviceNamed(config, 'Kitchen plug'),
+      feature: featureOf(gladys, config, 'Kitchen plug', 'on-off'),
+      value,
+      client,
+    });
+    uids.push(rememberLast(orders, config, client));
+    const state = value ? STATE_VALUES.ON : STATE_VALUES.OFF;
+    await hear(frame(state));
+    now += 5000;
+  }
+  assert.equal(orders.match(frame(STATE_VALUES.ON, uids[0])), orders.entries.get(uids[0]));
+
+  // 31 s after the OFF: the uid window is over, the voice still answers.
+  now += 26000;
+  assert.equal(orders.match(frame(STATE_VALUES.ON, uids[0]))?.uid, undefined);
+  await hear(frame(STATE_VALUES.ON, uids[0]));
+
+  assert.deepEqual(gladys.statesOf(`${deviceExternalId(config, 'Kitchen plug')}:on-off`), [1, 0]);
+  assert.deepEqual(gladys.sceneEvents, []);
+});
+
+test('a frame on our voice that listening would drop is no press within the minute either', async (t) => {
+  // A remote copied onto the gate's address is a press within the minute
+  // after a Gladys order — but only a frame applyEvents would follow at all.
+  // Graded outside the trusted window, or heard with listening off, the UP
+  // opened the gate and fired remote_pressed, where a minute later it was
+  // dropped.
+  const { gladys, context, client, clock, send, positionsOf, statesOf } = setupShutters(t, {
+    Gate: { type: 4098, travel: 20, channel: { id: 300, source: 3 } },
+  });
+  const orders = new SentOrders({ now: clock.now });
+  const scenes = new SceneEvents({ now: clock.now });
+  const heard = (value, extra = {}) => ({
+    type: 3,
+    channel: { id: 300, source: 3 },
+    thingnotes: { notes: [{ type: NOTE_TYPES.STATE, value }] },
+    ...extra,
+  });
+  const hear = (frame) =>
+    applyEvents(gladys, context.config, [frame], new HeardChannels(), orders, scenes);
+
+  await send('Gate', 'state', -1);
+  rememberLast(orders, context.config, client);
+  await hear(heard(STATE_VALUES.DOWN));
+  await clock.advance(21000);
+  const before = { positions: positionsOf('Gate').length, states: statesOf('Gate').length };
+
+  await hear(heard(STATE_VALUES.UP, { reliability: 0x50 }));
+  await clock.advance(1000);
+  context.config.listen_channel = 0;
+  await hear(heard(STATE_VALUES.UP));
+  await clock.advance(1000);
+
+  assert.equal(positionsOf('Gate').length, before.positions);
+  assert.equal(statesOf('Gate').length, before.states);
+  assert.equal(shutter.travel.isMoving(deviceNamed(context.config, 'Gate')), false);
+  assert.deepEqual(gladys.sceneEvents, []);
+});
+
 test('a shutter following a group channel follows the order Gladys sent to that group', async (t) => {
   const { gladys, context, client, clock, send, positionsOf } = setupShutters(t, {
     'All shutters': { type: 4098, channel: { id: 900, source: 100 } },

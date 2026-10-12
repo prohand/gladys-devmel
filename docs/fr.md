@@ -387,7 +387,11 @@ ou le niveau d'une prise ou d'une lumière —, annule la répétition d'un ordr
 Gladys qui attendait encore la radio, et déclenche **Une télécommande radio est
 actionnée**, comme toute télécommande. Seul un appui qui répète ce que Gladys
 vient de dire, et qui ne change rien, ou ce que le boîtier n'a pas encore été
-entendu répéter, est pris pour l'écho.
+entendu répéter, est pris pour l'écho. Et seulement une trame que
+l'intégration suivrait à tout autre moment : écoute coupée, ou trame trop mal
+notée (voir **Accepter les trames peu fiables**), elle est ignorée pendant
+cette minute aussi. La réponse du boîtier à un ordre de Gladys n'est jamais un
+appui, aussi tard qu'elle revienne.
 
 Il en va de même d'un pourcentage ou d'un ON/OFF envoyé par Gladys : son écho
 n'est pas pris pour l'appareil qui dirait où il en est. Lu ainsi, un 4099
@@ -421,7 +425,10 @@ Conséquences visibles :
   est annulé, pas le Stop. Chaque réponse est comptée à l'ordre qu'elle
   concerne, aussi tard qu'elle revienne : allumer, éteindre, allumer cliqués
   plus vite que le boîtier ne répond, tous refusés, laissent la prise affichée
-  comme avant les trois.
+  comme avant les trois. Un ordre dont la répétition n'est jamais partie (une
+  télécommande actionnée entre-temps, l'AirSend Web Service qui redémarre) est
+  signalé dès que c'est su, pas avec l'ordre suivant ; et un ordre que le
+  service n'a jamais reçu ne compte pas comme remplaçant celui d'avant.
 
 ### Quand le boîtier dit non
 

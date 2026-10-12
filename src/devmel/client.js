@@ -346,7 +346,11 @@ export class AirSendClient {
           );
           // The order is judged on what did go out: waiting for the verdicts
           // of repeats that never will, a refused order was never reported.
-          this.orders?.close?.(order?.verdicts);
+          // Overtaken when a remote pressed since dropped them.
+          const latest = this.latestOrders.get(device.platformId);
+          this.orders?.close?.(order?.verdicts, {
+            overtaken: latest?.heard === true ? latest.at : null,
+          });
           return;
         }
         this.rememberTransport(device, DEVICE_TRANSPORTS.LOCAL);
@@ -378,9 +382,13 @@ export class AirSendClient {
    * still waiting their turn are dropped — the UP repeated behind the STOP
    * pressed on the wall set the shutter off again, and its echo, ours, left
    * Gladys showing it stopped.
+   *
+   * Dated: the order whose repeats it drops is overtaken from then on, and
+   * what the device did after is not that order's to undo (see
+   * `SentOrders.close`).
    */
   supersede(device) {
-    this.latestOrders.set(device.platformId, { heard: true });
+    this.latestOrders.set(device.platformId, { heard: true, at: this.now() });
   }
 
   /** Has this device been given a newer order than `order`? */
