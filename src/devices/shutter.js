@@ -267,10 +267,24 @@ export const shutter = {
    */
   async notCarried(gladys, { device, since }) {
     reframe(device);
+    const ids = idsFor(gladys, KEY, device);
+    // The STOP of a timed positioning, refused after the travel arrived: the
+    // motor was never stopped, and the travel follows it to its end stop.
+    // Gladys was told the target and "stopped" at the arrival: it is told
+    // again which way the shutter is going.
+    const direction = shutter.travel.resume(device, since);
+    if (direction !== null) {
+      logger.info(`"${device.name}" was not stopped: it runs on to its end stop`);
+      await publishState(
+        gladys,
+        ids.feature(FEATURE.STATE),
+        direction === DIRECTIONS.UP ? SHUTTER_STATE.OPEN : SHUTTER_STATE.CLOSED,
+      );
+      return true;
+    }
     if (!shutter.travel.revert(device, since)) {
       return false;
     }
-    const ids = idsFor(gladys, KEY, device);
     const position = shutter.travel.positionOf(device);
     logger.info(`"${device.name}" did not move: its travel is taken back`);
     await publishState(
@@ -308,6 +322,17 @@ export const shutter = {
     await publishState(gladys, ids.feature(FEATURE.STATE), toShutterState(known));
     await publishPosition(gladys, device, ids, known);
     return known;
+  },
+
+  /**
+   * Integration shutdown: let a positioning whose order is still on its way
+   * to the radio arm its travel, then settle every travel (see
+   * `ShutterTravel.settle`). Armed after the settling, its STOP never went
+   * out and Gladys kept the position it started from.
+   */
+  async settle() {
+    await Promise.all(driving.values());
+    await shutter.travel.settle();
   },
 };
 
@@ -349,7 +374,8 @@ async function goTo(
       arrive: onArrival,
       publish: async (position, { done }) => {
         await publishPosition(gladys, device, ids, position);
-        if (!done) {
+        // A newer movement set off meanwhile has the state to say.
+        if (!done || shutter.travel.isMoving(device)) {
           return;
         }
         const arrived = toShutterState(position);
@@ -581,12 +607,6 @@ const memoryFrames = new WeakMap();
 /** Bring the memory of this shutter to its current configuration. */
 function reframe(device) {
   const travel = shutter.travel;
-  // A movement finishes in the terms it started in: its STOP and its arrival
-  // were computed there, and cancelling it would cancel the STOP. The memory
-  // is brought over at the next call after it.
-  if (travel.isMoving(device)) {
-    return;
-  }
   if (!memoryFrames.has(travel)) {
     memoryFrames.set(travel, new Map());
   }
@@ -598,10 +618,13 @@ function reframe(device) {
     return;
   }
   if (frame.positioned && !before.positioned) {
+    // Never a moving shutter: only a timed one moves, and it was positioned.
     travel.set(device, null);
   } else if (frame.invert !== before.invert) {
-    const position = travel.positionOf(device);
-    travel.set(device, position === null ? null : 100 - position);
+    // A movement under way included, mirrored rather than cancelled, which
+    // would cancel its STOP. Left for after it, the travel ended in the old
+    // terms and published them, and a restart in between kept them.
+    travel.mirror(device);
   }
 }
 

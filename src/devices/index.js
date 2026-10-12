@@ -145,7 +145,7 @@ export async function replayDeviceStates(gladys, gladysDevice, context) {
  * now, and Gladys the position it is left at (see `ShutterTravel.settle`).
  */
 export async function stopDeviceTracking() {
-  await shutter.travel.settle();
+  await shutter.settle();
   shutter.travel.clear();
 }
 

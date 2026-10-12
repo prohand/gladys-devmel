@@ -276,3 +276,164 @@ test('a shutdown whose STOP cannot go out publishes the end stop the motor runs 
   assert.equal(travel.isMoving(SHUTTER), false);
   assert.equal(clock.armed, 0);
 });
+
+test('a STOP the box refuses after the arrival leaves the shutter running to its end stop', async () => {
+  const { clock, travel, positions, publish } = setup();
+  travel.set(SHUTTER, 0);
+  travel.move(SHUTTER, { direction: DIRECTIONS.UP, target: 40, publish, arrive: async () => {} });
+  await clock.advance(8000);
+  assert.equal(positions.at(-1), '40!');
+
+  // A ping sent afterwards and refused is not that STOP.
+  await clock.advance(1000);
+  assert.equal(travel.resume(SHUTTER, 9000), null);
+  assert.equal(travel.isMoving(SHUTTER), false);
+
+  // With `wait: false`, the box says BUSY on the callback, after the STOP
+  // sent at 8 s was accepted: nothing stopped the motor.
+  assert.equal(travel.resume(SHUTTER, 8000), DIRECTIONS.UP);
+  assert.ok(travel.isMoving(SHUTTER));
+  assert.equal(travel.positionOf(SHUTTER), 45);
+  await clock.advance(12000);
+  assert.equal(positions.at(-1), '100!');
+  assert.equal(travel.positionOf(SHUTTER), 100);
+});
+
+test('a STOP refused after the shutter was given another order changes nothing', async () => {
+  const { clock, travel, publish } = setup();
+  travel.set(SHUTTER, 0);
+  travel.move(SHUTTER, { direction: DIRECTIONS.UP, target: 40, publish, arrive: async () => {} });
+  await clock.advance(8000);
+  travel.stop(SHUTTER);
+
+  assert.equal(travel.resume(SHUTTER, 8000), null);
+  assert.equal(travel.positionOf(SHUTTER), 40);
+});
+
+test('an arrival waiting for a slow publication does not land over a newer movement', async () => {
+  const { clock, travel, positions, publish } = setup();
+  travel.set(SHUTTER, 0);
+  let answer;
+  travel.move(SHUTTER, {
+    direction: DIRECTIONS.UP,
+    target: 40,
+    // Gladys takes its time over the 7 s position.
+    publish: async (position, info) => {
+      await publish(position, info);
+      if (position === 35) {
+        await new Promise((resolve) => {
+          answer = resolve;
+        });
+      }
+    },
+    arrive: async () => {},
+  });
+  await clock.advance(8000);
+
+  // The STOP went out on time; a wall remote then sends the shutter to the top.
+  const newer = [];
+  travel.move(SHUTTER, {
+    direction: DIRECTIONS.UP,
+    publish: async (position, { done }) => {
+      newer.push(done ? `${position}!` : position);
+    },
+  });
+  answer();
+  await new Promise(setImmediate);
+  await clock.advance(13000);
+
+  // The old target (and its STOP state) never landed over the newer travel.
+  assert.ok(!positions.includes('40!'), JSON.stringify(positions));
+  assert.equal(newer.at(-1), '100!');
+});
+
+test('a shutter mirrored while it moves ends its travel in the new terms', async () => {
+  const { clock, travel, positions, publish } = setup();
+  const symmetrical = { platformId: 'shutter-3', travelUp: 20 };
+  travel.set(symmetrical, 0);
+  travel.move(symmetrical, { direction: DIRECTIONS.UP, publish });
+  await clock.advance(5000);
+
+  travel.mirror(symmetrical);
+
+  // Still moving, a quarter of the way, seen from the other end.
+  assert.ok(travel.isMoving(symmetrical));
+  assert.equal(travel.positionOf(symmetrical), 75);
+  await clock.advance(15000);
+  assert.equal(positions.at(-1), '0!');
+  assert.equal(travel.positionOf(symmetrical), 0);
+});
+
+test('a shutdown waits for an arrival whose STOP is still on its way to the radio', async () => {
+  const { clock, travel, positions, publish } = setup();
+  travel.set(SHUTTER, 100);
+  let carried;
+  travel.move(SHUTTER, {
+    direction: DIRECTIONS.DOWN,
+    target: 40,
+    publish,
+    arrive: () =>
+      new Promise((resolve) => {
+        carried = resolve;
+      }),
+  });
+  await clock.advance(6000);
+  assert.equal(travel.isMoving(SHUTTER), false);
+
+  let settled = false;
+  const settling = travel.settle().then(() => {
+    settled = true;
+  });
+  await new Promise(setImmediate);
+  // The service is not stopped under the STOP.
+  assert.equal(settled, false);
+
+  carried();
+  await settling;
+  assert.equal(positions.at(-1), '40!');
+});
+
+test('a shutdown whose in-flight STOP then fails publishes the end stop the motor runs to', async () => {
+  const { clock, travel, positions, publish } = setup();
+  travel.set(SHUTTER, 100);
+  let refuse;
+  travel.move(SHUTTER, {
+    direction: DIRECTIONS.DOWN,
+    target: 40,
+    publish,
+    arrive: () =>
+      new Promise((_resolve, reject) => {
+        refuse = reject;
+      }),
+  });
+  await clock.advance(6000);
+
+  const settling = travel.settle();
+  refuse(new Error('ECONNREFUSED'));
+  await settling;
+  travel.clear();
+
+  assert.equal(positions.at(-1), '0!');
+  assert.equal(travel.positionOf(SHUTTER), 0);
+  assert.equal(travel.isMoving(SHUTTER), false);
+  assert.equal(clock.armed, 0);
+});
+
+test('a STOP refused after a mirror carries the shutter on in the new terms', async () => {
+  const { clock, travel, positions, publish } = setup();
+  const symmetrical = { platformId: 'shutter-4', travelUp: 20 };
+  travel.set(symmetrical, 0);
+  travel.move(symmetrical, {
+    direction: DIRECTIONS.UP,
+    target: 40,
+    publish,
+    arrive: async () => {},
+  });
+  await clock.advance(8000);
+  travel.mirror(symmetrical);
+  assert.equal(travel.positionOf(symmetrical), 60);
+
+  assert.equal(travel.resume(symmetrical, 8000), DIRECTIONS.DOWN);
+  await clock.advance(12000);
+  assert.equal(positions.at(-1), '0!');
+});

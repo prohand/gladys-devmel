@@ -513,18 +513,19 @@ Deux détails qui comptent :
   l'intégration reçoit tout de suite la position déjà connue, et une position
   que Gladys a manquée pendant qu'elle était injoignable (redémarrage, mise à
   jour) lui est republiée à son retour. Corriger `invert` inverse la position
-  retenue : le volet, lui, n'a pas bougé. Un volet encore en mouvement quand
-  l'intégration s'arrête (mise à jour, redémarrage de Gladys) n'est pas perdu
-  non plus : celui envoyé à une position reçoit son Stop sur-le-champ, et
-  Gladys garde l'endroit où il s'est arrêté ; celui qui s'ouvre ou se ferme
-  complètement est publié à la butée vers laquelle il va ;
+  retenue, volet en mouvement compris : le volet, lui, n'a pas bougé. Un volet
+  encore en mouvement quand l'intégration s'arrête (mise à jour, redémarrage de
+  Gladys) n'est pas perdu non plus : celui envoyé à une position reçoit son Stop
+  sur-le-champ (ou celui qui attendait déjà la radio), et Gladys garde l'endroit
+  où il s'est arrêté ; celui qui s'ouvre ou se ferme complètement est publié à
+  la butée vers laquelle il va ;
 - un volet envoyé à une position est **arrêté à temps même si Gladys ne répond
   plus un instant ou tarde à répondre** : le STOP part avant que la position
   soit publiée, et n'attend jamais Gladys. Un STOP que le boîtier n'a pas pu
-  envoyer active le déclencheur **Un ordre radio a échoué**, et la position
-  suit le volet jusqu'à sa butée, puisque rien ne l'a arrêté. Un STOP qui
-  attend encore la radio quand une télécommande murale relance le volet est
-  abandonné.
+  envoyer, qu'il le dise tout de suite ou un instant plus tard (BUSY, NETWORK…),
+  active le déclencheur **Un ordre radio a échoué**, et la position suit le
+  volet jusqu'à sa butée, puisque rien ne l'a arrêté. Un STOP qui attend encore
+  la radio quand une télécommande murale relance le volet est abandonné.
 
 ### La position favorite
 

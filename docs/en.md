@@ -483,18 +483,19 @@ Two more things worth knowing:
   again from the value Gladys kept. A shutter you add in Gladys after the
   integration started gets the position already known straight away, and a
   position Gladys missed while it was unreachable (restarted, updated) is
-  published again when it comes back. Correcting `invert` mirrors the
-  remembered position: the shutter itself did not move. A shutter still
-  moving when the integration stops (update, restart of Gladys) is not lost
-  either: one driven to a position gets its Stop there and then, and Gladys
-  keeps where it was stopped; one opening or closing fully is published at the
-  end stop it is heading for;
+  published again when it comes back. Correcting `invert` mirrors the remembered
+  position, a shutter on the move included: the shutter itself did not move. A
+  shutter still moving when the integration stops (update, restart of Gladys) is
+  not lost either: one driven to a position gets its Stop there and then (or the
+  one already on its way to the radio), and Gladys keeps where it was stopped;
+  one opening or closing fully is published at the end stop it is heading for;
 - a shutter driven to a position is **stopped on time even when Gladys is
-  briefly unreachable or slow to answer**: the STOP goes out before the
-  position is published, and never waits for Gladys. A STOP the box could not
-  send fires the **A radio order failed** trigger, and the position follows the
-  shutter to its end stop, since nothing stopped it. A STOP still waiting for
-  the radio when a wall remote sets the shutter off again is dropped.
+  briefly unreachable or slow to answer**: the STOP goes out before the position
+  is published, and never waits for Gladys. A STOP the box could not send,
+  whether it says so at once or a moment later (BUSY, NETWORK…), fires the **A
+  radio order failed** trigger, and the position follows the shutter to its end
+  stop, since nothing stopped it. A STOP still waiting for the radio when a wall
+  remote sets the shutter off again is dropped.
 
 ### The favourite position
 

@@ -217,6 +217,61 @@ export class ShutterTravel {
   }
 
   /**
+   * Carry on to its end stop a travel whose arrival STOP the box said, later,
+   * it never sent (BUSY, NETWORK…). With `wait: false` that is how a refused
+   * STOP comes back: as an error on the callback, long after the travel
+   * arrived. Nothing stopped the motor, so the travel goes on from the target,
+   * from the moment the STOP was due — as when the STOP fails at once (see
+   * `arrive`). Kept at the target, Gladys showed 40 % while the shutter ran
+   * to the top, and every later positioning was timed from there.
+   *
+   * Only the STOP of the last arrival, and only while nothing has touched the
+   * shutter since: `since` (when the refused order was first sent) must fall
+   * between the arrival and the moment its STOP was handed over. A PING sent
+   * afterwards and refused is not that STOP.
+   *
+   * @returns {'up'|'down'|null} the direction it carries on in, null when
+   *   the refused order was not that STOP
+   */
+  resume(device, since) {
+    const state = this.states.get(device.platformId);
+    const landed = state?.landed;
+    if (!landed || since < landed.move.endAt) {
+      return null;
+    }
+    if (landed.sentBy !== null && since > landed.sentBy) {
+      return null;
+    }
+    this.carryOn(device, state, landed.move);
+    return landed.move.direction;
+  }
+
+  /**
+   * See the shutter the other way round (its `invert` was corrected):
+   * positions are in Gladys terms, which `invert` turns upside down. A
+   * movement under way is mirrored, not cancelled: the motor keeps running
+   * the way it was, and its STOP is due at the same time. Left as it was,
+   * the travel ended in the old terms and Gladys showed the mirror of the
+   * shutter until the next order.
+   */
+  mirror(device) {
+    const state = this.states.get(device.platformId);
+    if (!state) {
+      return;
+    }
+    if (state.move) {
+      mirrorMove(state.move);
+      return;
+    }
+    state.position = state.position === null ? null : 100 - state.position;
+    // An arrival whose STOP is still on its way publishes its target, and
+    // carries on from it if that STOP fails: both in the new terms.
+    if (state.landed) {
+      mirrorMove(state.landed.move);
+    }
+  }
+
+  /**
    * How long until the next STOP a movement under way has to send (its
    * `arrive`), in milliseconds, or null when none is waiting for one. That STOP
    * waits here, in a timer, not in the radio queue: whoever wants the radio for
@@ -244,12 +299,16 @@ export class ShutterTravel {
    * radio still works, and an early STOP beats none. Any other one is heading
    * for a place the motor finds by itself (an end stop, its own favourite):
    * that is where it is published.
+   *
+   * An arrival already under way (its STOP waiting for the radio, its target
+   * not published yet) is waited for, and settled again if its STOP failed.
+   * Overlooked, shutdown went on to stop the service under it: the STOP
+   * failed, and Gladys kept the last tick of the way.
    */
   async settle() {
-    const moving = [...this.states.values()].filter((state) => state.move);
     // Every STOP is queued before anything is published: radio first, as at
     // any arrival (see `arrive`).
-    await Promise.all(moving.map((state) => this.settleOne(state)));
+    await Promise.all([...this.states.values()].map((state) => this.settleState(state)));
   }
 
   /** Cancel every pending timer (integration shutdown). */
@@ -264,11 +323,22 @@ export class ShutterTravel {
   stateOf(device) {
     let state = this.states.get(device.platformId);
     if (!state) {
-      state = { position: null, move: null, handle: null, device };
+      state = { position: null, move: null, handle: null, device, landed: null, arriving: null };
       this.states.set(device.platformId, state);
     }
     state.device = device;
     return state;
+  }
+
+  /** One shutter of `settle`. */
+  async settleState(state) {
+    if (state.arriving) {
+      // Its failure was said where the arrival runs (see `schedule`).
+      await state.arriving.catch(() => {});
+    }
+    if (state.move) {
+      await this.settleOne(state);
+    }
   }
 
   /** One movement of `settle`. */
@@ -310,6 +380,9 @@ export class ShutterTravel {
       state.handle = null;
     }
     state.move = null;
+    // Whatever replaced the last arrival, a STOP refused later no longer says
+    // where the shutter is (see `resume`).
+    state.landed = null;
   }
 
   /**
@@ -345,17 +418,16 @@ export class ShutterTravel {
     if (done) {
       state.move = null;
       state.position = move.target;
-      await this.arrive(device, state, move);
-      // A newer movement replaced this one while its STOP waited for the radio
-      // (a wall remote pressed meanwhile): its publications are the ones that
-      // say where the shutter is, and the old target must not land over them.
-      if (state.move) {
-        return;
+      // Held on the state so a shutdown waits for it (see `settle`).
+      const arriving = this.land(device, state, move);
+      state.arriving = arriving;
+      try {
+        await arriving;
+      } finally {
+        if (state.arriving === arriving) {
+          state.arriving = null;
+        }
       }
-      // Published after the last position of the way, never before it: Gladys
-      // keeps whichever it is told last.
-      await move.publishing;
-      await move.publish(move.target, { done: true });
       return;
     }
 
@@ -394,6 +466,26 @@ export class ShutterTravel {
     await move.publishing;
   }
 
+  /** The arrival of `move`: its STOP, then where it ends. */
+  async land(device, state, move) {
+    await this.arrive(device, state, move);
+    // A newer movement replaced this one while its STOP waited for the radio
+    // (a wall remote pressed meanwhile), or while the last position of the
+    // way was still on its way to a slow Gladys: its publications are the
+    // ones that say where the shutter is, and the old target and its STOP
+    // state must not land over them.
+    if (state.move) {
+      return;
+    }
+    // Published after the last position of the way, never before it: Gladys
+    // keeps whichever it is told last.
+    await move.publishing;
+    if (state.move) {
+      return;
+    }
+    await move.publish(move.target, { done: true });
+  }
+
   /**
    * The travel says the shutter is there: stop the motor, when it has to be
    * told. That runs before any publication — a radio order is time-critical, a
@@ -409,27 +501,49 @@ export class ShutterTravel {
     if (!move.arrive) {
       return;
     }
+    // Remembered until anything else happens to the shutter, for a refusal
+    // that comes back later on the callback (see `resume`).
+    const landed = { move, sentBy: null };
+    state.landed = landed;
     try {
       await move.arrive();
     } catch (error) {
-      if (!state.move && state.position === move.target) {
-        const end = move.direction === DIRECTIONS.UP ? 100 : 0;
-        const travelMs = travelMsFor(device, move.direction);
-        state.move = {
-          ...move,
-          from: move.target,
-          target: end,
-          startedAt: move.endAt,
-          endAt: move.endAt + (Math.abs(end - move.target) / 100) * travelMs,
-          arrive: null,
-          publishing: null,
-          published: null,
-        };
-        this.schedule(device, state);
+      if (state.landed === landed) {
+        this.carryOn(device, state, move);
       }
       throw error;
     }
+    if (state.landed === landed) {
+      landed.sentBy = this.now();
+    }
   }
+
+  /** On from the target of `move` to the end stop of its direction. */
+  carryOn(device, state, move) {
+    const end = move.direction === DIRECTIONS.UP ? 100 : 0;
+    const travelMs = travelMsFor(device, move.direction);
+    state.landed = null;
+    state.move = {
+      ...move,
+      from: move.target,
+      target: end,
+      startedAt: move.endAt,
+      endAt: move.endAt + (Math.abs(end - move.target) / 100) * travelMs,
+      arrive: null,
+      publishing: null,
+      published: null,
+    };
+    this.schedule(device, state);
+  }
+}
+
+/** A movement seen from the other end: same motor, same times. */
+function mirrorMove(move) {
+  move.from = move.from === null ? null : 100 - move.from;
+  move.target = 100 - move.target;
+  move.direction = move.direction === DIRECTIONS.UP ? DIRECTIONS.DOWN : DIRECTIONS.UP;
+  // Its next tick publishes, even on the value last given in the old terms.
+  move.published = null;
 }
 
 /** Linear interpolation between the start of a movement and its target. */

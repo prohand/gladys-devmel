@@ -2216,6 +2216,62 @@ test('correcting invert on a shutter mirrors the position it remembers', async (
   assert.equal(positionsOf('Sail').at(-1), 40);
 });
 
+test('correcting invert while the shutter travels ends the travel in the new terms', async (t) => {
+  const channel = { id: 741, source: 4 };
+  const { clock, send, reconfigure, positionsOf, statesOf, deviceOf } = setupShutters(t, {
+    Sail: { type: 4098, travel: 20, channel },
+  });
+  await send('Sail', 'state', -1);
+  await clock.advance(25000);
+
+  // "Open" sets the sail off the wrong way; the user adds invert while it runs.
+  await send('Sail', 'state', 1);
+  await clock.advance(5000);
+  await reconfigure({ Sail: { type: 4098, travel: 20, invert: true, channel } }, { Sail: 25 });
+  await clock.advance(16000);
+
+  // The motor is at its radio-UP end stop: closed, once inverted.
+  assert.equal(shutter.travel.positionOf(deviceOf('Sail')), 0);
+  assert.equal(shutter.travel.isMoving(deviceOf('Sail')), false);
+  assert.equal(positionsOf('Sail').at(-1), 0);
+  assert.equal(statesOf('Sail').at(-1), -1);
+});
+
+test('a positioning whose order is still on its way at shutdown is stopped and published', async (t) => {
+  const { client, clock, send, positionsOf, deviceOf } = setupShutters(t, {
+    Store: { type: 4098, travel: 20, channel: { id: 742, source: 4 } },
+  });
+  await send('Store', 'state', -1);
+  await clock.advance(25000);
+
+  // The UP waits for a slow box when SIGTERM arrives.
+  const transfer = client.transfer;
+  let carry;
+  client.transfer = async (...args) => {
+    await new Promise((resolve) => {
+      carry = resolve;
+    });
+    client.transfer = transfer;
+    return transfer(...args);
+  };
+  const positioning = send('Store', 'position', 40);
+  await new Promise(setImmediate);
+  const settling = stopDeviceTracking();
+  carry();
+  await positioning;
+  await settling;
+
+  // Its travel was armed, then stopped by the shutdown: STOP sent, and the
+  // shutter known (and shown) where it was stopped.
+  assert.deepEqual(
+    client.sent.map((entry) => entry.notes[0].value),
+    [STATE_VALUES.DOWN, STATE_VALUES.UP, STATE_VALUES.STOP],
+  );
+  assert.equal(shutter.travel.isMoving(deviceOf('Store')), false);
+  assert.equal(positionsOf('Store').at(-1), 0);
+  assert.equal(clock.armed, 0);
+});
+
 test('a position made unknown by the favourite button stays unknown after a reconnection', async (t) => {
   const { gladys, config, client, clock, send } = setupTimed(t);
   const externalId = deviceExternalId(config, 'Timed shutter');
@@ -2626,6 +2682,48 @@ test('a timed shutter whose order the box never carried does not move, nor get i
     transports.transportOf(deviceNamed(config, 'Timed shutter'))?.transport,
     'unreachable',
   );
+});
+
+test('a timed shutter whose STOP the box refuses after the arrival runs on to its end stop', async (t) => {
+  const { gladys, config, client, clock, send, positionsOf, statesOf } = setupTimed(t);
+  const orders = new SentOrders({ now: clock.now });
+  const scenes = new SceneEvents({ now: clock.now });
+  const previous = shutter.scenes;
+  shutter.scenes = scenes;
+  t.after(() => {
+    shutter.scenes = previous;
+  });
+  await send('Timed shutter', 'state', -1);
+  await clock.advance(10000);
+
+  // 40 % of a 20 s opening: the STOP goes out at 8 s, and the service takes
+  // it (`wait: false`).
+  await send('Timed shutter', 'position', 40);
+  await clock.advance(8000);
+  assert.equal(client.noteAt(client.sent.length - 1).value, STATE_VALUES.STOP);
+  const uid = rememberLast(orders, config, client, { emissions: 1 });
+  assert.equal(positionsOf('Timed shutter').at(-1), 40);
+
+  // Then the box says, on the callback, that another client held the radio.
+  await applyEvents(
+    gladys,
+    config,
+    [{ type: 0x104, channel: { id: 700, source: 7 }, thingnotes: { uid, notes: [] } }],
+    new HeardChannels(),
+    orders,
+    scenes,
+    new AirSendClient({ orders: new SentOrders() }),
+  );
+  await clock.advance(15000);
+
+  // Nothing stopped the motor: the travel follows it to the top.
+  assert.deepEqual(
+    gladys.sceneEvents.map((event) => event.data.reason),
+    ['BUSY'],
+  );
+  assert.equal(shutter.travel.positionOf(deviceNamed(config, 'Timed shutter')), 100);
+  assert.equal(positionsOf('Timed shutter').at(-1), 100);
+  assert.equal(statesOf('Timed shutter').at(-1), 1);
 });
 
 test('a plug or a lamp whose order the box never carried is shown as it was before', async () => {
