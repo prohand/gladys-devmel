@@ -116,7 +116,11 @@ export const light = {
       if (pendingBrightness.get(device.platformId) === pending) {
         pendingBrightness.delete(device.platformId);
       }
-      shown.sent(device.platformId, { onOff: level > 0 ? 1 : 0, brightness: level });
+      shown.sent(
+        device.platformId,
+        { onOff: level > 0 ? 1 : 0, brightness: level },
+        feature.external_id,
+      );
       replacedBrightness.set(device.platformId, previous);
       await publishState(gladys, feature.external_id, level);
       await publishState(gladys, ids.feature(FEATURE.ON_OFF), level > 0 ? 1 : 0);
@@ -145,7 +149,11 @@ export const light = {
         lastBrightness.set(device.platformId, level);
       }
     }
-    shown.sent(device.platformId, { onOff: on ? 1 : 0, brightness: on ? level : 0 });
+    shown.sent(
+      device.platformId,
+      { onOff: on ? 1 : 0, brightness: on ? level : 0 },
+      feature.external_id,
+    );
     replacedBrightness.delete(device.platformId);
     await publishState(gladys, feature.external_id, on ? 1 : 0);
     await publishState(gladys, ids.feature(FEATURE.BRIGHTNESS), on ? level : 0);
@@ -195,8 +203,13 @@ export const light = {
    *
    * @returns {Promise<boolean>} whether anything was taken back
    */
-  async notCarried(gladys, { device }) {
-    const before = shown.undo(device.platformId);
+  async notCarried(gladys, { device, uid = null, superseded = false }) {
+    // An order given before the last one, on the same feature: see switchDevice.
+    if (superseded) {
+      shown.supersededNotCarried(device.platformId, uid);
+      return false;
+    }
+    const before = shown.undo(device.platformId, uid);
     if (!before) {
       return false;
     }

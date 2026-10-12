@@ -647,7 +647,7 @@ export class AirSendClient {
     // then be taken for an order of Gladys coming back: a remote that stops
     // working the day the box gets warmed or polled.
     if (device.rtype !== DEVICE_TYPES.BOX) {
-      this.orders?.remember(thingUid, device, { notes, fresh, emissions });
+      this.orders?.remember(thingUid, device, { notes, fresh, emissions, wait });
     }
     const body = {
       wait,

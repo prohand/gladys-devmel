@@ -265,14 +265,16 @@ export const shutter = {
    * @param {number} since when that order was first sent
    * @returns {Promise<boolean>} whether anything was taken back
    */
-  async notCarried(gladys, { device, since }) {
+  async notCarried(gladys, { device, since, superseded = false, until = null }) {
     reframe(device);
     const ids = idsFor(gladys, KEY, device);
     // The STOP of a timed positioning, refused after the travel arrived: the
     // motor was never stopped, and the travel follows it to its end stop.
     // Gladys was told the target and "stopped" at the arrival: it is told
-    // again which way the shutter is going.
-    const direction = shutter.travel.resume(device, since);
+    // again which way the shutter is going. Never an order the same feature
+    // was given another one after (`superseded`): the UP of a short
+    // positioning, refused once its STOP was handed over, is not that STOP.
+    const direction = superseded ? null : shutter.travel.resume(device, since);
     if (direction !== null) {
       logger.info(`"${device.name}" was not stopped: it runs on to its end stop`);
       await publishState(
@@ -282,7 +284,7 @@ export const shutter = {
       );
       return true;
     }
-    if (!shutter.travel.revert(device, since)) {
+    if (!shutter.travel.revert(device, since, until ?? Infinity)) {
       return false;
     }
     const position = shutter.travel.positionOf(device);

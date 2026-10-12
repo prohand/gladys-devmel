@@ -48,6 +48,14 @@
 // comes back later, once per emission — the first one and every repeat, all
 // under the same uid. One emission refused while another went out is an order
 // that went out: only an order whose every emission was refused failed.
+//
+// And a uid names a feature, not an order: the STOP that ends a timed
+// positioning carries the uid of the UP that started it, the OFF the uid of
+// the ON before it. Verdicts come back in the order the emissions went out
+// (one radio), so those still owed to the order before are its own, not the
+// new one's: counted against the new one, the box refusing an ON undid the
+// OFF given after it, and refusing the UP of a short positioning read as a
+// refused STOP that ran a still shutter to its end stop.
 // -----------------------------------------------------------------------------
 
 import { isSameChannel } from './notes.js';
@@ -76,6 +84,9 @@ export const DEFAULT_LIMIT = 64;
 
 /** How many recent orders are kept per voice, to recognize them in an echo. */
 const SAID_LIMIT = 8;
+
+/** How many replaced orders of one uid may still be owed their verdicts. */
+const OWED_LIMIT = 4;
 
 export class SentOrders {
   /**
@@ -140,8 +151,10 @@ export class SentOrders {
    *   of the one before: the verdicts start over
    * @param {number} [order.emissions] how many times it is to go out, repeats
    *   included: the verdicts it takes to call it failed
+   * @param {boolean} [order.wait] answered by the transfer itself: no verdict
+   *   of it comes back on the callback
    */
-  remember(uid, device = {}, { notes = null, fresh = false, emissions = null } = {}) {
+  remember(uid, device = {}, { notes = null, fresh = false, emissions = null, wait = false } = {}) {
     const key = String(uid ?? '');
     if (!key) {
       return null;
@@ -155,15 +168,20 @@ export class SentOrders {
       emissions: 0,
     };
     // A uid names a feature, not an order: the CLOSE after an OPEN carries the
-    // same one. Its verdicts are the new order's, not added to the old one's.
+    // same one. Its verdicts are the new order's, not added to the old one's —
+    // once the old one has had its own (see `owe`).
     if (!known || fresh) {
+      const owed = known ? this.owe(entry) : [];
       Object.assign(entry, {
         since: this.now(),
         expected: null,
         carried: 0,
         failed: 0,
         uncarried: 0,
+        sent: 0,
+        answered: false,
         seq: ++this.sequence,
+        owed,
       });
       this.latest.set(entry.platformId, key);
       this.actedOn.set(entry.platformId, entry.seq);
@@ -171,10 +189,14 @@ export class SentOrders {
     if (Number.isFinite(emissions)) {
       entry.expected = emissions;
     }
+    if (wait) {
+      entry.answered = true;
+    }
     // A repeat of the same order refreshes it rather than adding another one:
     // the echoes of both emissions must be recognized, and they are the same
     // order twice.
     entry.emissions += 1;
+    entry.sent += 1;
     entry.at = this.now();
 
     this.entries.delete(key);
@@ -193,8 +215,10 @@ export class SentOrders {
       const said = (this.voices.get(voice)?.said ?? []).filter(
         (spoken) => entry.at - spoken.at <= this.voiceWindowMs,
       );
+      // Numbered: an echo of the order before, heard after the next one was
+      // given, is that order's (see `follows`).
       if (notes) {
-        said.push({ notes, at: entry.at });
+        said.push({ notes, at: entry.at, seq: entry.seq });
       }
       this.voices.delete(voice);
       this.voices.set(voice, {
@@ -210,6 +234,41 @@ export class SentOrders {
       }
     }
     return entry;
+  }
+
+  /**
+   * A new order replaces the one this entry holds: what is still owed
+   * verdicts — that order, if the box has not judged it yet, and those it
+   * replaced — to be judged before the new one (see `settle`).
+   *
+   * Not an order answered by its own transfer (`wait: true`): nothing more of
+   * it comes back. Nor one replaced later than the channel window after it
+   * went out: the box answers within the second, so its verdicts came — or
+   * were lost, and waiting for them would hand it the new order's: an 8 s
+   * positioning whose UP was never answered took the refusal of its STOP for
+   * the UP's, and took the travel back instead of running it on.
+   */
+  owe(entry) {
+    const now = this.now();
+    const owed = (entry.owed ?? []).filter((order) => now - order.since <= this.ttlMs);
+    const expected = entry.expected ?? entry.sent;
+    if (
+      Number.isFinite(entry.failed) &&
+      !entry.answered &&
+      now - entry.at <= this.channelWindowMs &&
+      entry.carried === 0 &&
+      entry.failed < expected
+    ) {
+      owed.push({
+        since: entry.since,
+        expected,
+        carried: 0,
+        failed: entry.failed,
+        uncarried: entry.uncarried,
+        seq: entry.seq,
+      });
+    }
+    return owed.slice(-OWED_LIMIT);
   }
 
   /**
@@ -251,18 +310,48 @@ export class SentOrders {
    * the next echo, which cancelled the STOP of its own travel: it ran to the
    * bottom.
    *
+   * Which order, though, is the echo's own: a uid — and the channel window,
+   * and the voice — name the newest order on that feature. "Close all", then
+   * "Stop all": a late echo of the DOWN, taken for the STOP, was replayed as
+   * the newer order, and the STOP's own echo was then refused as already
+   * followed — the member ran to the bottom while the group stopped. What the
+   * echo says tells them apart: it is the newest order sent with those notes.
+   *
    * @param {object} order what `match` returned for the event
    * @param {string} platformId the device that hears it
+   * @param {Array<object>} [notes] what the echo says
    */
-  follows(order, platformId) {
-    if (!Number.isFinite(order?.seq)) {
+  follows(order, platformId, notes = null) {
+    const seq = this.orderOf(order, notes);
+    if (!Number.isFinite(seq)) {
       return true;
     }
-    if (order.seq <= (this.actedOn.get(platformId) ?? 0)) {
+    if (seq <= (this.actedOn.get(platformId) ?? 0)) {
       return false;
     }
-    this.actedOn.set(platformId, order.seq);
+    this.actedOn.set(platformId, seq);
     return true;
+  }
+
+  /** The number of the order an echo repeats: see `follows`. */
+  orderOf(order, notes) {
+    const heard = new Set((Array.isArray(notes) ? notes : []).map(noteKey));
+    if (heard.size === 0) {
+      return order?.seq;
+    }
+    // A voice is keyed already; an order carries the channel itself.
+    const key = typeof order?.channel === 'string' ? order.channel : channelKey(order?.channel);
+    const said = this.voices.get(key)?.said ?? [];
+    for (const spoken of [...said].reverse()) {
+      if (
+        Number.isFinite(spoken.seq) &&
+        spoken.seq <= order.seq &&
+        (spoken.notes ?? []).some((note) => heard.has(noteKey(note)))
+      ) {
+        return spoken.seq;
+      }
+    }
+    return order?.seq;
   }
 
   /**
@@ -279,32 +368,64 @@ export class SentOrders {
    *
    * @param {object} order what `match` returned for the event
    * @param {number} type the event type: below 0x100 it went out
-   * @returns {{failed: boolean, uncarried: boolean, latest: boolean, since: ?number}}
+   * @returns {{failed: boolean, uncarried: boolean, latest: boolean, since: ?number,
+   *   superseded: boolean, until: ?number}}
    *   `failed` once every emission it was to make was refused and none went
    *   out; `uncarried` when, on top of that, the box said each time that
-   *   nothing reached the air; `latest` when it is still the device's last
-   *   order; `since` when it was first sent
+   *   nothing reached the air; `latest` when no order went to another feature
+   *   of the device since; `since` when it was first sent; `superseded` when
+   *   it is an order the same uid carried before the newest one, given at
+   *   `until` (see `owe`)
    */
   settle(order, type) {
     // A voice, not an order: older than any verdict should be. Taken at its
     // word, as a failure of its own, and nothing more.
     if (!order || !Number.isFinite(order.failed)) {
-      return { failed: isErrorEvent(type), uncarried: false, latest: false, since: null };
+      return {
+        failed: isErrorEvent(type),
+        uncarried: false,
+        latest: false,
+        since: null,
+        superseded: false,
+        until: null,
+      };
     }
+    // The verdicts still owed to the orders this one replaced come first:
+    // the radio sent those emissions first.
+    const now = this.now();
+    order.owed = (order.owed ?? []).filter((owed) => now - owed.since <= this.ttlMs);
+    const judged = order.owed[0] ?? order;
+    const superseded = judged !== order;
+    const until = superseded ? (order.owed[1]?.since ?? order.since) : null;
     if (!isErrorEvent(type)) {
-      order.carried += 1;
-      return { failed: false, uncarried: false, latest: false, since: order.since };
+      judged.carried += 1;
+      if (superseded) {
+        order.owed.shift();
+      }
+      return {
+        failed: false,
+        uncarried: false,
+        latest: false,
+        since: judged.since,
+        superseded,
+        until,
+      };
     }
-    order.failed += 1;
+    judged.failed += 1;
     if (describeFailure(type).carried === false) {
-      order.uncarried += 1;
+      judged.uncarried += 1;
     }
-    const failed = order.carried === 0 && order.failed >= (order.expected ?? order.emissions);
+    const failed = judged.carried === 0 && judged.failed >= (judged.expected ?? judged.emissions);
+    if (superseded && failed) {
+      order.owed.shift();
+    }
     return {
       failed,
-      uncarried: failed && order.uncarried >= order.failed,
+      uncarried: failed && judged.uncarried >= judged.failed,
       latest: this.latest.get(order.platformId) === order.uid,
-      since: order.since,
+      since: judged.since,
+      superseded,
+      until,
     };
   }
 
@@ -360,6 +481,11 @@ export class SentOrders {
     this.latest.clear();
     this.actedOn.clear();
   }
+}
+
+/** A note as a key: what it says, whatever the frame wrapped it in. */
+function noteKey(note) {
+  return `${note?.type}:${note?.value}`;
 }
 
 /**

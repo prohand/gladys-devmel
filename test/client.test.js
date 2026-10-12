@@ -633,6 +633,8 @@ test('an order repeated is one order to the box, refused only when every emissio
     uncarried: true,
     latest: true,
     since: order.since,
+    superseded: false,
+    until: null,
   });
 });
 

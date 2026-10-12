@@ -399,7 +399,9 @@ Conséquences visibles :
   pilote avec d'autres) **suit** l'ordre : il n'y a pas réagi, et pour lui la
   trame est un ordre comme un autre. Une fois : les échos suivants de cet ordre,
   et tout écho arrivé après un ordre donné depuis à cet appareil, ne sont pas
-  rejoués — « tout fermer, puis le salon à 50 % » laisse le salon à 50 % ;
+  rejoués — « tout fermer, puis le salon à 50 % » laisse le salon à 50 %. Un
+  écho tardif du Fermer du groupe, entendu après son Stop, est ce Fermer, pas
+  le Stop : « tout fermer, puis tout arrêter » arrête aussi le salon ;
 - quand le boîtier répond qu'il **n'a pas porté l'ordre** — aucune de ses
   émissions, répétitions comprises : une répétition refusée après le départ de
   l'ordre ne change rien —, l'intégration l'écrit dans ses journaux, en nommant
@@ -410,6 +412,10 @@ Conséquences visibles :
   retrouve dans Gladys l'état d'avant (sauf si une télécommande l'a changé
   depuis), et la course d'un volet chronométré est annulée, avec le Stop qu'elle aurait envoyé à l'arrivée —
   envoyé à un volet Somfy immobile, ce Stop est le bouton « my ».
+  Seul l'ordre qui a échoué : un PING « Identifier » refusé ne rééteint pas une
+  prise dont l'allumage est parti, et quand l'Ouvrir d'un court
+  positionnement est refusé après l'envoi de son Stop, c'est cet Ouvrir qui
+  est annulé, pas le Stop.
 
 ### Quand le boîtier dit non
 

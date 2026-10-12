@@ -574,18 +574,27 @@ async function applyOwnEcho(gladys, config, event, echo, { orders, scenes, clien
     hearsChannel(candidate, event.channel),
   )) {
     const own = device.platformId === echo.platformId;
+    const blueprint = findBlueprintByType(device.rtype);
+    if (!blueprint || typeof blueprint.applyReadings !== 'function') {
+      continue;
+    }
     let readings = leftovers;
     if (!own) {
-      // A group order is followed once, and never over an order the device
-      // was given since (see `SentOrders.follows`).
-      const follows = overheard || orders?.follows?.(echo, device.platformId) !== false;
       if (overheard) {
         orders?.pressed?.(device.platformId);
       }
+      // A group order is followed once, and never over an order the device
+      // was given since (see `SentOrders.follows`). Asked only of an echo
+      // that says something: following uses the order up, and the transfer
+      // answer that says nothing (PENDING, SENT) used it up before the box
+      // was heard with the DOWN — the member never followed the group.
+      const follows =
+        overheard ||
+        (all.length > 0 &&
+          orders?.follows?.(echo, device.platformId, event?.thingnotes?.notes) !== false);
       readings = follows ? all : [];
     }
-    const blueprint = findBlueprintByType(device.rtype);
-    if (readings.length === 0 || !blueprint || typeof blueprint.applyReadings !== 'function') {
+    if (readings.length === 0) {
       continue;
     }
     try {
@@ -639,10 +648,22 @@ async function orderNotCarried(gladys, config, event, echo, verdict, { scenes, c
   if (!verdict.uncarried || !verdict.latest) {
     return;
   }
-  client?.rememberTransport(device, DEVICE_TRANSPORTS.UNREACHABLE);
+  // An order the same feature was given another one after (see `owe` in
+  // orders.js) leaves the badge to that newer one, which may have gone out.
+  if (!verdict.superseded) {
+    client?.rememberTransport(device, DEVICE_TRANSPORTS.UNREACHABLE);
+  }
   if (typeof blueprint.notCarried === 'function') {
     try {
-      await blueprint.notCarried(gladys, { device, since: verdict.since });
+      // Which order failed, so the device undoes that one and no other: a
+      // PING of "identify" refused undid the ON carried minutes before it.
+      await blueprint.notCarried(gladys, {
+        device,
+        since: verdict.since,
+        uid: echo.uid,
+        superseded: Boolean(verdict.superseded),
+        until: verdict.until ?? null,
+      });
     } catch (err) {
       logger.error(`Could not publish the states of "${device.name}"`, err);
     }

@@ -115,3 +115,69 @@ test('a voice is ours for a minute, then a remote sharing it is followed again',
   advance(30000);
   assert.ok(orders.match({ type: 3, channel: SHUTTER.channel }));
 });
+
+test('verdicts still owed to the order before are its own, not the next one', () => {
+  // ON, then OFF 0.8 s later, under the same uid: the box answers the ON's
+  // emissions first, and refusing them says nothing about the OFF.
+  const { orders, advance } = registry();
+  const on = orders.remember('0xabc', SHUTTER, { fresh: true, emissions: 2 });
+  const onSince = on.since;
+  advance(800);
+  orders.remember('0xabc', SHUTTER, { fresh: true, emissions: 2 });
+  const order = orders.match(echo('0xabc'));
+
+  assert.equal(orders.settle(order, 0x101).failed, false);
+  const first = orders.settle(order, 0x101);
+  assert.equal(first.failed, true);
+  assert.equal(first.superseded, true);
+  assert.equal(first.since, onSince);
+  assert.equal(first.until, order.since);
+
+  // The OFF's own verdicts come next.
+  assert.equal(orders.settle(order, 0x101).failed, false);
+  const second = orders.settle(order, 0x101);
+  assert.equal(second.failed, true);
+  assert.equal(second.superseded, false);
+  assert.equal(second.since, order.since);
+});
+
+test('an order answered, or replaced long after it went out, is owed nothing', () => {
+  const { orders, advance } = registry();
+  // Its SENT came back: the next refusal is the next order's.
+  const order = orders.remember('0xabc', SHUTTER, { fresh: true, emissions: 1 });
+  orders.settle(order, 1);
+  orders.remember('0xabc', SHUTTER, { fresh: true, emissions: 1 });
+  assert.equal(orders.settle(order, 0x104).superseded, false);
+
+  // An 8 s positioning whose UP was never answered: the refusal of its STOP
+  // is the STOP's, not the UP's.
+  orders.remember('0xdef', SHUTTER, { fresh: true, emissions: 1 });
+  advance(8000);
+  const stop = orders.remember('0xdef', SHUTTER, { fresh: true, emissions: 1 });
+  const verdict = orders.settle(stop, 0x104);
+  assert.equal(verdict.superseded, false);
+  assert.equal(verdict.failed, true);
+
+  // Nor an order the transfer itself answered (`wait: true`).
+  orders.remember('0x123', SHUTTER, { fresh: true, emissions: 1, wait: true });
+  const next = orders.remember('0x123', SHUTTER, { fresh: true, emissions: 1 });
+  assert.equal(orders.settle(next, 0x104).superseded, false);
+});
+
+test('a late echo of a group order is that order, not the one given since', () => {
+  const { orders, advance } = registry();
+  const DOWN = [{ method: 1, type: 0, value: 34 }];
+  const STOP = [{ method: 1, type: 0, value: 17 }];
+  orders.remember('0xabc', SHUTTER, { notes: DOWN, fresh: true });
+  const heardDown = [{ type: 0, value: 34 }];
+  assert.equal(orders.follows(orders.match(echo('0xabc')), 'member', heardDown), true);
+  advance(3000);
+  orders.remember('0xabc', SHUTTER, { notes: STOP, fresh: true });
+
+  // The DOWN heard late is the DOWN, already followed; the STOP is still news.
+  assert.equal(orders.follows(orders.match(echo('0xabc')), 'member', heardDown), false);
+  assert.equal(
+    orders.follows(orders.match(echo('0xabc')), 'member', [{ type: 0, value: 17 }]),
+    true,
+  );
+});

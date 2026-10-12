@@ -199,16 +199,21 @@ export class ShutterTravel {
    * moved set off for its favourite position.
    *
    * Only a movement started at `since` or later (an older one was another
-   * order's, and that one went out), and only one that set off a still
+   * order's, and that one went out) and before `until` (a newer one is the
+   * order given after the refused one), and only one that set off a still
    * shutter: one that turned a moving shutter around leaves it running the
    * way it was, which nothing here can rebuild.
    *
+   * A travel that already arrived too: a short positioning (2 % of a 20 s
+   * shutter) lands before the box refuses the UP that started it, and the
+   * motor that never left 0 % was shown, and timed from, 2 %.
+   *
    * @returns {boolean} whether a movement was taken back
    */
-  revert(device, since) {
+  revert(device, since, until = Infinity) {
     const state = this.states.get(device.platformId);
-    const move = state?.move;
-    if (!move || move.turned || move.startedAt < since) {
+    const move = state?.move ?? state?.landed?.move;
+    if (!move || move.turned || move.startedAt < since || move.startedAt >= until) {
       return false;
     }
     this.cancel(state);

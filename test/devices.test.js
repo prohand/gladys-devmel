@@ -2729,6 +2729,93 @@ test('a group order followed by its member is not replayed by its next echo', as
   );
 });
 
+test('a transfer answer that says nothing does not use up the group order of its member', async (t) => {
+  const { gladys, context, client, clock, send, positionsOf } = setupShutters(t, {
+    'All shutters': { type: 4098, channel: { id: 912, source: 100 } },
+    'Living room': { type: 4098, travel: 20, channel: { id: 912, source: 1 }, remotes: [100] },
+  });
+  const orders = new SentOrders({ now: clock.now });
+  await send('Living room', 'state', 1);
+  rememberLast(orders, context.config, client);
+  await clock.advance(21000);
+
+  await send('All shutters', 'state', -1);
+  const uid = rememberLast(orders, context.config, client, { emissions: 2 });
+  // The service answers the transfer (SENT, no notes), then the box hears
+  // itself with the DOWN: that frame is the one the member follows.
+  const channel = { id: 912, source: 100 };
+  await applyEvents(
+    gladys,
+    context.config,
+    [{ type: 1, channel, thingnotes: { uid, notes: [] } }],
+    new HeardChannels(),
+    orders,
+  );
+  const heard = {
+    type: 3,
+    channel,
+    thingnotes: { notes: [{ type: NOTE_TYPES.STATE, value: STATE_VALUES.DOWN }] },
+  };
+  assert.equal(await applyEvents(gladys, context.config, [heard], new HeardChannels(), orders), 1);
+  await clock.advance(2000);
+
+  assert.deepEqual(positionsOf('Living room'), [100, 95, 90]);
+});
+
+test('a late echo of a group DOWN is not taken for the STOP given since', async (t) => {
+  const { gladys, context, client, clock, send, positionsOf } = setupShutters(t, {
+    'All shutters': { type: 4098, channel: { id: 913, source: 100 } },
+    'Living room': { type: 4098, travel: 20, channel: { id: 913, source: 1 }, remotes: [100] },
+  });
+  const orders = new SentOrders({ now: clock.now });
+  const heard = (value) => ({
+    type: 3,
+    channel: { id: 913, source: 100 },
+    thingnotes: { notes: [{ type: NOTE_TYPES.STATE, value }] },
+  });
+  await send('Living room', 'state', 1);
+  rememberLast(orders, context.config, client);
+  await clock.advance(21000);
+
+  // "Close all", heard; "Stop all" 3 s later; then a repeat of the DOWN heard
+  // late, and the STOP.
+  await send('All shutters', 'state', -1);
+  rememberLast(orders, context.config, client, { emissions: 2 });
+  await clock.advance(500);
+  await applyEvents(
+    gladys,
+    context.config,
+    [heard(STATE_VALUES.DOWN)],
+    new HeardChannels(),
+    orders,
+  );
+  await clock.advance(2500);
+  await send('All shutters', 'state', 0);
+  rememberLast(orders, context.config, client, { emissions: 2 });
+  await clock.advance(300);
+  await applyEvents(
+    gladys,
+    context.config,
+    [heard(STATE_VALUES.DOWN)],
+    new HeardChannels(),
+    orders,
+  );
+  await clock.advance(300);
+  await applyEvents(
+    gladys,
+    context.config,
+    [heard(STATE_VALUES.STOP)],
+    new HeardChannels(),
+    orders,
+  );
+  await clock.advance(30000);
+
+  // Its motor stopped with the group's: so does its travel.
+  const position = shutter.travel.positionOf(deviceNamed(context.config, 'Living room'));
+  assert.equal(position, 85);
+  assert.equal(positionsOf('Living room').at(-1), 85);
+});
+
 test('a timed shutter whose order the box never carried does not move, nor get its STOP', async (t) => {
   const { gladys, config, client, clock, send, positionsOf, statesOf } = setupTimed(t);
   const orders = new SentOrders({ now: clock.now });
@@ -2806,6 +2893,42 @@ test('a timed shutter whose STOP the box refuses after the arrival runs on to it
   assert.equal(statesOf('Timed shutter').at(-1), 1);
 });
 
+test('a short positioning whose UP the box refuses after its STOP is taken back', async (t) => {
+  const { gladys, config, client, clock, send, positionsOf, statesOf } = setupTimed(t);
+  const orders = new SentOrders({ now: clock.now });
+  const device = deviceNamed(config, 'Timed shutter');
+  await send('Timed shutter', 'state', -1);
+  await clock.advance(10000);
+
+  // 2 % of a 20 s opening: the STOP is due 400 ms after the UP, sooner than
+  // the box answers the UP and its repeat.
+  await send('Timed shutter', 'position', 2);
+  const uid = rememberLast(orders, config, client, { emissions: 2 });
+  orders.remember(uid, device);
+  await clock.advance(400);
+  assert.equal(client.noteAt(client.sent.length - 1).value, STATE_VALUES.STOP);
+  rememberLast(orders, config, client, { emissions: 2 });
+
+  // The box was BUSY: it refuses both emissions of the UP, then the STOP.
+  const busy = { type: 0x104, channel: { id: 700, source: 7 }, thingnotes: { uid, notes: [] } };
+  for (let i = 0; i < 3; i += 1) {
+    await applyEvents(
+      gladys,
+      config,
+      [{ ...busy }],
+      new HeardChannels(),
+      orders,
+      new SceneEvents(),
+    );
+  }
+  await clock.advance(30000);
+
+  // The motor never left the bottom: no run to the top, no 2 % either.
+  assert.equal(shutter.travel.positionOf(device), 0);
+  assert.equal(positionsOf('Timed shutter').at(-1), 0);
+  assert.equal(statesOf('Timed shutter').at(-1), -1);
+});
+
 test('a plug or a lamp whose order the box never carried is shown as it was before', async () => {
   const gladys = createFakeGladys();
   const config = normalizeConfig({
@@ -2830,32 +2953,122 @@ test('a plug or a lamp whose order the box never carried is shown as it was befo
       },
     );
   // The service could not reach the box: nothing went out on the air.
-  const notCarried = (name, uid) =>
+  const answer = (name, uid, type) =>
     applyEvents(
       gladys,
       config,
-      [{ type: 0x101, channel: { ...deviceNamed(config, name).channel }, thingnotes: { uid } }],
+      [{ type, channel: { ...deviceNamed(config, name).channel }, thingnotes: { uid } }],
       new HeardChannels(),
       orders,
       new SceneEvents(),
       transports,
     );
+  const notCarried = (name, uid) => answer(name, uid, 0x101);
+  // The order before went out (SENT): the verdict that follows is the new one's.
+  const carried = (name, uid) => answer(name, uid, 1);
 
   await send('Plug', 'on-off', 0);
-  rememberLast(orders, config, client);
+  await carried('Plug', rememberLast(orders, config, client));
   await send('Plug', 'on-off', 1);
   await notCarried('Plug', rememberLast(orders, config, client, { emissions: 1 }));
   assert.deepEqual(gladys.statesOf(`${deviceExternalId(config, 'Plug')}:on-off`), [0, 1, 0]);
   assert.equal(transports.transportOf(deviceNamed(config, 'Plug'))?.transport, 'unreachable');
 
   await send('Lamp', 'brightness', 30);
-  rememberLast(orders, config, client);
+  await carried('Lamp', rememberLast(orders, config, client));
   await send('Lamp', 'brightness', 70);
   await notCarried('Lamp', rememberLast(orders, config, client, { emissions: 1 }));
   assert.deepEqual(gladys.statesOf(`${deviceExternalId(config, 'Lamp')}:brightness`), [30, 70, 30]);
   // And the next On goes back to the brightness the lamp really has.
   await send('Lamp', 'on-off', 1);
   assert.equal(client.noteAt(client.sent.length - 1).value, 30);
+});
+
+test('a plug or a lamp is not switched back when an identify PING fails', async () => {
+  for (const type of [4097, 4100]) {
+    const gladys = createFakeGladys();
+    const config = normalizeConfig({
+      devices: JSON.stringify({ devices: { Dev: { type, channel: { id: 233, source: 2 } } } }),
+    });
+    const client = createFakeClient({ config });
+    let now = 1000;
+    const orders = new SentOrders({ now: () => now });
+    const externalId = deviceExternalId(config, 'Dev');
+    const device = deviceNamed(config, 'Dev');
+    const verdict = (eventType, uid) =>
+      applyEvents(
+        gladys,
+        config,
+        [{ type: eventType, channel: { id: 233, source: 2 }, thingnotes: { uid, notes: [] } }],
+        new HeardChannels(),
+        orders,
+      );
+    await restoreDeviceStates(gladys, config, [
+      {
+        external_id: externalId,
+        features: [
+          { external_id: `${externalId}:on-off`, last_value: 0 },
+          { external_id: `${externalId}:brightness`, last_value: 0 },
+        ],
+      },
+    ]);
+    await findDeviceByExternalId(gladys, config, externalId).blueprint.onSetValue(gladys, {
+      device,
+      feature: featureOf(gladys, config, 'Dev', 'on-off'),
+      value: 1,
+      client,
+    });
+    await verdict(1, rememberLast(orders, config, client, { emissions: 2 }));
+
+    // Two minutes later, the box unreachable: "identify" sends a PING, refused.
+    now += 120000;
+    await identifyDevice(gladys, externalId, { config, client });
+    const ping = rememberLast(orders, config, client, { emissions: 2 });
+    await verdict(0x101, ping);
+    await verdict(0x101, ping);
+
+    // The ON went out minutes ago: the device is still shown on.
+    assert.deepEqual(gladys.statesOf(`${externalId}:on-off`), [1]);
+  }
+});
+
+test('a plug switched ON then OFF, neither carried, is shown as it was before both', async () => {
+  const gladys = createFakeGladys();
+  const config = normalizeConfig({
+    devices: JSON.stringify({ devices: { Plug: { type: 4097, channel: { id: 234, source: 2 } } } }),
+  });
+  const client = createFakeClient({ config });
+  let now = 1000;
+  const orders = new SentOrders({ now: () => now });
+  const externalId = deviceExternalId(config, 'Plug');
+  await restoreDeviceStates(gladys, config, [
+    { external_id: externalId, features: [{ external_id: `${externalId}:on-off`, last_value: 0 }] },
+  ]);
+  const send = async (value) => {
+    await findDeviceByExternalId(gladys, config, externalId).blueprint.onSetValue(gladys, {
+      device: deviceNamed(config, 'Plug'),
+      feature: featureOf(gladys, config, 'Plug', 'on-off'),
+      value,
+      client,
+    });
+    return rememberLast(orders, config, client, { emissions: 2 });
+  };
+  await send(1);
+  now += 800;
+  const uid = await send(0);
+  now += 2000;
+
+  // The ON's two refusals, then the OFF's: nothing reached the air.
+  const refused = { type: 0x101, channel: { id: 234, source: 2 }, thingnotes: { uid, notes: [] } };
+  await applyEvents(
+    gladys,
+    config,
+    [refused, { ...refused }, { ...refused }, { ...refused }],
+    new HeardChannels(),
+    orders,
+  );
+
+  assert.deepEqual(gladys.statesOf(`${externalId}:on-off`), [1, 0]);
 });
 
 test('a plug whose first order after a restart was never carried is shown as Gladys kept it', async () => {

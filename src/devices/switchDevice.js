@@ -55,7 +55,7 @@ export const switchDevice = {
       uid: feature.external_id,
       callbackUrl,
     });
-    shown.sent(device.platformId, { onOff: on ? 1 : 0 });
+    shown.sent(device.platformId, { onOff: on ? 1 : 0 }, feature.external_id);
     await publishState(gladys, feature.external_id, on ? 1 : 0);
   },
 
@@ -79,10 +79,17 @@ export const switchDevice = {
    * The box said, after Gladys was answered and shown the new state, that the
    * last order never reached the air: Gladys is shown the state from before.
    *
+   * An order given before the last one (`superseded`) only changes what
+   * undoing the last one goes back to (see `ShownStates`).
+   *
    * @returns {Promise<boolean>} whether anything was taken back
    */
-  async notCarried(gladys, { device }) {
-    const before = shown.undo(device.platformId);
+  async notCarried(gladys, { device, uid = null, superseded = false }) {
+    if (superseded) {
+      shown.supersededNotCarried(device.platformId, uid);
+      return false;
+    }
+    const before = shown.undo(device.platformId, uid);
     if (!before) {
       return false;
     }

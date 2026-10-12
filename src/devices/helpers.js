@@ -2,6 +2,8 @@
 // Small helpers shared by every device module.
 // -----------------------------------------------------------------------------
 
+import { toThingUid } from '../devmel/client.js';
+
 /**
  * Build the Gladys external ids of a Devmel device. The blueprint key is the
  * "type" part (`switch`, `shutter`…) and the AirSend id/channel the platform
@@ -94,6 +96,8 @@ export class ShownStates {
     this.shown = new Map();
     /** @type {Map<string, object>} the last order of each device */
     this.orders = new Map();
+    /** @type {Map<string, object>} and the one it replaced */
+    this.replaced = new Map();
   }
 
   get(platformId) {
@@ -112,32 +116,72 @@ export class ShownStates {
    * must find nothing to undo rather than undo the order before.
    */
   begin(platformId) {
+    const order = this.orders.get(platformId);
+    if (order) {
+      this.replaced.set(platformId, order);
+    } else {
+      this.replaced.delete(platformId);
+    }
     this.orders.delete(platformId);
   }
 
-  /** The service took the order, and Gladys is about to be shown `after`. */
-  sent(platformId, after) {
-    this.orders.set(platformId, { before: this.shown.get(platformId), after });
+  /**
+   * The service took the order, and Gladys is about to be shown `after`.
+   * `uid` is the one the order was sent under: a verdict names its order by
+   * it, and one on another order of the device (a PING) must undo nothing.
+   */
+  sent(platformId, after, uid = null) {
+    this.orders.set(platformId, {
+      before: this.shown.get(platformId),
+      after,
+      uid: uid === null || uid === undefined ? null : toThingUid(uid),
+    });
     this.shown.set(platformId, after);
   }
 
   /**
    * The box said the last order never went out. Returns the state to show
    * again, or null when there is none: the state before it was never known,
-   * or a remote changed the state since — that one is right.
+   * a remote changed the state since — that one is right —, or the verdict
+   * is another order's (see `sent`).
    */
-  undo(platformId) {
+  undo(platformId, uid = null) {
     const order = this.orders.get(platformId);
+    if (!order || (uid !== null && order.uid !== null && order.uid !== uid)) {
+      return null;
+    }
     this.orders.delete(platformId);
     if (
-      !order ||
       order.before === undefined ||
+      sameState(order.before, order.after) ||
       !sameState(this.shown.get(platformId), order.after)
     ) {
       return null;
     }
     this.shown.set(platformId, order.before);
     return order.before;
+  }
+
+  /**
+   * The order before the last one, on the same feature, never went out: the
+   * last one replaced a state the device was never in. Nothing to show — the
+   * last order is what Gladys shows — but undone in turn, it must go back to
+   * what was there before both: ON then OFF, both refused, ended shown ON.
+   */
+  supersededNotCarried(platformId, uid) {
+    const order = this.orders.get(platformId);
+    const replaced = this.replaced.get(platformId);
+    this.replaced.delete(platformId);
+    if (
+      !order ||
+      !replaced ||
+      order.uid !== uid ||
+      replaced.uid !== uid ||
+      !sameState(order.before, replaced.after)
+    ) {
+      return;
+    }
+    order.before = replaced.before;
   }
 }
 

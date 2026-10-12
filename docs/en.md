@@ -379,7 +379,8 @@ Visible consequences:
   frame is an order like any other. Once: the further echoes of that order, and
   any echo arriving after an order given to that device since, are not
   replayed — "close all, then the living room to 50 %" leaves the living room
-  at 50 %;
+  at 50 %. A late echo of the group's Close, heard after its Stop, is that
+  Close, not the Stop: "close all, then stop all" stops the living room too;
 - when the box answers that it **did not carry the order** — every emission of
   it, repeats included: a repeat refused after the order went out changes
   nothing — the integration writes it in its logs, naming the device and what
@@ -389,6 +390,9 @@ Visible consequences:
   switch or a light is shown again in the state it had before (unless a remote
   changed it since), and a timed shutter's travel is taken back, with the Stop it would have sent at the
   end — sent to a still Somfy shutter, that Stop is the "my" button.
+  Only the order that failed: a refused "Identify" PING does not switch back a
+  plug whose ON went out, and when a short positioning's Open is refused after
+  its Stop was sent, it is that Open which is taken back, not the Stop.
 
 ### When the box says no
 
