@@ -6,6 +6,8 @@ All notable changes to this integration are documented here. The format follows
 
 ## [Unreleased]
 
+## [3.0.0] - 2026-10-12
+
 ### Fixed
 
 #### Shutters and gates
@@ -306,7 +308,8 @@ First public release.
 
 - Compute the position of a shutter from its travel time
 
-[Unreleased]: https://github.com/prohand/gladys-devmel/compare/v2.2.4...HEAD
+[Unreleased]: https://github.com/prohand/gladys-devmel/compare/v3.0.0...HEAD
+[3.0.0]: https://github.com/prohand/gladys-devmel/compare/v2.2.4...v3.0.0
 [2.2.4]: https://github.com/prohand/gladys-devmel/compare/v2.2.3...v2.2.4
 [2.2.3]: https://github.com/prohand/gladys-devmel/compare/v2.2.2...v2.2.3
 [2.2.2]: https://github.com/prohand/gladys-devmel/compare/v2.2.1...v2.2.2
