@@ -5,6 +5,8 @@ import {
   DEFAULT_CONFIG,
   describeSpurl,
   EMBEDDED_SERVICE_URL,
+  GLADYS_POLL_FREQUENCIES_MS,
+  gladysPollFrequency,
   hostFromSpurl,
   normalizeConfig,
   parseDevices,
@@ -424,4 +426,11 @@ test('an entry whose type was left empty is reported, not read as a box', () => 
   assert.deepEqual(devices, []);
   // A type written as text still counts.
   assert.equal(parseDevices(JSON.stringify([{ name: 'Box', type: '0' }]))[0].rtype, 0);
+});
+
+test('the Gladys poll ticks are the core enum, in milliseconds, fastest first', () => {
+  assert.deepEqual(GLADYS_POLL_FREQUENCIES_MS, [1000, 2000, 10000, 15000, 30000, 60000]);
+  assert.equal(gladysPollFrequency(1), 1000);
+  assert.equal(gladysPollFrequency(20), 15000);
+  assert.equal(gladysPollFrequency(600), 60000);
 });
