@@ -229,7 +229,11 @@ export class SentOrders {
         // order of the feature alive.
         replaced: previous ?? null,
       };
-      if (previous) {
+      // Except through an order the service has not received yet: it may
+      // never, and then the one before it is what Gladys shows again. An OFF
+      // refused, then an ON tapped during its retry delay and refused too,
+      // put the dead OFF back in place of the ON before it.
+      if (previous && (previous.handed > 0 || previous.waited)) {
         previous.replaced = null;
       }
       entry.since = since;
@@ -386,8 +390,17 @@ export class SentOrders {
    * the dead order will ever come to carry it.
    */
   withdraw(entry, order) {
-    const previous = order.replaced;
-    if (entry.order !== order || order.handed > 0 || order.waited || !previous) {
+    if (entry.order !== order || order.handed > 0 || order.waited) {
+      return;
+    }
+    // Past every order closed without the service ever receiving it: none of
+    // them is what Gladys shows. One still open may yet be retried, and is
+    // put back to be withdrawn in its turn.
+    let previous = order.replaced;
+    while (previous?.closed && previous.handed === 0 && !previous.waited) {
+      previous = previous.replaced;
+    }
+    if (!previous) {
       return;
     }
     entry.order = previous;

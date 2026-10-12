@@ -659,3 +659,50 @@ test('an order refused before the next one, which the service never received, is
   assert.deepEqual(h.statesOf('on-off'), [1, 0]);
   assert.deepEqual(h.failures, ['NETWORK']);
 });
+
+test('two orders in a row the service never received still leave the refused one before them undone', async (t) => {
+  // The OFF is refused by the service and waits out its retry delay; the ON
+  // tapped meanwhile is refused too. Neither ever reached the box: what Gladys
+  // shows again is the first ON, whose refusal must then undo it — not the
+  // dead OFF put back in its place.
+  isolate(t);
+  const held = [];
+  const sleep = (ms) => (ms >= 600 ? new Promise((resolve) => held.push(resolve)) : null);
+  const h = rig(t, SWITCH.entry, { repeat: 1, sleep });
+  await restoreDeviceStates(h.gladys, h.config, [
+    { external_id: h.ids.device, features: SWITCH.restore(h.ids) },
+  ]);
+  const answered = globalThis.fetch;
+  let down = false;
+  globalThis.fetch = async (url, options) => {
+    if (down) {
+      throw refusedConnection();
+    }
+    return answered(url, options);
+  };
+  await quietly(async () => {
+    await h.send('on-off', 1);
+    down = true;
+    // Settled as soon as they fail: both fail while the retries are let go.
+    const outcome = (sent) =>
+      sent.then(
+        () => 'sent',
+        () => 'refused',
+      );
+    const off = outcome(h.send('on-off', 0));
+    await ticks();
+    const on = outcome(h.send('on-off', 1));
+    await ticks();
+    while (held.length > 0) {
+      held.shift()();
+      await ticks();
+    }
+    assert.deepEqual(await Promise.all([off, on]), ['refused', 'refused']);
+    for (const body of h.handed) {
+      await h.deliver([answerTo(body, 0x101)]);
+    }
+  });
+  assert.equal(h.handed.length, 2);
+  assert.deepEqual(h.statesOf('on-off'), [1, 0]);
+  assert.deepEqual(h.failures, ['NETWORK']);
+});
