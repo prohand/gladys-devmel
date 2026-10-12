@@ -746,7 +746,8 @@ are followed whatever their grade, since an exact address is no noise.
 picked the protocol up **without decoding it**. There is no emitter to name and
 no order to replay, and no setting makes usable what was never decoded. It is
 the signature of a box listening to the **wrong decoder**: put that `pid` in the
-**Listening channel** field so the box listens to that protocol on its own
+**Listening channel** field (the word `generic` for pid 1, which typed as is
+means "deduce") so the box listens to that protocol on its own
 decoder, then run **Test the connection** again. If the frames come back with an
 address, attach it as usual.
 
@@ -1053,7 +1054,7 @@ last emitters heard with what became of them (followed, unknown, dropped…). It
 | Remote attached, nothing moves        | **Test the connection**, _Heard_ line: it says whether the frames carry an order                                 |
 | `unreliable, graded N` in the logs    | A frame graded too low: **Accept unreliable frames**, or move the box closer                                     |
 | `did not carry the order` in the logs | The name that line gives the failure — see [When the box says no](#when-the-box-says-no)                         |
-| A frame with a `pid` and no `addr`    | The protocol is not decoded: put that `pid` in **Listening channel**                                             |
+| A frame with a `pid` and no `addr`    | The protocol is not decoded: put that `pid` (`generic` for 1) in **Listening channel**                           |
 
 The integration logs everything it does: read the integration logs from the
 Gladys UI (or `docker logs` on the host), and tick **Detailed logs (debug)** in

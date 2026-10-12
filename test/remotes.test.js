@@ -468,6 +468,70 @@ test('a remote whose earlier press decoded an order is not told it will not foll
   assert.match(message.fr, /n'est plus écartée pour sa note/);
 });
 
+test('any earlier frame that decoded an order counts, not only the last of each kind', async () => {
+  // Only the last dropped and the last routed frame are kept: a remote at the
+  // edge of range (a dropped UP, then a weaker press decoding nothing), or a
+  // release frame between two presses (routed UP, routed nothing), was told
+  // "will not follow" although its UP press is followed once attached.
+  const config = configOf(
+    JSON.stringify({ devices: [{ name: 'Volet', type: 4098, pid: 25455, addr: 8295 }] }),
+  );
+  const channel = { id: 25455, source: 94311 };
+  const UP = { notes: [{ type: NOTE_TYPES.STATE, value: STATE_VALUES.UP }] };
+  const NOTHING = { notes: [] };
+  const attachAfter = async (frames) => {
+    let now = 1_700_000_000_000;
+    const heard = new HeardChannels({ now: () => now });
+    for (const [reliability, thingnotes] of frames) {
+      await captureLogs(() =>
+        applyEvents(
+          createFakeGladys(),
+          config,
+          [{ type: 3, reliability, timestamp: now, channel, thingnotes }],
+          heard,
+          new SentOrders(),
+        ),
+      ).result;
+      now += 5 * 60_000;
+    }
+    return attachHeardRemote({ config, device: config.devmelDevices[0], heard, now });
+  };
+
+  // (a) Two dropped presses: graded 71 carrying UP, then graded 0 with nothing.
+  const edge = await attachAfter([
+    [71, UP],
+    [0, NOTHING],
+  ]);
+  assert.doesNotMatch(edge.en, /no note the service could decode|will not follow/);
+  assert.doesNotMatch(edge.fr, /aucune note décodable/);
+  assert.match(edge.en, /no longer dropped for its grade/);
+
+  // (b) Routed UP, routed nothing, then a dropped press with nothing.
+  const mixed = await attachAfter([
+    [30, UP],
+    [30, NOTHING],
+    [0, NOTHING],
+  ]);
+  assert.match(mixed.en, /note: level 100 \(up\)/);
+  assert.doesNotMatch(mixed.en, /no note the service could decode|will not follow/);
+  assert.match(mixed.en, /no longer dropped for its grade/);
+
+  // Routed UP, then routed nothing: never dropped, still not "will not follow".
+  const routed = await attachAfter([
+    [30, UP],
+    [30, NOTHING],
+  ]);
+  assert.doesNotMatch(routed.en, /no note the service could decode|will not follow/);
+  assert.doesNotMatch(routed.fr, /aucune note décodable/);
+
+  // A remote that never decoded anything is still told so.
+  const silent = await attachAfter([
+    [30, NOTHING],
+    [0, NOTHING],
+  ]);
+  assert.match(silent.en, /no note the service could decode.*will not follow/);
+});
+
 test('the AirSend box is refused as the device a remote drives', () => {
   const config = configOf(
     JSON.stringify({

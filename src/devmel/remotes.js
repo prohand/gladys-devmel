@@ -219,14 +219,17 @@ export function attachHeardRemote({ config, device, heard, now = Date.now(), tab
   // but a dropped frame that decoded to nothing has nothing for any setting
   // to let through, and pointing at "Accept unreliable frames" (a switch for
   // the whole neighbourhood) was advice that could never help there. Only the
-  // LAST frame was dropped, though: an earlier press of the same remote that
-  // was routed and decoded an order (`readings`) proves the protocol carries
-  // one, and saying "the device state will not follow" would then be false.
-  const carriesNothing = remote.dropped
-    ? Array.isArray(remote.droppedReadings) &&
-      remote.droppedReadings.length === 0 &&
-      !(remote.readings?.length > 0)
-    : remote.claimed === false && remote.understood === false && remote.readings?.length === 0;
+  // LAST frame of each kind is kept, though: an earlier press of the same
+  // remote, routed or dropped, that decoded an order (`decoded`, sticky)
+  // proves the protocol carries one, and saying "the device state will not
+  // follow" would then be false — a remote at the edge of range, or a release
+  // frame between two presses, decodes nothing on its last frame.
+  const decodedOnce = remote.decoded === true || remote.readings?.length > 0;
+  const carriesNothing =
+    !decodedOnce &&
+    (remote.dropped
+      ? Array.isArray(remote.droppedReadings) && remote.droppedReadings.length === 0
+      : remote.claimed === false && remote.understood === false && remote.readings?.length === 0);
   if (remote.dropped && !carriesNothing) {
     en.push(
       `Its frames were dropped before any device (${remote.dropped}), so what they carry is ` +

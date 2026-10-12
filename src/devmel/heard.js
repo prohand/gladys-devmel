@@ -129,6 +129,12 @@ export class HeardChannels {
       // every button of it into the same order" — which is the difference
       // between a remote Gladys can follow and one it can only acknowledge.
       notes: new Set(),
+      // Sticky, like `understood`: some frame of this emitter — routed or
+      // dropped — decoded at least one reading. `readings` and
+      // `droppedReadings` only hold the LAST frame of each kind, and a weak
+      // press or a released button decodes nothing: "Attach a remote" told a
+      // remote whose earlier press carried UP that it "will not follow".
+      decoded: false,
       dropped: null,
     };
     entry.frames += 1;
@@ -146,6 +152,11 @@ export class HeardChannels {
     if (!samePress) {
       entry.dropped = dropped;
       entry.droppedReadings = dropped ? droppedReadings : undefined;
+      // Not for a copy of a press: a low-graded copy must not pass for what
+      // the remote says (see `droppedReadings`).
+      if (dropped && droppedReadings?.length > 0) {
+        entry.decoded = true;
+      }
       // Dropped under the configuration in force: that verdict is current too.
       if (dropped) {
         entry.stale = false;
@@ -170,6 +181,9 @@ export class HeardChannels {
     }
     if (readings !== undefined) {
       entry.readings = readings;
+      if (readings.length > 0) {
+        entry.decoded = true;
+      }
       const said = describeReadings(readings);
       if (said && entry.notes.size < DISTINCT_NOTES) {
         entry.notes.add(said);

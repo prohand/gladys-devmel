@@ -792,7 +792,8 @@ suivies quelle que soit leur note, une adresse exacte n'est pas du bruit.
 protocole **sans le décoder**. Il n'y a ni émetteur à nommer, ni ordre à
 rejouer, et aucun réglage ne rend exploitable ce qui n'a pas été décodé. C'est
 la signature d'un boîtier à l'écoute du **mauvais décodeur** : renseignez ce
-`pid` dans le champ **Canal d'écoute**, pour que le boîtier écoute ce protocole
+`pid` dans le champ **Canal d'écoute** (le mot `générique` pour le pid 1, qui
+tapé tel quel veut dire « déduire »), pour que le boîtier écoute ce protocole
 sur son propre décodeur, puis relancez **Tester la connexion**. Si les trames
 reviennent alors avec une adresse, rattachez-la comme d'habitude.
 
@@ -1117,7 +1118,7 @@ scène. Le réglage **Émetteurs affichés** (0 à 8) règle la longueur de la l
 | Télécommande rattachée, rien ne bouge    | **Tester la connexion**, ligne _Entendu_ : elle dit si les trames portent un ordre                                                   |
 | `unreliable, graded N` (logs)            | Trame notée trop bas : **Accepter les trames peu fiables**, ou rapprochez le boîtier                                                 |
 | `did not carry the order` (logs)         | Le nom que cette ligne donne à l'échec — voir [Quand le boîtier dit non](#quand-le-boîtier-dit-non)                                  |
-| Une trame avec un `pid` et sans `addr`   | Le protocole n'est pas décodé : mettez ce `pid` dans **Canal d'écoute**                                                              |
+| Une trame avec un `pid` et sans `addr`   | Le protocole n'est pas décodé : mettez ce `pid` (`générique` pour 1) dans **Canal d'écoute**                                         |
 
 L'intégration journalise tout ce qu'elle fait : consultez les logs de
 l'intégration depuis l'interface de Gladys (ou `docker logs` sur l'hôte), et
