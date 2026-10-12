@@ -379,6 +379,43 @@ test('the radio widget says "no box" rather than "no route" without a connection
   assert.deepEqual(validateWidgetContent(content), []);
 });
 
+test('the radio widget says "no service" when the string is there and the service is not', () => {
+  // A box carrying its string, the built-in service turned off and no URL
+  // typed: "no box" read as "paste the string", which the user had done.
+  const content = buildRadioWidget({
+    gladys: createFakeGladys(),
+    config: normalizeConfig({
+      use_embedded_service: false,
+      service_url: '',
+      devices: JSON.stringify({ devices: { 'AirSend box': { type: 0, spurl: SPURL } } }),
+    }),
+    listen: { url: null, error: null, plan: { enabled: true, channel: 1 } },
+  });
+  const status = content.components.find((component) => component.type === 'status');
+  const listening = status.items.find((item) => item.label.en === 'Listening');
+
+  assert.equal(listening.value.en, 'no service');
+  assert.equal(listening.value.fr, 'aucun service');
+  assert.deepEqual(validateWidgetContent(content), []);
+});
+
+test('the radio widget does not call a remote dropped, then attached by its address, dropped', async () => {
+  // Graded too low while undeclared, then attached by its address: that waives
+  // the grade, so until its next frame the badge is "press again", not the red
+  // "dropped" that sends the user to accept the whole neighbourhood's frames.
+  const { heard } = setup();
+  heard.record({ id: 300, source: 77 }, { dropped: 'unreliable, graded 71' });
+  heard.forgetVerdicts();
+  const attached = normalizeConfig({
+    spurl: SPURL,
+    devices: DEVICES.replace('"remotes":[42]', '"remotes":[42,77]'),
+  });
+
+  const row = emitterRow(widgetOf({ heard, config: attached }), 'pid 300');
+  assert.equal(row.badge, 'press again');
+  assert.doesNotMatch(row.description, /Accept unreliable/);
+});
+
 test('every scene event carries each filter and variable its trigger declares', async () => {
   // A declared key missing from the data reads as null in a scene, and a filter
   // on it never matches: the trigger would look broken with nothing in the logs.
@@ -461,7 +498,7 @@ test('the radio widget does not call a remote just attached mute before it is pr
   );
 
   // "Attach a remote", pasted and saved: a new configuration.
-  heard.reannounce();
+  heard.forgetVerdicts();
   const attached = normalizeConfig({
     spurl: SPURL,
     devices: DEVICES.replace('"remotes":[42]', '"remotes":[42,77]'),

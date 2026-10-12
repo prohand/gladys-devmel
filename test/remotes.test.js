@@ -3,8 +3,12 @@ import assert from 'node:assert/strict';
 import { normalizeConfig } from '../src/config.js';
 import { HeardChannels } from '../src/devmel/heard.js';
 import { attachHeardRemote, attachRemote, unclaimedEmitters } from '../src/devmel/remotes.js';
-import { READINGS } from '../src/devmel/notes.js';
+import { NOTE_TYPES, READINGS, STATE_VALUES } from '../src/devmel/notes.js';
 import { indexChannels, planListening } from '../src/devmel/listening.js';
+import { applyEvents } from '../src/devices/index.js';
+import { SentOrders } from '../src/devmel/orders.js';
+import { captureLogs } from './helpers/captureLogs.js';
+import { createFakeGladys } from './helpers/fakeGladys.js';
 
 // The line a user actually pastes: the airsend.cloud export, one shutter, one
 // line. Every test below starts from it, because that is what the action has
@@ -380,6 +384,57 @@ test('a remote heard only in dropped frames is not said to carry no order', () =
   assert.match(message.en, /dropped before any device \(unreliable, graded 71\)/);
   assert.match(message.en, /no longer dropped for its grade/);
   assert.match(message.fr, /n'est plus écartée pour sa note/);
+});
+
+test('a remote dropped with nothing to decode is not sent to "Accept unreliable frames"', async () => {
+  // The docs' own example: graded 0, no address, no note the service could
+  // decode. No setting makes usable what was never decoded, and the switch
+  // for the whole neighbourhood was the one hint that could never help. What
+  // the frames carried is remembered now, through the real routing.
+  const config = configOf(
+    JSON.stringify({ devices: [{ name: 'Volet', type: 4098, pid: 14177, addr: 3359265281 }] }),
+  );
+  const heard = new HeardChannels();
+  const route = (event) =>
+    captureLogs(() => applyEvents(createFakeGladys(), config, [event], heard, new SentOrders()))
+      .result;
+  await route({ type: 3, reliability: 0, channel: { id: 14177 }, thingnotes: { notes: [] } });
+
+  const message = attachHeardRemote({ config, device: config.devmelDevices[0], heard });
+  assert.match(message.en, /"remotes":\[\{"pid":14177\}\]/);
+  assert.doesNotMatch(message.en, /Accept unreliable frames/);
+  assert.doesNotMatch(message.fr, /Accepter les trames peu fiables/);
+  assert.match(message.en, /no note the service could decode.*will not follow/);
+  assert.match(message.fr, /aucune note décodable/);
+
+  // A frame dropped for its grade that does carry an order keeps the advice
+  // that it will be followed once attached by its address.
+  const shutter = configOf(EXPORT);
+  const edge = new HeardChannels();
+  await captureLogs(() =>
+    applyEvents(
+      createFakeGladys(),
+      shutter,
+      [
+        {
+          type: 3,
+          reliability: 71,
+          channel: { id: 25455, source: 94311 },
+          thingnotes: { notes: [{ type: NOTE_TYPES.STATE, value: STATE_VALUES.UP }] },
+        },
+      ],
+      edge,
+      new SentOrders(),
+    ),
+  ).result;
+  const kept = attachHeardRemote({
+    config: shutter,
+    device: shutter.devmelDevices[0],
+    heard: edge,
+  });
+  assert.match(kept.en, /dropped before any device \(unreliable, graded 71\)/);
+  assert.match(kept.en, /no longer dropped for its grade/);
+  assert.doesNotMatch(kept.en, /will not follow/);
 });
 
 test('the AirSend box is refused as the device a remote drives', () => {

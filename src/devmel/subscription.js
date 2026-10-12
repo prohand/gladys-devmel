@@ -15,8 +15,8 @@
 // -----------------------------------------------------------------------------
 
 import { createLogger } from '../logging.js';
-import { boxDevices } from './connection.js';
-import { planListening } from './listening.js';
+import { boxDevices, noBoxFix } from './connection.js';
+import { channelToType, planListening } from './listening.js';
 
 const logger = createLogger();
 
@@ -46,9 +46,10 @@ export async function armListening({ config, table, callbackUrl, client }) {
   }
   const boxes = boxDevices(config);
   if (boxes.length === 0) {
-    // Nothing to bind through: without a connection string there is no box to
-    // ask, and a renewal timer would bind nothing every ten minutes.
-    logger.info('No AirSend box to listen through: paste the sp:// connection string first');
+    // Nothing to bind through: without a connection string, or without a
+    // service to carry it, there is no box to ask, and a renewal timer would
+    // bind nothing every ten minutes.
+    logger.info(`No AirSend box to listen through: ${noBoxFix(config).en}`);
     return outcome;
   }
   if (plan.fallback) {
@@ -158,8 +159,8 @@ export function rearmedChannel(outcome, config) {
   }
   if (boxDevices(config).length === 0) {
     // Said as what it is: "no route" sent the user after a relay that was
-    // working, when what is missing is the connection string.
-    throw new Error('No AirSend box to listen through: paste the sp:// connection string first');
+    // working, when what is missing is the connection string — or the service.
+    throw new Error(`No AirSend box to listen through: ${noBoxFix(config).en}`);
   }
   if (outcome.error) {
     throw new Error(`The box refused the subscription: ${outcome.error}`);
@@ -193,7 +194,7 @@ function announceBlindSpots(plan, url) {
     logger.warn(
       `The remote declared on "${device.name}" (pid ${remote.id}) speaks another protocol than ` +
         `the ${plan.channel} the box listens to: pressing it will do nothing in Gladys. Fill in ` +
-        `${remote.id} as the listening channel to hear it instead.`,
+        `${channelToType(remote.id)} as the listening channel to hear it instead.`,
     );
   }
   if (plan.echoOnly) {

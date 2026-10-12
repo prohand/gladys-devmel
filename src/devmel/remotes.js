@@ -13,16 +13,10 @@
 // fields, plus the remote — and the user pastes it back.
 // -----------------------------------------------------------------------------
 
-import {
-  DEVICE_TYPES,
-  GENERIC_433_CHANNEL,
-  channelOfEntry,
-  parseDeviceEntries,
-  parseDevices,
-} from '../config.js';
+import { DEVICE_TYPES, channelOfEntry, parseDeviceEntries, parseDevices } from '../config.js';
 import { isSameChannel } from './notes.js';
 import { describeEmitter } from './heard.js';
-import { channelName, decoderOf, planListening } from './listening.js';
+import { channelName, channelToType, decoderOf, planListening } from './listening.js';
 import { hearsChannel } from '../devices/index.js';
 
 /**
@@ -206,24 +200,29 @@ export function attachHeardRemote({ config, device, heard, now = Date.now(), tab
       `The box decoded no address for it, only protocol ${remote.id}: that line makes ` +
         `"${device.name}" follow EVERY frame of that protocol the box cannot attribute, a ` +
         "neighbour's remote included. It is the last resort — first set the listening channel " +
-        `to ${toType(remote.id, 'en')}, which is how the box is told to decode that protocol ` +
-        'properly.',
+        `to ${channelToType(remote.id, 'en')}, which is how the box is told to decode that ` +
+        'protocol properly.',
     );
     fr.push(
       `Le boîtier n'en a décodé aucune adresse, seulement le protocole ${remote.id} : cette ligne ` +
         `fait suivre à « ${device.name} » TOUTES les trames de ce protocole que le boîtier ` +
         "n'attribue à personne, celles d'un voisin comprises. C'est le dernier recours : " +
-        `renseignez d'abord ${toType(remote.id, 'fr')} comme canal d'écoute, c'est ainsi qu'on ` +
-        'demande au boîtier de décoder ce protocole correctement.',
+        `renseignez d'abord ${channelToType(remote.id, 'fr')} comme canal d'écoute, c'est ainsi ` +
+        "qu'on demande au boîtier de décoder ce protocole correctement.",
     );
   }
 
-  if (remote.dropped) {
-    // Thrown away before anything read its notes (heard.js records a dropped
-    // frame without its readings): "no decodable note" would be a guess, and a
-    // wrong one for a remote graded at the edge of the window — its frames do
-    // carry an order, and once attached by its address they are no longer
-    // dropped for their grade (see `isDeclaredRemote`).
+  // What its frames carry. A dropped frame was thrown away before any device
+  // read it, so its notes are kept apart (`droppedReadings`): a remote graded
+  // at the edge of the window does carry an order, and once attached by its
+  // address it is no longer dropped for its grade (see `isDeclaredRemote`) —
+  // but a dropped frame that decoded to nothing has nothing for any setting
+  // to let through, and pointing at "Accept unreliable frames" (a switch for
+  // the whole neighbourhood) was advice that could never help there.
+  const carriesNothing = remote.dropped
+    ? Array.isArray(remote.droppedReadings) && remote.droppedReadings.length === 0
+    : remote.claimed === false && remote.understood === false && remote.readings?.length === 0;
+  if (remote.dropped && !carriesNothing) {
     en.push(
       `Its frames were dropped before any device (${remote.dropped}), so what they carry is ` +
         'not known here: the "Ignored a radio frame" log line says it. ' +
@@ -241,11 +240,7 @@ export function attachHeardRemote({ config, device, heard, now = Date.now(), tab
           : 'Une ligne sans adresse ne lève pas cette exigence : « Accepter les trames peu ' +
             'fiables » les laisse passer.'),
     );
-  } else if (
-    remote.claimed === false &&
-    remote.understood === false &&
-    remote.readings?.length === 0
-  ) {
+  } else if (carriesNothing) {
     en.push(
       'Its frames carry no note the service could decode: attaching it makes the emitter known, ' +
         'but a partially decoded protocol carries no order to replay, so the device state will ' +
@@ -348,10 +343,11 @@ function describeListeningAfter(config, line, remote, table) {
     return {
       en:
         'Listening is turned off (Listening channel set to 0): the box will not hear this ' +
-        `remote. Put ${toType(wanted, 'en')} in that field, or empty it, to hear it.`,
+        `remote. Put ${channelToType(wanted, 'en')} in that field, or empty it, to hear it.`,
       fr:
         "L'écoute est désactivée (Canal d'écoute à 0) : le boîtier n'entendra pas cette " +
-        `télécommande. Mettez ${toType(wanted, 'fr')} dans ce champ, ou videz-le, pour l'entendre.`,
+        `télécommande. Mettez ${channelToType(wanted, 'fr')} dans ce champ, ou videz-le, pour ` +
+        "l'entendre.",
     };
   }
   const listened = named(after.channel, table);
@@ -368,25 +364,13 @@ function describeListeningAfter(config, line, remote, table) {
     en:
       `Warning: once saved, the box listens to ${listened} (${why.en}), not to ` +
       `${named(wanted, table)} of this remote: it will not be heard. The box listens to one ` +
-      `protocol at a time — put ${toType(wanted, 'en')} in the Listening channel field.`,
+      `protocol at a time — put ${channelToType(wanted, 'en')} in the Listening channel field.`,
     fr:
       `Attention : une fois enregistré, le boîtier écoute le ${listened} (${why.fr}), pas le ` +
       `${named(wanted, table)} de cette télécommande : elle ne sera pas entendue. Le boîtier ` +
-      `n'écoute qu'un protocole à la fois — mettez ${toType(wanted, 'fr')} dans le champ Canal ` +
-      "d'écoute.",
+      `n'écoute qu'un protocole à la fois — mettez ${channelToType(wanted, 'fr')} dans le champ ` +
+      "Canal d'écoute.",
   };
-}
-
-/**
- * What to type in the Listening channel field to listen to a channel: its pid,
- * except for the generic 433 MHz decoder — `1` there has always meant "deduce"
- * (see `toListenChannel`), so advising it changed nothing.
- */
-function toType(channel, language) {
-  if (Number(channel) === GENERIC_433_CHANNEL) {
-    return language === 'fr' ? '« générique »' : '"generic"';
-  }
-  return String(channel);
 }
 
 /** `pid 14177 "X2D868"`, or the bare pid when the service did not name it. */

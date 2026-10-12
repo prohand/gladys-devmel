@@ -9,7 +9,7 @@
 // -----------------------------------------------------------------------------
 
 import { describeSpurl, DEVICE_TYPES, hostFromSpurl, otherSpurls } from '../config.js';
-import { planListening } from './listening.js';
+import { channelToType, planListening } from './listening.js';
 import { describeEmitter } from './heard.js';
 import { hearsChannel } from '../devices/index.js';
 import { ordersOf } from '../capabilities/scenes.js';
@@ -54,6 +54,34 @@ export function boxDevices(config) {
       spurl: config.spurl,
     },
   ];
+}
+
+/**
+ * What to do when `boxDevices` comes back empty, as the user can act on it.
+ *
+ * Two different things are missing behind the same empty list: the connection
+ * string, or the AirSend service that would carry it (the built-in one turned
+ * off and no URL typed). Asking for the string when it IS pasted sent the user
+ * after the wrong field, where the bind itself used to name the service.
+ *
+ * @param {object} config normalized configuration
+ * @returns {{ en: string, fr: string }}
+ */
+export function noBoxFix(config) {
+  if (!config.effectiveServiceUrl) {
+    return {
+      en:
+        'no AirSend Web Service to reach it (the built-in one is turned off and no service URL ' +
+        'is filled in)',
+      fr:
+        'aucun service AirSend pour le joindre (le service intégré est désactivé et aucune URL ' +
+        "de service n'est renseignée)",
+    };
+  }
+  return {
+    en: 'paste the sp:// connection string first',
+    fr: "collez d'abord la chaîne de connexion sp://",
+  };
 }
 
 /** Is this declared box the one behind the global connection string? */
@@ -253,12 +281,13 @@ function describeListening(config, listen, language) {
       : `${channel}, frames pushed to ${listen.url}.${coverage}`;
   }
   // No box to bind through: the route is not what is missing, the connection
-  // string is — and sending the user after Gladys Plus would be the wrong half.
+  // string (or the service) is — and sending the user after Gladys Plus would
+  // be the wrong half.
   if (boxDevices(config).length === 0) {
+    const fix = noBoxFix(config);
     return language === 'fr'
-      ? `${channel} : aucun boîtier à qui demander l'écoute — collez d'abord la chaîne de ` +
-          'connexion sp://.'
-      : `${channel}: no AirSend box to listen through — paste the sp:// connection string first.`;
+      ? `${channel} : aucun boîtier à qui demander l'écoute — ${fix.fr}.`
+      : `${channel}: no AirSend box to listen through — ${fix.en}.`;
   }
   // No route at all. With the bundled service that never happens (the loopback
   // callback is always there); with a service of the user's own it does, and
@@ -372,11 +401,17 @@ function describeUnheardRemotes(plan, language) {
     .map(({ device, remote }) => `${device.name} (${describeRemote(remote)})`)
     .join(', ');
   const more = unheard.length > 5 ? ` (+${unheard.length - 5})` : '';
+  // The value to type, spelled out: "their pid" is 1 for a remote of the
+  // generic decoder, and the field reads 1 as "deduce".
+  const typed = (lang) =>
+    [...new Set(unheard.map(({ remote }) => channelToType(remote.id, lang)))].join(
+      lang === 'fr' ? ' ou ' : ' or ',
+    );
   return language === 'fr'
     ? ` Télécommandes déclarées sur un autre protocole, donc jamais entendues : ${listed}${more}. ` +
-        "Renseignez leur pid dans le canal d'écoute pour écouter le leur à la place."
-    : ` Remotes declared on another protocol, so never heard: ${listed}${more}. Fill in their ` +
-        'pid as the listening channel to listen to theirs instead.';
+        `Renseignez ${typed('fr')} dans le canal d'écoute pour écouter le leur à la place.`
+    : ` Remotes declared on another protocol, so never heard: ${listed}${more}. Fill in ` +
+        `${typed('en')} as the listening channel to listen to theirs instead.`;
 }
 
 /**
@@ -555,9 +590,25 @@ export function describeFate(config, entry, language) {
   if ((entry.source === null || entry.source === undefined) && claimants.length === 0) {
     return language === 'fr'
       ? `le boîtier n'a pas décodé ce protocole (aucune adresse)${dropped(entry, language)} : ` +
-          `renseignez ${entry.id} comme canal d'écoute pour qu'il l'écoute sur son propre décodeur`
+          `renseignez ${channelToType(entry.id, 'fr')} comme canal d'écoute pour qu'il l'écoute ` +
+          'sur son propre décodeur'
       : `the box did not decode this protocol (no address)${dropped(entry, language)}: set the ` +
-          `listening channel to ${entry.id} so it listens on that protocol's own decoder`;
+          `listening channel to ${channelToType(entry.id, 'en')} so it listens on that ` +
+          "protocol's own decoder";
+  }
+  // What its frames did was established under the previous configuration (see
+  // HeardChannels.forgetVerdicts): a remote heard before it was attached was
+  // routed to nobody, and reading that as "carries no order" told the user
+  // who had just attached it that it could not work. A drop too: attached by
+  // its address, a remote is no longer dropped for its grade, and advising
+  // "Accept unreliable frames" contradicted the attach answer just followed.
+  if (entry.stale && claimants.length > 0) {
+    const claimed = names(claimants);
+    return language === 'fr'
+      ? `déclaré sur ${claimed}, pas entendu depuis le changement de configuration : ` +
+          "appuyez dessus pour voir s'il est suivi"
+      : `declared on ${claimed}, not heard since the configuration changed: press it to see ` +
+          'whether it is followed';
   }
   // Dropped on the way in: no device ever saw it, so nothing below applies.
   // Worth naming — an emitter the box hears loud and clear and grades badly is
@@ -575,17 +626,6 @@ export function describeFate(config, entry, language) {
       : 'no device declares it: "Attach a remote" writes the line for you';
   }
   const claimed = names(claimants);
-  // What its frames did was established under the previous configuration (see
-  // HeardChannels.reannounce): a remote heard before it was attached was
-  // routed to nobody, and reading that as "carries no order" told the user
-  // who had just attached it that it could not work.
-  if (entry.stale) {
-    return language === 'fr'
-      ? `déclaré sur ${claimed}, pas entendu depuis le changement de configuration : ` +
-          "appuyez dessus pour voir s'il est suivi"
-      : `declared on ${claimed}, not heard since the configuration changed: press it to see ` +
-          'whether it is followed';
-  }
   if (entry.understood) {
     return language === 'fr'
       ? `suivi par ${claimed}${describeOneNote(entry, claimants, language)}`

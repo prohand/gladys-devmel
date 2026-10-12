@@ -94,8 +94,16 @@ export class HeardChannels {
    * @param {string} [details.dropped] why the frame went no further, when it
    *   was dropped on the way: an emitter heard and thrown away is still an
    *   emitter heard, and hiding it is what makes a noisy install look silent
+   * @param {Array<object>} [details.droppedReadings] what a dropped frame's
+   *   notes decoded to — kept apart from `readings`, which only routed frames
+   *   write: "Attach a remote" needs to know whether the frames it cannot see
+   *   carried anything at all, and a low-graded copy must not pass for what
+   *   the remote says
    */
-  record(channel, { readings, claimed, understood = false, timestamp, dropped = null } = {}) {
+  record(
+    channel,
+    { readings, claimed, understood = false, timestamp, dropped = null, droppedReadings } = {},
+  ) {
     const id = Number(channel?.id);
     if (!Number.isFinite(id)) {
       return null;
@@ -137,6 +145,11 @@ export class HeardChannels {
       arrived - known.usableAt < PRESS_WINDOW_MS;
     if (!samePress) {
       entry.dropped = dropped;
+      entry.droppedReadings = dropped ? droppedReadings : undefined;
+      // Dropped under the configuration in force: that verdict is current too.
+      if (dropped) {
+        entry.stale = false;
+      }
     }
     // Told to the caller too, for the same reason: its log line must not give
     // that advice either (see `applyEvents`).
@@ -219,12 +232,22 @@ export class HeardChannels {
    */
   reannounce() {
     this.generation += 1;
-    // And forget what the frames did under the previous configuration: who
-    // claimed them and whether a device acted on them were answers about
-    // devices that may no longer be declared that way. A remote heard before
-    // it was attached was routed to nobody, so "understood" stayed false, and
-    // every screen called the remote just attached mute until it was pressed
-    // again. Until its next frame, an emitter is "not heard since the change".
+  }
+
+  /**
+   * Forget what the frames did under the previous configuration: who claimed
+   * them and whether a device acted on them were answers about devices that
+   * may no longer be declared that way. A remote heard before it was attached
+   * was routed to nobody, so "understood" stayed false, and every screen called
+   * the remote just attached mute until it was pressed again. Until its next
+   * frame, an emitter is "not heard since the change".
+   *
+   * Only for a configuration that did change: run on every reconnection to
+   * Gladys too (a Gladys restart, a network blip), it called every remote
+   * being followed "not heard since the configuration changed" when nothing
+   * had.
+   */
+  forgetVerdicts() {
     for (const entry of this.entries.values()) {
       entry.stale = true;
       entry.understood = false;

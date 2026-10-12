@@ -9,6 +9,11 @@ import { boxDevices, describeConnection, testConnection } from '../src/devmel/co
 import { indexChannels, planListening } from '../src/devmel/listening.js';
 import { normalizeConfig } from '../src/config.js';
 import { HeardChannels } from '../src/devmel/heard.js';
+import { applyEvents } from '../src/devices/index.js';
+import { SentOrders } from '../src/devmel/orders.js';
+import { NOTE_TYPES, STATE_VALUES } from '../src/devmel/notes.js';
+import { captureLogs } from './helpers/captureLogs.js';
+import { createFakeGladys } from './helpers/fakeGladys.js';
 
 const SPURL = 'sp://pass@[fe80::1]?gw=0&rhost=192.168.1.50';
 
@@ -256,15 +261,31 @@ test('test_connection tells an attached remote that moves nothing from one that 
 });
 
 test('test_connection does not blame partial decoding for an order the device ignores', async () => {
-  // A TOGGLE is fully decoded: a shutter that does nothing with it has the
+  // A TOGGLE is fully decoded: a switch that does nothing with it has the
   // wrong type or the wrong remote attached, and the protocol is not at fault.
-  const config = normalizeConfig({ spurl: SPURL, devices: DEVICES_WITH_REMOTE });
+  // Through the real routing: a shutter DOES act on a TOGGLE (it goes the
+  // other way), so a hand-made "claimed, not understood" shutter tested a
+  // state real traffic never produces.
+  const config = normalizeConfig({
+    spurl: SPURL,
+    devices:
+      '{"devices":[{"name":"Prise salon","type":4097,"pid":25455,"addr":8295,' +
+      '"remotes":[{"pid":14177,"addr":3359265281}]}]}',
+  });
   const heard = new HeardChannels();
-  heard.record(WALL_REMOTE, { readings: [{ kind: 'toggle', value: 'TOGGLE' }], claimed: true });
+  const toggle = {
+    type: 3,
+    channel: WALL_REMOTE,
+    thingnotes: { notes: [{ type: NOTE_TYPES.STATE, value: STATE_VALUES.TOGGLE }] },
+  };
+  const routed = captureLogs(() =>
+    applyEvents(createFakeGladys(), config, [toggle], heard, new SentOrders(), null),
+  );
+  assert.equal(await routed.result, 0);
 
   const report = await testConnection(fakeClient(), config, RUNNING, null, heard);
 
-  assert.match(report.en, /declared on Baie vitree, which does nothing with the order decoded/);
+  assert.match(report.en, /declared on Prise salon, which does nothing with the order decoded/);
   assert.match(report.en, /Button, type 4096/);
   assert.doesNotMatch(report.en, /partially decodes/);
   assert.match(report.fr, /qui ne fait rien de l'ordre décodé/);
@@ -619,11 +640,106 @@ test('test_connection does not judge a remote just attached on frames heard befo
     readings: [{ kind: 'level', value: 100, command: 'up' }],
     claimed: false,
   });
-  heard.reannounce();
+  heard.forgetVerdicts();
   const config = normalizeConfig({ spurl: SPURL, devices: DEVICES_WITH_REMOTE });
 
   const report = await testConnection(fakeClient(), config, RUNNING, null, heard);
   assert.match(report.en, /declared on Baie vitree, not heard since the configuration changed/);
   assert.doesNotMatch(report.en, /no order to replay|does nothing with the order/);
   assert.match(report.fr, /pas entendu depuis le changement de configuration/);
+});
+
+test('test_connection asks for "generic", never 1, to hear the generic 433 MHz decoder', async () => {
+  // The Listening channel field reads 1 as "deduce": a remote declared on pid
+  // 1, or an emitter heard on it without an address, was answered "fill in 1",
+  // which left the box on the protocol it was already listening to.
+  const table = indexChannels([
+    { id: 1, name: 'Generic 433MHz', getDecoder: 1 },
+    { id: 25455, name: 'Somfy RTS', getDecoder: 25455 },
+  ]);
+  const config = normalizeConfig({
+    spurl: SPURL,
+    devices: JSON.stringify({
+      devices: [
+        { name: 'V1', type: 4098, pid: 25455, addr: 1, remotes: [{ pid: 25455, addr: 11 }] },
+        { name: 'V2', type: 4098, pid: 25455, addr: 2, remotes: [{ pid: 25455, addr: 12 }] },
+        { name: 'Lampe', type: 4097, pid: 25455, addr: 5, remotes: [{ pid: 1, addr: 4242 }] },
+      ],
+    }),
+  });
+  const plan = planListening(config, table);
+  assert.equal(plan.channel, 25455);
+  const heard = new HeardChannels();
+  heard.record({ id: 1 }, { readings: [], claimed: false });
+
+  const report = await testConnection(
+    fakeClient(),
+    config,
+    RUNNING,
+    { plan, url: 'http://127.0.0.1:33864/', error: null },
+    heard,
+    table,
+  );
+
+  assert.match(report.en, /never heard: Lampe \(pid 1, addr 4242\)\. Fill in "generic" as the/);
+  assert.match(report.fr, /Renseignez « générique » dans le canal d'écoute/);
+  assert.match(report.en, /set the listening channel to "generic" so it listens/);
+  assert.match(report.fr, /renseignez « générique » comme canal d'écoute/);
+  assert.doesNotMatch(report.en, /Fill in their pid|listening channel to 1 /);
+});
+
+test('a box with its string but no AirSend service: the Listening line names the service', async () => {
+  // Built-in service off, no URL typed: the string is there, the service is
+  // not, and "paste the sp:// connection string" sent the user after a field
+  // they had already filled in.
+  const config = normalizeConfig({
+    use_embedded_service: false,
+    service_url: '',
+    devices: JSON.stringify({
+      devices: { 'AirSend box': { type: 0, spurl: SPURL }, ...JSON.parse(DEVICES) },
+    }),
+  });
+  assert.deepEqual(boxDevices(config), []);
+
+  const report = await testConnection(fakeClient(), config, RUNNING, { url: null, error: null });
+  assert.match(report.en, /no AirSend box to listen through — no AirSend Web Service to reach it/);
+  assert.match(report.fr, /aucun boîtier à qui demander l'écoute — aucun service AirSend/);
+  assert.doesNotMatch(report.en, /paste the sp:\/\/ connection string first/);
+});
+
+test('a remote dropped for its grade, then attached by its address, is not told to accept unreliable frames', async () => {
+  // "Attach a remote" says a remote attached by its address is no longer
+  // dropped for its grade: until its next frame, the report must not advise
+  // the very switch that answer called unnecessary.
+  const heard = new HeardChannels();
+  heard.record(WALL_REMOTE, { dropped: 'unreliable, graded 71' });
+  heard.forgetVerdicts();
+  const config = normalizeConfig({ spurl: SPURL, devices: DEVICES_WITH_REMOTE });
+
+  const report = await testConnection(fakeClient(), config, RUNNING, null, heard);
+  assert.match(report.en, /declared on Baie vitree, not heard since the configuration changed/);
+  assert.doesNotMatch(report.en, /Accept unreliable/);
+
+  // A frame dropped under the new configuration is a current verdict again.
+  heard.record(WALL_REMOTE, { dropped: 'unreliable, graded 71' });
+  const again = await testConnection(fakeClient(), config, RUNNING, null, heard);
+  assert.match(again.en, /dropped before any device \(unreliable, graded 71\)/);
+});
+
+test('a reconnection to Gladys keeps the verdicts: only a configuration change forgets them', async () => {
+  // Every reconnection re-runs the initialization with the same configuration,
+  // and the once-only log lines are said again (reannounce) — but a remote
+  // being followed did not become "not heard since the configuration changed".
+  const config = normalizeConfig({ spurl: SPURL, devices: DEVICES_WITH_REMOTE });
+  const heard = new HeardChannels();
+  heard.record(WALL_REMOTE, {
+    readings: [{ kind: 'level', value: 100, command: 'up' }],
+    claimed: true,
+    understood: true,
+  });
+
+  heard.reannounce();
+  const report = await testConnection(fakeClient(), config, RUNNING, null, heard);
+  assert.match(report.en, /followed by Baie vitree/);
+  assert.doesNotMatch(report.en, /not heard since the configuration changed/);
 });

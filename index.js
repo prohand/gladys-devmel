@@ -82,6 +82,11 @@ const callbackServer = new CallbackServer();
 // Current configuration (hot-reloaded via onConfigUpdated).
 let config = normalizeConfig();
 
+// The raw configuration it was built from, as `configKey` spells it: what
+// tells a configuration that changed from the same one read again after a
+// reconnection.
+let appliedConfigKey = null;
+
 // Public URL of the `events` webhook, relayed by Gladys Plus. It is the only
 // way in for frames when the AirSend Web Service runs on ANOTHER machine, which
 // cannot reach our loopback.
@@ -398,6 +403,16 @@ async function initializeOrReport(readConfig, what) {
 }
 
 /**
+ * A raw configuration as one comparable string, whatever order Gladys lists
+ * its keys in (the save and the read-back after a reconnection come by two
+ * different routes).
+ */
+function configKey(rawConfig) {
+  const entries = Object.entries(rawConfig ?? {}).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
+  return JSON.stringify(entries);
+}
+
+/**
  * Apply a configuration and (re)build everything that depends on it: the
  * devices, their transport badge, the radio listener and the status shown in
  * the Configuration screen.
@@ -415,6 +430,15 @@ async function initialize(rawConfig) {
   // already had their say about. Re-arm those once-only lines: the next press
   // of the remote is the one the user is watching for.
   heardChannels.reannounce();
+  // And forget what the frames did under the previous configuration — only
+  // when there was one: this also runs on every reconnection to Gladys, with
+  // the very same configuration, and every remote being followed then read
+  // "not heard since the configuration changed".
+  const key = configKey(rawConfig);
+  if (key !== appliedConfigKey) {
+    heardChannels.forgetVerdicts();
+    appliedConfigKey = key;
+  }
   // The protocol table belongs to the service the configuration points at.
   channelTable = new Map();
 

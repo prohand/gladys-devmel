@@ -146,7 +146,8 @@ test('each re-arm answers from its own attempt, not from the one queued behind i
   });
   const shared = { url: null, error: null, plan: null };
 
-  // What index.js does for every request.
+  // What index.js does for every request (index.js's own path, against a
+  // fake service, is test/index.test.js).
   async function start() {
     let outcome = null;
     await loop.start(async () => {
@@ -215,4 +216,48 @@ test('a box declared before the connection string is pasted is not listened thro
   assert.ok(of('INFO').some((line) => /paste the sp:\/\/ connection string/.test(line)));
   assert.equal(of('WARN').length, 0);
   assert.throws(() => rearmedChannel(outcome, config), /paste the sp:\/\/ connection string/);
+});
+
+test('a remote of the generic 433 MHz decoder is asked for as "generic", not as 1', async () => {
+  // Attach a remote heard on pid 1 to a switch of a Somfy house: the box stays
+  // on 25455, and the field reads a typed 1 as "deduce" — advising it left the
+  // remote unheard however often the user followed the advice.
+  const config = configWith([
+    { ...SHUTTER, remotes: [{ pid: 25455, addr: 11 }] },
+    { name: 'Volet cuisine', type: 4098, pid: 25455, addr: 2, remotes: [{ pid: 25455, addr: 12 }] },
+    { name: 'Lampe', type: 4097, pid: 25455, addr: 5, remotes: [{ pid: 1, addr: 4242 }] },
+  ]);
+  const { result: outcome, of } = await quietly(() =>
+    armListening({ config, table: TABLE, callbackUrl: CALLBACK, client: fakeBinder() }),
+  );
+
+  assert.equal(outcome.plan.channel, 25455);
+  const warning = of('WARN').find((line) => line.includes('"Lampe" (pid 1)'));
+  assert.match(warning, /Fill in "generic" as the listening channel/);
+  assert.doesNotMatch(warning, /Fill in 1 /);
+});
+
+test('a box with its string but no AirSend service asks for the service, not the string', async () => {
+  // The built-in service turned off and no URL typed: the string IS pasted,
+  // and asking for it again sent the user after the wrong field.
+  const config = normalizeConfig({
+    use_embedded_service: false,
+    service_url: '',
+    devices: JSON.stringify({
+      devices: {
+        'AirSend box': { type: 0, spurl: 'sp://abc123def456@192.168.1.20' },
+        Volet: SHUTTER,
+      },
+    }),
+  });
+  const client = fakeBinder();
+  const { result: outcome, of } = await quietly(() =>
+    armListening({ config, table: TABLE, callbackUrl: CALLBACK, client }),
+  );
+
+  assert.deepEqual(client.binds, []);
+  assert.equal(outcome.renewable, false);
+  assert.ok(of('INFO').some((line) => /no AirSend Web Service to reach it/.test(line)));
+  assert.ok(of('INFO').every((line) => !/paste the sp:\/\//.test(line)));
+  assert.throws(() => rearmedChannel(outcome, config), /no AirSend Web Service to reach it/);
 });

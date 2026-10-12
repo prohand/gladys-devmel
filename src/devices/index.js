@@ -306,18 +306,21 @@ export async function applyEvents(
     const unusable = whyUnusable(event, config);
     registry.received({ dropped: unusable });
     if (unusable) {
+      // What it carried: it is the whole difference between a frame worth
+      // rescuing (it decodes to an order, and "Accept unreliable frames" will
+      // let it through) and one that carries nothing to rescue — said in the
+      // line below, and remembered for "Attach a remote", which says it too.
+      const droppedReadings = decodeNotes(event?.thingnotes?.notes);
       // Remembered all the same when the box named the emitter: a frame graded
       // too low is an emitter heard, and leaving it out of the registry is what
       // made a box drowning in frames report exactly the same "nothing heard"
       // as a box listening to the wrong protocol.
       const dropped = registry.record(event?.channel, {
         dropped: unusable,
+        droppedReadings,
         timestamp: event?.timestamp,
       });
-      // What it carried, spelled out: it is the whole difference between a
-      // frame worth rescuing (it decodes to an order, and "Accept unreliable
-      // frames" will let it through) and one that carries nothing to rescue.
-      const carried = describeReadings(decodeNotes(event?.thingnotes?.notes));
+      const carried = describeReadings(droppedReadings);
       const line =
         `Ignored a radio frame (${unusable}): ${describeChannel(event?.channel)}, ` +
         `${carried ? `carrying ${carried}` : 'carrying no note the service could decode'}.`;

@@ -78,6 +78,23 @@ export function channelName(channelId, table) {
 }
 
 /**
+ * What to type in the Listening channel field to listen to a channel: its pid,
+ * except for the generic 433 MHz decoder — `1` there has always meant "deduce"
+ * (see `toListenChannel`), so advising it changed nothing. Every message that
+ * tells the user what to type goes through here, or one of them sends the user
+ * back to the very deduction that left their remote unheard.
+ *
+ * @param {number} channel the pid to listen to
+ * @param {string} [language] 'fr', or English
+ */
+export function channelToType(channel, language = 'en') {
+  if (Number(channel) === GENERIC_433_CHANNEL) {
+    return language === 'fr' ? '« générique »' : '"generic"';
+  }
+  return String(channel);
+}
+
+/**
  * What to bind, and what it will let Gladys hear.
  *
  * @param {object} config normalized configuration
