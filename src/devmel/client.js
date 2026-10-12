@@ -17,7 +17,7 @@
 import { createHash } from 'node:crypto';
 import { DEVICE_TRANSPORTS } from '@gladysassistant/integration-sdk';
 import { createLogger } from '../logging.js';
-import { checkSpurl, DEVICE_TYPES, MAX_COMMAND_REPEAT } from '../config.js';
+import { checkSpurl, DEVICE_TYPES, hostFromSpurl, MAX_COMMAND_REPEAT } from '../config.js';
 import { isOrder, isRepeatable, queryNote, QUERY_TYPES } from './notes.js';
 import {
   describeEventType,
@@ -135,7 +135,7 @@ export class AirSendClient {
      * back to its starting point on every configuration.
      */
     this.warmAfter = WARM_AFTER_MS;
-    /** The radio of each box, by connection string (see `radioOf`). */
+    /** The radio of each box, by its address (see `radioOf`). */
     this.radios = new Map();
     /**
      * The last order given to each device, by platform id — by Gladys, or by a
@@ -185,12 +185,20 @@ export class AirSendClient {
   }
 
   /**
-   * The radio a device is reached through: one per box, told apart by the
-   * connection string, each with its own queue and its own idea of when it was
-   * last spoken to.
+   * The radio a device is reached through: one per box, each with its own
+   * queue and its own idea of when it was last spoken to.
+   *
+   * Boxes are told apart by their ADDRESS, not by the text of the connection
+   * string — the way connection.js decides the declared box is the global one.
+   * The box written `…?gw=0&rhost=192.168.1.50` in the device list and
+   * `…?rhost=192.168.1.50&gw=0` in the configuration is one radio: keyed on
+   * the text, the listening renewal and the keep-warm went out through one
+   * queue while the shutter orders went out through the other, both at once,
+   * and the order the busy box did not hear was lost.
    */
   radioOf(device) {
-    const key = this.spurlOf(device) ?? '';
+    const spurl = this.spurlOf(device);
+    const key = hostFromSpurl(spurl) ?? spurl ?? '';
     let radio = this.radios.get(key);
     if (!radio) {
       radio = {

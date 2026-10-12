@@ -131,7 +131,7 @@ export class AirSendService {
   async apply(config) {
     this.wanted = config?.embeddedService === true;
     if (!this.wanted) {
-      await this.stop();
+      await this.stop({ unlessWantedAgain: true });
       return false;
     }
     try {
@@ -235,10 +235,22 @@ export class AirSendService {
     });
   }
 
-  async stop() {
+  /**
+   * @param {object} [options]
+   * @param {boolean} [options.unlessWantedAgain] give up when, by the time a
+   *   start in flight has finished, a newer configuration wants the service
+   *   again (apply). Shutdown stops it whatever the configuration says.
+   */
+  async stop({ unlessWantedAgain = false } = {}) {
     // A start in flight launches the daemon after we would have looked for its
     // pid, and arms the watchdog: let it finish, then end what it started.
     await this.starting?.catch(() => {});
+    // Unless a save made while we waited asked for it back: that apply joined
+    // the same start and answered true, and stopping now killed the daemon it
+    // had just launched — wanted, not running, and no watchdog to notice.
+    if (unlessWantedAgain && this.wanted) {
+      return;
+    }
     this.disarmWatchdog();
     const pid = this.pid ?? (await this.readPid());
     this.running = false;

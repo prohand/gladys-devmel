@@ -193,6 +193,25 @@ test('switching to a service of your own while the bundled one starts leaves not
   assert.equal(await service.probe(), false);
 });
 
+test('a URL typed then cleared while the bundled service starts leaves it running and supervised', async () => {
+  const port = await freePort();
+  const { service } = await serviceWithFakeBinary(port);
+
+  // The 'connected' start is still launching the daemon when the configuration
+  // is saved twice: a URL typed, then cleared. The stop of the first save used
+  // to wait for that start, then kill what the second save had joined.
+  const results = await Promise.all([
+    service.apply({ embeddedService: true }),
+    service.apply({ embeddedService: false }),
+    service.apply({ embeddedService: true }),
+  ]);
+
+  assert.deepEqual(results, [true, false, true]);
+  assert.equal(service.status().running, true);
+  assert.notEqual(service.watchdog, null);
+  assert.equal(await service.probe(), true);
+});
+
 test('switching to a service of your own while the watchdog ends a hung daemon starts no new one', async () => {
   const port = await freePort();
   const { service } = await serviceWithFakeBinary(port, { stopGraceMs: 2000 });

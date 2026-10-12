@@ -868,6 +868,38 @@ test('every box is kept warm, each after its own silence', async () => {
   ]);
 });
 
+test('one box written two ways is one radio: one transmission at a time', async () => {
+  // The device list declares the box with its parameters in another order than
+  // the global string: connection.js takes it for the global box, and so must
+  // the queue. Keyed on the text, the keep-warm and the listening renewal went
+  // out through the box's string while the shutter order went out through the
+  // global one, at the same moment, to the same radio.
+  const declared = { ...BOX, spurl: 'sp://pass@[fe80::1]?rhost=192.168.1.50&gw=0' };
+  let inFlight = 0;
+  let most = 0;
+  stubFetch(async () => {
+    inFlight += 1;
+    most = Math.max(most, inFlight);
+    await new Promise(setImmediate);
+    inFlight -= 1;
+    return jsonResponse(200, { type: 3, thingnotes: { notes: [] } });
+  });
+  const client = clientWith({ spurl: 'sp://pass@[fe80::1]?gw=0&rhost=192.168.1.50' });
+
+  await Promise.all([
+    client.keepWarm(declared),
+    client.transfer(DEVICE, [stateNote(STATE_VALUES.ON)]),
+    client.bind(5, 'http://127.0.0.1:9999/', declared),
+  ]);
+
+  assert.equal(calls.length, 3);
+  assert.equal(most, 1);
+  // And the shutter orders are news for the keep-warm: a box just used is not
+  // woken again.
+  assert.equal(await client.keepWarm(declared), false);
+  assert.equal(calls.length, 3);
+});
+
 test('a box that does not answer holds up only its own orders', async () => {
   // Two boxes, the first one unplugged: each request to it hangs until the
   // timeout. The STOP that ends a timed travel through the second box used to
