@@ -437,6 +437,37 @@ test('a remote dropped with nothing to decode is not sent to "Accept unreliable 
   assert.doesNotMatch(kept.en, /will not follow/);
 });
 
+test('a remote whose earlier press decoded an order is not told it will not follow', async () => {
+  // Only its last press was dropped, graded 0 with no note: the one before it
+  // was routed and decoded UP, so the protocol does carry an order and the
+  // remote, once attached by its address, is followed.
+  const config = configOf(
+    JSON.stringify({ devices: [{ name: 'Volet', type: 4098, pid: 25455, addr: 8295 }] }),
+  );
+  let now = 1_700_000_000_000;
+  const heard = new HeardChannels({ now: () => now });
+  const channel = { id: 25455, source: 94311 };
+  const route = (event) =>
+    captureLogs(() => applyEvents(createFakeGladys(), config, [event], heard, new SentOrders()))
+      .result;
+  await route({
+    type: 3,
+    reliability: 30,
+    timestamp: now,
+    channel,
+    thingnotes: { notes: [{ type: NOTE_TYPES.STATE, value: STATE_VALUES.UP }] },
+  });
+  now += 5 * 60_000;
+  await route({ type: 3, reliability: 0, timestamp: now, channel, thingnotes: { notes: [] } });
+
+  const message = attachHeardRemote({ config, device: config.devmelDevices[0], heard, now });
+  assert.match(message.en, /"remotes":\[\{"pid":25455,"addr":94311\}\]/);
+  assert.doesNotMatch(message.en, /no note the service could decode|will not follow/);
+  assert.doesNotMatch(message.fr, /aucune note décodable|ne suivra donc pas/);
+  assert.match(message.en, /no longer dropped for its grade/);
+  assert.match(message.fr, /n'est plus écartée pour sa note/);
+});
+
 test('the AirSend box is refused as the device a remote drives', () => {
   const config = configOf(
     JSON.stringify({

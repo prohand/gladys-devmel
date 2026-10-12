@@ -1863,7 +1863,7 @@ test('a frame the box graded badly says what it carried, and what to do about it
   assert.equal(first.of('INFO').length, 1);
   assert.match(first.of('INFO')[0], /unreliable, graded 0.*pid 14177/);
   assert.match(first.of('INFO')[0], /carrying no note the service could decode/);
-  assert.match(first.of('INFO')[0], /Set the listening channel to that pid/);
+  assert.match(first.of('INFO')[0], /Set the listening channel to 14177 so the box/);
 
   // Once is a diagnosis; every press is noise.
   const again = captureLogs(
@@ -1873,6 +1873,26 @@ test('a frame the box graded badly says what it carried, and what to do about it
   await again.result;
   assert.equal(again.of('INFO').length, 0);
   assert.equal(again.of('DEBUG').length, 1);
+});
+
+test('a dropped frame of the generic channel asks for "generic", not for pid 1', async () => {
+  // pid 1 typed in the Listening channel field reads as "deduce": the log line
+  // has to name it the way Test the connection and the widget do.
+  const { gladys, config } = setup();
+  const lines = captureLogs(
+    async () =>
+      applyEvents(
+        gladys,
+        config,
+        [{ type: 3, reliability: 0, channel: { id: 1 }, thingnotes: { notes: [] } }],
+        new HeardChannels(),
+        new SentOrders(),
+      ),
+    'debug',
+  );
+  await lines.result;
+  assert.match(lines.of('INFO')[0], /Set the listening channel to "generic" so the box/);
+  assert.doesNotMatch(lines.of('INFO')[0], /listening channel to (1|that pid)\b/);
 });
 
 test('accepting unreliable frames lets a badly graded frame through', async () => {

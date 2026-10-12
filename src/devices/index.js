@@ -30,6 +30,7 @@ import { light } from './light.js';
 import { decodeNotes, describeReadings, isSameChannel } from '../devmel/notes.js';
 import { describeEventType, explainFailure, isErrorEvent } from '../devmel/events.js';
 import { heardChannels } from '../devmel/heard.js';
+import { channelToType } from '../devmel/listening.js';
 import { sentOrders } from '../devmel/orders.js';
 import { idsFor } from './helpers.js';
 import { DEVICE_TYPES } from '../config.js';
@@ -707,8 +708,11 @@ function adviseOnDropped(event, reason) {
   if (event?.channel?.source === undefined) {
     return (
       `The box picked up protocol ${event?.channel?.id} without decoding it (no address, no ` +
-      'grade it trusts). Set the listening channel to that pid so the box listens to its own ' +
-      'decoder, and run "Test the connection" to see what it says about it.'
+      'grade it trusts). Set the listening channel to ' +
+      // Through channelToType, like every other advice on that field: pid 1
+      // typed as is reads as "deduce" and would change nothing.
+      `${channelToType(event?.channel?.id)} so the box listens to its own decoder, and run ` +
+      '"Test the connection" to see what it says about it.'
     );
   }
   return (

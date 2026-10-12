@@ -218,9 +218,14 @@ export function attachHeardRemote({ config, device, heard, now = Date.now(), tab
   // address it is no longer dropped for its grade (see `isDeclaredRemote`) —
   // but a dropped frame that decoded to nothing has nothing for any setting
   // to let through, and pointing at "Accept unreliable frames" (a switch for
-  // the whole neighbourhood) was advice that could never help there.
+  // the whole neighbourhood) was advice that could never help there. Only the
+  // LAST frame was dropped, though: an earlier press of the same remote that
+  // was routed and decoded an order (`readings`) proves the protocol carries
+  // one, and saying "the device state will not follow" would then be false.
   const carriesNothing = remote.dropped
-    ? Array.isArray(remote.droppedReadings) && remote.droppedReadings.length === 0
+    ? Array.isArray(remote.droppedReadings) &&
+      remote.droppedReadings.length === 0 &&
+      !(remote.readings?.length > 0)
     : remote.claimed === false && remote.understood === false && remote.readings?.length === 0;
   if (remote.dropped && !carriesNothing) {
     en.push(
