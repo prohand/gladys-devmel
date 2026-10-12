@@ -22,6 +22,7 @@ import {
   SceneEvents,
 } from '../src/capabilities/scenes.js';
 import { buildRadioWidget } from '../src/capabilities/widget.js';
+import { captureLogs } from './helpers/captureLogs.js';
 import { createFakeGladys } from './helpers/fakeGladys.js';
 
 const SPURL = 'sp://pass@[fe80::1]?rhost=192.168.1.50';
@@ -143,11 +144,55 @@ test('a remote held down is one press, not one event per frame', async (t) => {
   assert.equal(gladys.sceneEvents.length, 2);
 });
 
+test('a remote held down for two seconds is still one press', async (t) => {
+  // Its frames keep coming every half second: the window runs from the last
+  // one, so a long press never splits into two — a scene "on toggle" would
+  // put the lamp back where it was.
+  t.after(() => shutter.travel.clear());
+  let now = 0;
+  const { gladys, config, scenes, heard, orders } = setup({ now: () => now });
+
+  for (let elapsed = 0; elapsed <= 2000; elapsed += 500) {
+    now = elapsed;
+    await applyEvents(
+      gladys,
+      config,
+      [frame({ id: 100, source: 11 }, STATE_VALUES.TOGGLE)],
+      heard,
+      orders,
+      scenes,
+    );
+  }
+
+  assert.deepEqual(
+    gladys.sceneEvents.map((event) => event.data.order),
+    ['toggle'],
+  );
+});
+
+test('a box failing every order still says so once a minute', async () => {
+  let now = 0;
+  const scenes = new SceneEvents({ now: () => now });
+  const gladys = createFakeGladys();
+  const failure = { externalId: 'switch:200-2', name: 'Kitchen plug', reason: 'BUSY' };
+
+  for (let elapsed = 0; elapsed <= 60 * 1000; elapsed += 20 * 1000) {
+    now = elapsed;
+    await scenes.orderFailed(gladys, failure);
+  }
+
+  assert.equal(gladys.sceneEvents.length, 2);
+});
+
 test("Gladys' own orders never fire remote_pressed: no scene can loop on itself", async (t) => {
   t.after(() => shutter.travel.clear());
   const { gladys, config, scenes, heard, orders } = setup();
   const device = config.devmelDevices.find((entry) => entry.name === 'Living room shutter');
-  orders.remember('0xabc', device);
+  // What the client files for every transfer: the notes it carried.
+  orders.remember('0xabc', device, {
+    notes: [{ type: NOTE_TYPES.STATE, value: STATE_VALUES.UP }],
+    fresh: true,
+  });
 
   await applyEvents(
     gladys,
@@ -159,6 +204,29 @@ test("Gladys' own orders never fire remote_pressed: no scene can loop on itself"
   );
 
   assert.deepEqual(gladys.sceneEvents, []);
+});
+
+test('a remote copied onto the address of its device fires remote_pressed within the minute', async () => {
+  // It speaks with the voice Gladys just used: its OFF reaches the integration
+  // as an echo, and is a press all the same — Gladys never said it.
+  const { gladys, config, scenes, heard, orders } = setup();
+  const device = config.devmelDevices.find((entry) => entry.name === 'Kitchen plug');
+  orders.remember('0xabc', device, {
+    notes: [{ type: NOTE_TYPES.STATE, value: STATE_VALUES.ON }],
+    fresh: true,
+  });
+  const hear = (value) =>
+    applyEvents(gladys, config, [frame({ ...device.channel }, value)], heard, orders, scenes);
+
+  // The box hearing itself, then the remote's OFF.
+  await hear(STATE_VALUES.ON);
+  assert.deepEqual(gladys.sceneEvents, []);
+  await hear(STATE_VALUES.OFF);
+
+  assert.equal(gladys.sceneEvents.length, 1);
+  assert.equal(gladys.sceneEvents[0].key, SCENE_TRIGGERS.REMOTE_PRESSED);
+  assert.equal(gladys.sceneEvents[0].data.device, 'switch:200-2');
+  assert.equal(gladys.sceneEvents[0].data.order, 'off');
 });
 
 test('an order the box reports as failed fires order_failed', async () => {
@@ -338,6 +406,43 @@ test('the radio widget says "no box" rather than "no route" without a connection
   assert.deepEqual(validateWidgetContent(content), []);
 });
 
+test('the radio widget says "no service" when the string is there and the service is not', () => {
+  // A box carrying its string, the built-in service turned off and no URL
+  // typed: "no box" read as "paste the string", which the user had done.
+  const content = buildRadioWidget({
+    gladys: createFakeGladys(),
+    config: normalizeConfig({
+      use_embedded_service: false,
+      service_url: '',
+      devices: JSON.stringify({ devices: { 'AirSend box': { type: 0, spurl: SPURL } } }),
+    }),
+    listen: { url: null, error: null, plan: { enabled: true, channel: 1 } },
+  });
+  const status = content.components.find((component) => component.type === 'status');
+  const listening = status.items.find((item) => item.label.en === 'Listening');
+
+  assert.equal(listening.value.en, 'no service');
+  assert.equal(listening.value.fr, 'aucun service');
+  assert.deepEqual(validateWidgetContent(content), []);
+});
+
+test('the radio widget does not call a remote dropped, then attached by its address, dropped', async () => {
+  // Graded too low while undeclared, then attached by its address: that waives
+  // the grade, so until its next frame the badge is "press again", not the red
+  // "dropped" that sends the user to accept the whole neighbourhood's frames.
+  const { heard } = setup();
+  heard.record({ id: 300, source: 77 }, { dropped: 'unreliable, graded 71' });
+  heard.forgetVerdicts();
+  const attached = normalizeConfig({
+    spurl: SPURL,
+    devices: DEVICES.replace('"remotes":[42]', '"remotes":[42,77]'),
+  });
+
+  const row = emitterRow(widgetOf({ heard, config: attached }), 'pid 300');
+  assert.equal(row.badge, 'press again');
+  assert.doesNotMatch(row.description, /Accept unreliable/);
+});
+
 test('every scene event carries each filter and variable its trigger declares', async () => {
   // A declared key missing from the data reads as null in a scene, and a filter
   // on it never matches: the trigger would look broken with nothing in the logs.
@@ -376,4 +481,129 @@ test('every scene event carries each filter and variable its trigger declares', 
     ['channel'],
     'index.js answers rearm_listening with { channel }',
   );
+});
+
+/** The widget row of one emitter: its badge and its description. */
+function emitterRow(content, title) {
+  const list = content.components.find((component) => component.type === 'card-list');
+  const item = list.items.find((found) => found.title === title && found.subtitle);
+  return { badge: item.badge.text.en, description: item.description.en };
+}
+
+test('the radio widget calls a spare remote on a button followed, press after press', async () => {
+  // A Button does nothing with a frame but fire the scene trigger, and that
+  // is exactly what a spare remote on it is for: not "mute", not "does
+  // nothing with the order", and not "every press says the same thing".
+  const { gladys, config, scenes, heard, orders } = setup();
+  for (let press = 0; press < 3; press += 1) {
+    await applyEvents(
+      gladys,
+      config,
+      [frame({ id: 100, source: 11 }, STATE_VALUES.TOGGLE)],
+      heard,
+      orders,
+      scenes,
+    );
+  }
+
+  const row = emitterRow(widgetOf({ heard, settings: { emitters: 8 } }), 'pid 100');
+  assert.equal(row.badge, 'followed');
+  assert.match(row.description, /followed by Garage\.$/);
+});
+
+test('the radio widget does not call a remote just attached mute before it is pressed again', async (t) => {
+  t.after(() => shutter.travel.clear());
+  const { gladys, config, scenes, heard, orders } = setup();
+  // Pressed while no device declares it: routed to nobody.
+  await applyEvents(
+    gladys,
+    config,
+    [frame({ id: 300, source: 77 }, STATE_VALUES.UP)],
+    heard,
+    orders,
+    scenes,
+  );
+
+  // "Attach a remote", pasted and saved: a new configuration.
+  heard.forgetVerdicts();
+  const attached = normalizeConfig({
+    spurl: SPURL,
+    devices: DEVICES.replace('"remotes":[42]', '"remotes":[42,77]'),
+  });
+  const before = emitterRow(widgetOf({ heard, config: attached }), 'pid 300');
+  assert.equal(before.badge, 'press again');
+  assert.match(before.description, /not heard since the configuration changed/);
+  assert.doesNotMatch(before.description, /no order to replay/);
+
+  // One press under the new configuration, and the verdict is current again.
+  await applyEvents(
+    gladys,
+    attached,
+    [frame({ id: 300, source: 77 }, STATE_VALUES.UP)],
+    heard,
+    orders,
+    scenes,
+  );
+  const after = emitterRow(widgetOf({ heard, config: attached }), 'pid 300');
+  assert.equal(after.badge, 'followed');
+  assert.match(after.description, /followed by Living room shutter/);
+});
+
+test('the radio widget calls a remote declared by its protocol alone followed', async (t) => {
+  // The documented last resort: listen to the protocol, declare `{ pid }`.
+  // Its address-less frames move the shutter, so "not decoded" was wrong.
+  t.after(() => shutter.travel.clear());
+  const { gladys, scenes, heard, orders } = setup();
+  const config = normalizeConfig({
+    spurl: SPURL,
+    listen_channel: 14177,
+    devices: JSON.stringify({
+      devices: {
+        'Patio door': { type: 4098, pid: 25455, addr: 8295, travel: 20, remotes: [{ pid: 14177 }] },
+      },
+    }),
+  });
+  const applied = await applyEvents(
+    gladys,
+    config,
+    [frame({ id: 14177 }, STATE_VALUES.UP)],
+    heard,
+    orders,
+    scenes,
+  );
+  assert.equal(applied, 1);
+
+  const row = emitterRow(widgetOf({ heard, config }), 'pid 14177');
+  assert.equal(row.badge, 'followed');
+  assert.match(row.description, /followed by Patio door/);
+  assert.doesNotMatch(row.description, /set the listening channel/);
+});
+
+test('the radio widget keeps a remote followed when a second box hears the same press badly', async () => {
+  // Two boxes on the same callback: the near one grades the press well, the
+  // far one badly. The press was followed; only a bad frame on its own, later,
+  // is worth the red badge.
+  let now = 0;
+  const { gladys, config, scenes, orders } = setup();
+  const heard = new HeardChannels({ now: () => now });
+  const copy = (reliability) => ({
+    ...frame({ id: 100, source: 1 }, STATE_VALUES.TOGGLE),
+    reliability,
+  });
+
+  const lines = captureLogs(() =>
+    applyEvents(gladys, config, [copy(40), copy(3)], heard, orders, scenes),
+  );
+  await lines.result;
+  assert.equal(emitterRow(widgetOf({ heard }), 'pid 100').badge, 'followed');
+  assert.equal(heard.dropped, 1);
+  // Nor does the log advise letting the far box's garbled copies through.
+  assert.deepEqual(
+    lines.of('INFO').filter((line) => line.includes('Accept unreliable frames')),
+    [],
+  );
+
+  now += 10000;
+  await applyEvents(gladys, config, [copy(3)], heard, orders, scenes);
+  assert.equal(emitterRow(widgetOf({ heard }), 'pid 100').badge, 'dropped');
 });

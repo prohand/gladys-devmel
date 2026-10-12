@@ -84,3 +84,31 @@ test('nothing to renew arms nothing, and a failed bind does not block the next',
   assert.equal(timers.live.size, 1);
   loop.stop();
 });
+
+test('a stop also cancels the requests still queued: nothing is bound after it', async () => {
+  const timers = fakeTimers();
+  const loop = createListenLoop({ renew: () => {}, intervalMs: 600000, timers });
+
+  const pending = deferredArm();
+  const a = loop.start(pending.arm);
+  let queuedArmed = false;
+  const b = loop.start(async () => {
+    queuedArmed = true;
+    return true;
+  });
+  await tick();
+  // Gladys disconnected while the first request was binding.
+  loop.stop();
+  pending.release(true);
+  await a;
+  await b;
+
+  assert.equal(queuedArmed, false);
+  assert.equal(timers.live.size, 0);
+  assert.equal(loop.armed, false);
+
+  // And the next connection arms listening again.
+  await loop.start(async () => true);
+  assert.equal(timers.live.size, 1);
+  loop.stop();
+});

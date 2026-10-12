@@ -3,7 +3,12 @@ import assert from 'node:assert/strict';
 import { normalizeConfig } from '../src/config.js';
 import { HeardChannels } from '../src/devmel/heard.js';
 import { attachHeardRemote, attachRemote, unclaimedEmitters } from '../src/devmel/remotes.js';
-import { READINGS } from '../src/devmel/notes.js';
+import { NOTE_TYPES, READINGS, STATE_VALUES } from '../src/devmel/notes.js';
+import { indexChannels, planListening } from '../src/devmel/listening.js';
+import { applyEvents } from '../src/devices/index.js';
+import { SentOrders } from '../src/devmel/orders.js';
+import { captureLogs } from './helpers/captureLogs.js';
+import { createFakeGladys } from './helpers/fakeGladys.js';
 
 // The line a user actually pastes: the airsend.cloud export, one shutter, one
 // line. Every test below starts from it, because that is what the action has
@@ -310,4 +315,237 @@ test('attaching a remote keeps the one declared without a list, or as "remote"',
     const again = attachRemote(source, device, { id: 25455, source: 42 });
     assert.deepEqual(configOf(again).devmelDevices[0].remotes, [{ id: 25455, source: 42 }]);
   }
+});
+
+test('a remote decoded by the generic 433 MHz channel is asked for by name, not as 1', () => {
+  // `1` in the Listening channel field means "deduce": advising it brought the
+  // same deduction back, and the remote stayed unheard.
+  const table = indexChannels([
+    { id: 1, name: 'Generic 433MHz' },
+    { id: 1368, name: 'Chacon', getDecoder: 1 },
+    { id: 25455, name: 'Somfy RTS', getDecoder: 25455 },
+  ]);
+  const heard = heardRemote({ id: 1368, source: 777 });
+
+  const forced = normalizeConfig({ devices: EXPORT, listen_channel: '25455' });
+  const warning = attachHeardRemote({
+    config: forced,
+    device: forced.devmelDevices[0],
+    heard,
+    table,
+  });
+  assert.match(warning.en, /put "generic" in the Listening channel field/);
+  assert.match(warning.fr, /mettez « générique » dans le champ Canal d'écoute/);
+  assert.doesNotMatch(warning.en, /put 1 /);
+
+  const off = normalizeConfig({ devices: EXPORT, listen_channel: '0' });
+  const turnedOff = attachHeardRemote({ config: off, device: off.devmelDevices[0], heard, table });
+  assert.match(turnedOff.en, /Put "generic" in that field, or empty it/);
+  assert.match(turnedOff.fr, /Mettez « générique » dans ce champ/);
+
+  // And the word advised is the one that does select the remote's decoder.
+  const followed = normalizeConfig({ devices: EXPORT, listen_channel: 'generic' });
+  assert.equal(planListening(followed, table).channel, 1);
+});
+
+test('no address, and the only one on the protocol is its own device: the last-resort line', () => {
+  // The device's `addr` is the one the box transmits with, not proof that the
+  // box decodes addresses on that protocol: "press again" was answered forever.
+  const config = configOf(
+    JSON.stringify({
+      devices: [{ name: 'Volet Profalux', type: 4098, pid: 14177, addr: 3359265281 }],
+    }),
+  );
+  const heard = new HeardChannels({ now: () => 1_000_000 });
+  heard.record({ id: 14177 }, { timestamp: 1_000_000 });
+
+  const message = attachHeardRemote({ config, device: config.devmelDevices[0], heard });
+
+  assert.match(message.fr, /"remotes":\[\{"pid":14177\}\]/);
+  assert.match(message.fr, /C'est le dernier recours/);
+  assert.doesNotMatch(message.fr, /vos autres télécommandes/);
+});
+
+test('a remote heard only in dropped frames is not said to carry no order', () => {
+  // A wall remote graded at the edge of the window (71): its frames are
+  // dropped unread, and followed once it is attached by its address.
+  const config = configOf(EXPORT);
+  const heard = new HeardChannels({ now: () => 1_000_000 });
+  heard.record(
+    { id: 25455, source: 94311 },
+    { dropped: 'unreliable, graded 71', timestamp: 1_000_000 },
+  );
+
+  const message = attachHeardRemote({ config, device: config.devmelDevices[0], heard });
+
+  assert.match(message.fr, /"remotes":\[\{"pid":25455,"addr":94311\}\]/);
+  assert.doesNotMatch(message.fr, /aucune note décodable/);
+  assert.doesNotMatch(message.en, /will not follow/);
+  assert.match(message.en, /dropped before any device \(unreliable, graded 71\)/);
+  assert.match(message.en, /no longer dropped for its grade/);
+  assert.match(message.fr, /n'est plus écartée pour sa note/);
+});
+
+test('a remote dropped with nothing to decode is not sent to "Accept unreliable frames"', async () => {
+  // The docs' own example: graded 0, no address, no note the service could
+  // decode. No setting makes usable what was never decoded, and the switch
+  // for the whole neighbourhood was the one hint that could never help. What
+  // the frames carried is remembered now, through the real routing.
+  const config = configOf(
+    JSON.stringify({ devices: [{ name: 'Volet', type: 4098, pid: 14177, addr: 3359265281 }] }),
+  );
+  const heard = new HeardChannels();
+  const route = (event) =>
+    captureLogs(() => applyEvents(createFakeGladys(), config, [event], heard, new SentOrders()))
+      .result;
+  await route({ type: 3, reliability: 0, channel: { id: 14177 }, thingnotes: { notes: [] } });
+
+  const message = attachHeardRemote({ config, device: config.devmelDevices[0], heard });
+  assert.match(message.en, /"remotes":\[\{"pid":14177\}\]/);
+  assert.doesNotMatch(message.en, /Accept unreliable frames/);
+  assert.doesNotMatch(message.fr, /Accepter les trames peu fiables/);
+  assert.match(message.en, /no note the service could decode.*will not follow/);
+  assert.match(message.fr, /aucune note décodable/);
+
+  // A frame dropped for its grade that does carry an order keeps the advice
+  // that it will be followed once attached by its address.
+  const shutter = configOf(EXPORT);
+  const edge = new HeardChannels();
+  await captureLogs(() =>
+    applyEvents(
+      createFakeGladys(),
+      shutter,
+      [
+        {
+          type: 3,
+          reliability: 71,
+          channel: { id: 25455, source: 94311 },
+          thingnotes: { notes: [{ type: NOTE_TYPES.STATE, value: STATE_VALUES.UP }] },
+        },
+      ],
+      edge,
+      new SentOrders(),
+    ),
+  ).result;
+  const kept = attachHeardRemote({
+    config: shutter,
+    device: shutter.devmelDevices[0],
+    heard: edge,
+  });
+  assert.match(kept.en, /dropped before any device \(unreliable, graded 71\)/);
+  assert.match(kept.en, /no longer dropped for its grade/);
+  assert.doesNotMatch(kept.en, /will not follow/);
+});
+
+test('a remote whose earlier press decoded an order is not told it will not follow', async () => {
+  // Only its last press was dropped, graded 0 with no note: the one before it
+  // was routed and decoded UP, so the protocol does carry an order and the
+  // remote, once attached by its address, is followed.
+  const config = configOf(
+    JSON.stringify({ devices: [{ name: 'Volet', type: 4098, pid: 25455, addr: 8295 }] }),
+  );
+  let now = 1_700_000_000_000;
+  const heard = new HeardChannels({ now: () => now });
+  const channel = { id: 25455, source: 94311 };
+  const route = (event) =>
+    captureLogs(() => applyEvents(createFakeGladys(), config, [event], heard, new SentOrders()))
+      .result;
+  await route({
+    type: 3,
+    reliability: 30,
+    timestamp: now,
+    channel,
+    thingnotes: { notes: [{ type: NOTE_TYPES.STATE, value: STATE_VALUES.UP }] },
+  });
+  now += 5 * 60_000;
+  await route({ type: 3, reliability: 0, timestamp: now, channel, thingnotes: { notes: [] } });
+
+  const message = attachHeardRemote({ config, device: config.devmelDevices[0], heard, now });
+  assert.match(message.en, /"remotes":\[\{"pid":25455,"addr":94311\}\]/);
+  assert.doesNotMatch(message.en, /no note the service could decode|will not follow/);
+  assert.doesNotMatch(message.fr, /aucune note décodable|ne suivra donc pas/);
+  assert.match(message.en, /no longer dropped for its grade/);
+  assert.match(message.fr, /n'est plus écartée pour sa note/);
+});
+
+test('any earlier frame that decoded an order counts, not only the last of each kind', async () => {
+  // Only the last dropped and the last routed frame are kept: a remote at the
+  // edge of range (a dropped UP, then a weaker press decoding nothing), or a
+  // release frame between two presses (routed UP, routed nothing), was told
+  // "will not follow" although its UP press is followed once attached.
+  const config = configOf(
+    JSON.stringify({ devices: [{ name: 'Volet', type: 4098, pid: 25455, addr: 8295 }] }),
+  );
+  const channel = { id: 25455, source: 94311 };
+  const UP = { notes: [{ type: NOTE_TYPES.STATE, value: STATE_VALUES.UP }] };
+  const NOTHING = { notes: [] };
+  const attachAfter = async (frames) => {
+    let now = 1_700_000_000_000;
+    const heard = new HeardChannels({ now: () => now });
+    for (const [reliability, thingnotes] of frames) {
+      await captureLogs(() =>
+        applyEvents(
+          createFakeGladys(),
+          config,
+          [{ type: 3, reliability, timestamp: now, channel, thingnotes }],
+          heard,
+          new SentOrders(),
+        ),
+      ).result;
+      now += 5 * 60_000;
+    }
+    return attachHeardRemote({ config, device: config.devmelDevices[0], heard, now });
+  };
+
+  // (a) Two dropped presses: graded 71 carrying UP, then graded 0 with nothing.
+  const edge = await attachAfter([
+    [71, UP],
+    [0, NOTHING],
+  ]);
+  assert.doesNotMatch(edge.en, /no note the service could decode|will not follow/);
+  assert.doesNotMatch(edge.fr, /aucune note décodable/);
+  assert.match(edge.en, /no longer dropped for its grade/);
+
+  // (b) Routed UP, routed nothing, then a dropped press with nothing.
+  const mixed = await attachAfter([
+    [30, UP],
+    [30, NOTHING],
+    [0, NOTHING],
+  ]);
+  assert.match(mixed.en, /note: level 100 \(up\)/);
+  assert.doesNotMatch(mixed.en, /no note the service could decode|will not follow/);
+  assert.match(mixed.en, /no longer dropped for its grade/);
+
+  // Routed UP, then routed nothing: never dropped, still not "will not follow".
+  const routed = await attachAfter([
+    [30, UP],
+    [30, NOTHING],
+  ]);
+  assert.doesNotMatch(routed.en, /no note the service could decode|will not follow/);
+  assert.doesNotMatch(routed.fr, /aucune note décodable/);
+
+  // A remote that never decoded anything is still told so.
+  const silent = await attachAfter([
+    [30, NOTHING],
+    [0, NOTHING],
+  ]);
+  assert.match(silent.en, /no note the service could decode.*will not follow/);
+});
+
+test('the AirSend box is refused as the device a remote drives', () => {
+  const config = configOf(
+    JSON.stringify({
+      devices: [
+        { name: 'AirSend', type: 0, sensors: true },
+        { name: 'Baie vitree', type: 4098, pid: 25455, addr: 8295 },
+      ],
+    }),
+  );
+  const heard = heardRemote({ id: 25455, source: 94311 });
+
+  const message = attachHeardRemote({ config, device: config.devmelDevices[0], heard });
+
+  assert.match(message.en, /"AirSend" is the AirSend box itself/);
+  assert.match(message.fr, /Choisissez l’appareil que pilote cette télécommande/);
+  assert.doesNotMatch(message.en, /"remotes"|Attached/);
 });

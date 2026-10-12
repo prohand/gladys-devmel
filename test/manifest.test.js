@@ -97,6 +97,30 @@ test('the listening channel can actually be left empty', () => {
   assert.equal(normalizeConfig({ listen_channel: '0' }).listen_channel, 0);
 });
 
+test('advice to put a pid in the listening channel names "generic" for pid 1', async () => {
+  // Typed as is, 1 reads as "deduce" (above) and changes nothing; the code's
+  // own log lines ask for the word generic (`channelToType`). A text telling
+  // the user to type the frame's pid without that exception sent whoever had
+  // a pid-1 frame to a setting that does nothing.
+  const field = manifest.config_schema.find((entry) => entry.key === 'accept_unreliable');
+  assert.match(field.description.en, /its pid, or to the word generic for pid 1/);
+  assert.match(field.description.fr, /son pid .*, ou le mot générique pour le pid 1/);
+  const docs = {
+    en: [/put that `pid`/g, /generic/],
+    fr: [/mettez ce `pid`|renseignez ce\s+`pid`/g, /générique/],
+  };
+  for (const [language, [advice, generic]] of Object.entries(docs)) {
+    const text = await readFile(new URL(`../docs/${language}.md`, import.meta.url), 'utf8');
+    const found = [...text.matchAll(advice)];
+    assert.ok(found.length >= 2, `docs/${language}.md: advice not found`);
+    for (const match of found) {
+      // The exception sits in the same sentence or table cell, right after.
+      const after = text.slice(match.index, match.index + 140);
+      assert.match(after, generic, `docs/${language}.md: "${match[0]}" without generic`);
+    }
+  }
+});
+
 test('the description fits what the store allows', () => {
   assert.ok(manifest.name.length >= 3 && manifest.name.length <= 30);
   for (const [language, text] of Object.entries(manifest.description)) {

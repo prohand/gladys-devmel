@@ -61,10 +61,10 @@ Each device reports the channel that actually carried its last order
 nothing did.
 
 Nothing acknowledges a radio order, so the driver does not send one and hope:
-orders queue up (one radio, one transmission at a time), a transmission the box
-could not carry is tried again (a TOGGLE only when it provably never went out),
-and an order that means the same thing twice is
-repeated the way a real remote repeats it. And because everything transmitted
+orders queue up (one radio per box, one transmission at a time), a transmission
+the box could not carry is tried again (a TOGGLE or a STOP only when it provably
+never went out, and never once the device was given a newer order), and an order
+that means the same thing twice is repeated the way a real remote repeats it. And because everything transmitted
 comes back — the answer to the transfer, and the box hearing itself —
 `src/devmel/orders.js` remembers what was just sent so the echo is not replayed
 as a fresh order: that is what used to send a shutter being positioned at 40 %
@@ -121,6 +121,7 @@ them.
 │  │  ├─ travel.js                   #   shutter position, computed from the travel times
 │  │  ├─ callback.js                 #   where the service posts the frames it hears
 │  │  ├─ listening.js                #   which radio protocol the box is asked to listen to
+│  │  ├─ subscription.js             #   arming, renewing and re-arming that subscription
 │  │  ├─ heard.js                    #   the emitters heard on the air, remembered
 │  │  ├─ remotes.js                  #   the "Attach a remote" action: writes the device list
 │  │  └─ connection.js               #   connection status + the "Test the connection" action

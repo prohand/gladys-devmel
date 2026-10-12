@@ -197,9 +197,12 @@ function listeningItem(config, listen, table) {
     };
   }
   if (!listen?.url) {
-    // No box at all is not a missing route: it is a missing connection string.
+    // No box at all is not a missing route: it is a missing connection string,
+    // or a missing service when the string is there (see `noBoxFix`).
     if (boxDevices(config).length === 0) {
-      return { label, value: { en: 'no box', fr: 'aucun boîtier' }, color: 'warning' };
+      return config.effectiveServiceUrl
+        ? { label, value: { en: 'no box', fr: 'aucun boîtier' }, color: 'warning' }
+        : { label, value: { en: 'no service', fr: 'aucun service' }, color: 'warning' };
     }
     return { label, value: { en: 'no route', fr: 'aucune route' }, color: 'warning' };
   }
@@ -259,13 +262,19 @@ function emitterItem(config, entry, now, table) {
 
 /** What became of an emitter's frames, as a short colored badge. */
 function badgeOf(config, entry) {
-  if (entry.source === null || entry.source === undefined) {
+  // In the order describeFate tells it, so the badge never contradicts the
+  // line under it: a protocol-only remote claims the address-less frames.
+  const claimed = config.devmelDevices.some((device) => hearsChannel(device, entry));
+  if ((entry.source === null || entry.source === undefined) && !claimed) {
     return { text: { en: 'not decoded', fr: 'non décodé' }, color: 'neutral' };
+  }
+  if (entry.stale && claimed) {
+    return { text: { en: 'press again', fr: 'à réessayer' }, color: 'neutral' };
   }
   if (entry.dropped) {
     return { text: { en: 'dropped', fr: 'écarté' }, color: 'danger' };
   }
-  if (!config.devmelDevices.some((device) => hearsChannel(device, entry))) {
+  if (!claimed) {
     return { text: { en: 'unknown', fr: 'inconnu' }, color: 'warning' };
   }
   return entry.understood

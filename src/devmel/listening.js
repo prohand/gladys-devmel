@@ -78,6 +78,23 @@ export function channelName(channelId, table) {
 }
 
 /**
+ * What to type in the Listening channel field to listen to a channel: its pid,
+ * except for the generic 433 MHz decoder — `1` there has always meant "deduce"
+ * (see `toListenChannel`), so advising it changed nothing. Every message that
+ * tells the user what to type goes through here, or one of them sends the user
+ * back to the very deduction that left their remote unheard.
+ *
+ * @param {number} channel the pid to listen to
+ * @param {string} [language] 'fr', or English
+ */
+export function channelToType(channel, language = 'en') {
+  if (Number(channel) === GENERIC_433_CHANNEL) {
+    return language === 'fr' ? '« générique »' : '"generic"';
+  }
+  return String(channel);
+}
+
+/**
  * What to bind, and what it will let Gladys hear.
  *
  * @param {object} config normalized configuration
@@ -109,7 +126,11 @@ export function planListening(config, table = new Map()) {
   }
 
   const deduced = config.listen_channel === null || config.listen_channel === undefined;
-  const channel = deduced ? deduceChannel(devices, table) : config.listen_channel;
+  // A typed pid goes through the table like a deduced one. A protocol the
+  // generic decoder covers is heard on channel 1, not on its own pid: bound as
+  // typed, the box listened to a decoder that does not exist, and every device
+  // on that very pid was reported unheard — right after the advice to type it.
+  const channel = deduced ? deduceChannel(devices, table) : decoderOf(config.listen_channel, table);
 
   const covered = [];
   const uncovered = [];
@@ -181,12 +202,28 @@ function listenableDevices(config) {
  * is the only useful thing to listen to before anything is declared.
  */
 function deduceChannel(devices, table) {
-  const emitting = countDecoders(devices.flatMap(emitterChannelsOf), table);
-  const counts = emitting.size > 0 ? emitting : countDecoders(devices.flatMap(channelsOf), table);
+  const emitting = countDecoders(distinct(devices.flatMap(emitterChannelsOf)), table);
+  const counts =
+    emitting.size > 0 ? emitting : countDecoders(distinct(devices.flatMap(channelsOf)), table);
   if (counts.size === 0) {
     return GENERIC_433_CHANNEL;
   }
   return [...counts.entries()].sort((a, b) => b[1] - a[1] || a[0] - b[0])[0][0];
+}
+
+/**
+ * One entry per emitter. A general remote written into the `remotes` of every
+ * shutter it drives is still one remote, and a keyfob declared as a sensor and
+ * attached to a lamp is still one keyfob: counted once per declaration, the
+ * remote of four shutters outvoted three thermometers on another protocol, and
+ * the box went deaf to all three.
+ */
+function distinct(channels) {
+  const seen = new Map();
+  for (const channel of channels) {
+    seen.set(`${Number(channel.id)}:${channel.source ?? ''}`, channel);
+  }
+  return [...seen.values()];
 }
 
 /** How many of these channels each decoder covers. */

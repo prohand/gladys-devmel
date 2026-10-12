@@ -8,10 +8,11 @@
 //     demand, in more detail.
 // -----------------------------------------------------------------------------
 
-import { describeSpurl, DEVICE_TYPES } from '../config.js';
-import { planListening } from './listening.js';
+import { describeSpurl, DEVICE_TYPES, hostFromSpurl, otherSpurls } from '../config.js';
+import { channelToType, planListening } from './listening.js';
 import { describeEmitter } from './heard.js';
 import { hearsChannel } from '../devices/index.js';
+import { ordersOf } from '../capabilities/scenes.js';
 
 /**
  * The AirSend boxes to talk to when listening for radio frames.
@@ -19,16 +20,32 @@ import { hearsChannel } from '../devices/index.js';
  * A box declared in the device list wins (it may carry its own connection
  * string); when the user only filled the global credentials, the box is
  * implicit and rebuilt here.
+ *
+ * Rebuilt too when the boxes declared all carry ANOTHER string: that is a
+ * second box, and the one behind the global string still carries every order
+ * of every device without a string of its own. Left out, it was never listened
+ * through nor kept warm, while the second box's subscription made every report
+ * say listening worked.
  */
 export function boxDevices(config) {
-  const boxes = config.devmelDevices.filter((device) => device.rtype === DEVICE_TYPES.BOX);
-  if (boxes.length > 0) {
+  // Only the boxes something can reach: a box declared before any connection
+  // string was pasted (the docs' own example) has nothing to bind with, and
+  // counting it made listening, "Test the connection" and the widget report
+  // "the box refused the subscription" every ten minutes instead of asking for
+  // the string.
+  const boxes = config.devmelDevices.filter(
+    (device) =>
+      device.rtype === DEVICE_TYPES.BOX &&
+      Boolean(config.effectiveServiceUrl && (device.spurl || config.spurl)),
+  );
+  if (boxes.some((box) => isGlobalBox(box, config))) {
     return boxes;
   }
   if (!config.spurl || !config.effectiveServiceUrl) {
-    return [];
+    return boxes;
   }
   return [
+    ...boxes,
     {
       name: 'AirSend box',
       rtype: DEVICE_TYPES.BOX,
@@ -37,6 +54,44 @@ export function boxDevices(config) {
       spurl: config.spurl,
     },
   ];
+}
+
+/**
+ * What to do when `boxDevices` comes back empty, as the user can act on it.
+ *
+ * Two different things are missing behind the same empty list: the connection
+ * string, or the AirSend service that would carry it (the built-in one turned
+ * off and no URL typed). Asking for the string when it IS pasted sent the user
+ * after the wrong field, where the bind itself used to name the service.
+ *
+ * @param {object} config normalized configuration
+ * @returns {{ en: string, fr: string }}
+ */
+export function noBoxFix(config) {
+  if (!config.effectiveServiceUrl) {
+    return {
+      en:
+        'no AirSend Web Service to reach it (the built-in one is turned off and no service URL ' +
+        'is filled in)',
+      fr:
+        'aucun service AirSend pour le joindre (le service intégré est désactivé et aucune URL ' +
+        "de service n'est renseignée)",
+    };
+  }
+  return {
+    en: 'paste the sp:// connection string first',
+    fr: "collez d'abord la chaîne de connexion sp://",
+  };
+}
+
+/** Is this declared box the one behind the global connection string? */
+function isGlobalBox(box, config) {
+  // No string of its own: it is reached with the global one (client.spurlOf).
+  if (!box.spurl || box.spurl === config.spurl) {
+    return true;
+  }
+  const host = hostFromSpurl(box.spurl);
+  return Boolean(host) && host === hostFromSpurl(config.spurl);
 }
 
 /**
@@ -150,6 +205,10 @@ export async function testConnection(
     en.push(`Connection string: ${describeSpurl(config.spurl)}`);
     fr.push(`Chaîne de connexion : ${describeSpurl(config.spurl)}`);
   }
+  for (const { name, spurl } of otherSpurls(config)) {
+    en.push(`Connection string of "${name}": ${describeSpurl(spurl)}`);
+    fr.push(`Chaîne de connexion de « ${name} » : ${describeSpurl(spurl)}`);
+  }
   for (const problem of config.spurlProblems ?? []) {
     en.push(`Connection string: ${problem.en}`);
     fr.push(`Chaîne de connexion : ${problem.fr}`);
@@ -222,12 +281,13 @@ function describeListening(config, listen, language) {
       : `${channel}, frames pushed to ${listen.url}.${coverage}`;
   }
   // No box to bind through: the route is not what is missing, the connection
-  // string is — and sending the user after Gladys Plus would be the wrong half.
+  // string (or the service) is — and sending the user after Gladys Plus would
+  // be the wrong half.
   if (boxDevices(config).length === 0) {
+    const fix = noBoxFix(config);
     return language === 'fr'
-      ? `${channel} : aucun boîtier à qui demander l'écoute — collez d'abord la chaîne de ` +
-          'connexion sp://.'
-      : `${channel}: no AirSend box to listen through — paste the sp:// connection string first.`;
+      ? `${channel} : aucun boîtier à qui demander l'écoute — ${fix.fr}.`
+      : `${channel}: no AirSend box to listen through — ${fix.en}.`;
   }
   // No route at all. With the bundled service that never happens (the loopback
   // callback is always there); with a service of the user's own it does, and
@@ -338,14 +398,32 @@ function describeUnheardRemotes(plan, language) {
   }
   const listed = unheard
     .slice(0, 5)
-    .map(({ device, remote }) => `${device.name} (pid ${remote.id}, addr ${remote.source})`)
+    .map(({ device, remote }) => `${device.name} (${describeRemote(remote)})`)
     .join(', ');
   const more = unheard.length > 5 ? ` (+${unheard.length - 5})` : '';
+  // The value to type, spelled out: "their pid" is 1 for a remote of the
+  // generic decoder, and the field reads 1 as "deduce".
+  const typed = (lang) =>
+    [...new Set(unheard.map(({ remote }) => channelToType(remote.id, lang)))].join(
+      lang === 'fr' ? ' ou ' : ' or ',
+    );
   return language === 'fr'
     ? ` Télécommandes déclarées sur un autre protocole, donc jamais entendues : ${listed}${more}. ` +
-        "Renseignez leur pid dans le canal d'écoute pour écouter le leur à la place."
-    : ` Remotes declared on another protocol, so never heard: ${listed}${more}. Fill in their ` +
-        'pid as the listening channel to listen to theirs instead.';
+        `Renseignez ${typed('fr')} dans le canal d'écoute pour écouter le leur à la place.`
+    : ` Remotes declared on another protocol, so never heard: ${listed}${more}. Fill in ` +
+        `${typed('en')} as the listening channel to listen to theirs instead.`;
+}
+
+/**
+ * A remote of a `remotes` list: pid and address, or the pid alone for a remote
+ * declared by its protocol only (`{ "pid": 14177 }`, the documented last
+ * resort), which has no address to print.
+ */
+function describeRemote(remote) {
+  if (remote.source === null || remote.source === undefined) {
+    return `pid ${remote.id}`;
+  }
+  return `pid ${remote.id}, addr ${remote.source}`;
 }
 
 function names(devices) {
@@ -500,16 +578,37 @@ function describeHeardEmitter(config, entry, now, language, table) {
  * nothing, and it looks exactly like a remote that was never attached.
  */
 export function describeFate(config, entry, language) {
+  const claimants = config.devmelDevices.filter((device) => hearsChannel(device, entry));
   // No address at all: the box picked the protocol up without decoding it, so
   // there is nothing to attach and nothing to publish. The fix is upstream —
   // listen to that protocol's own decoder — and it is the only advice that
   // works here, so it comes before everything else.
-  if (entry.source === null || entry.source === undefined) {
+  //
+  // Unless a device declares that protocol alone (`remotes: [{ "pid": X }]`,
+  // the documented last resort once X is listened to): the frames are then
+  // followed like any other, and advising the channel already set was wrong.
+  if ((entry.source === null || entry.source === undefined) && claimants.length === 0) {
     return language === 'fr'
       ? `le boîtier n'a pas décodé ce protocole (aucune adresse)${dropped(entry, language)} : ` +
-          `renseignez ${entry.id} comme canal d'écoute pour qu'il l'écoute sur son propre décodeur`
+          `renseignez ${channelToType(entry.id, 'fr')} comme canal d'écoute pour qu'il l'écoute ` +
+          'sur son propre décodeur'
       : `the box did not decode this protocol (no address)${dropped(entry, language)}: set the ` +
-          `listening channel to ${entry.id} so it listens on that protocol's own decoder`;
+          `listening channel to ${channelToType(entry.id, 'en')} so it listens on that ` +
+          "protocol's own decoder";
+  }
+  // What its frames did was established under the previous configuration (see
+  // HeardChannels.forgetVerdicts): a remote heard before it was attached was
+  // routed to nobody, and reading that as "carries no order" told the user
+  // who had just attached it that it could not work. A drop too: attached by
+  // its address, a remote is no longer dropped for its grade, and advising
+  // "Accept unreliable frames" contradicted the attach answer just followed.
+  if (entry.stale && claimants.length > 0) {
+    const claimed = names(claimants);
+    return language === 'fr'
+      ? `déclaré sur ${claimed}, pas entendu depuis le changement de configuration : ` +
+          "appuyez dessus pour voir s'il est suivi"
+      : `declared on ${claimed}, not heard since the configuration changed: press it to see ` +
+          'whether it is followed';
   }
   // Dropped on the way in: no device ever saw it, so nothing below applies.
   // Worth naming — an emitter the box hears loud and clear and grades badly is
@@ -521,7 +620,6 @@ export function describeFate(config, entry, language) {
       : `its last frame was dropped before any device (${entry.dropped}): "Accept unreliable ` +
           'frames" lets them through';
   }
-  const claimants = config.devmelDevices.filter((device) => hearsChannel(device, entry));
   if (claimants.length === 0) {
     return language === 'fr'
       ? 'aucun appareil ne le déclare : « Rattacher une télécommande » écrit la ligne'
@@ -530,8 +628,30 @@ export function describeFate(config, entry, language) {
   const claimed = names(claimants);
   if (entry.understood) {
     return language === 'fr'
-      ? `suivi par ${claimed}${describeOneNote(entry, language)}`
-      : `followed by ${claimed}${describeOneNote(entry, language)}`;
+      ? `suivi par ${claimed}${describeOneNote(entry, claimants, language)}`
+      : `followed by ${claimed}${describeOneNote(entry, claimants, language)}`;
+  }
+  // Decoded fine, into readings the device does not declare (a weather sensor
+  // pasted from the airsend.cloud export, which carries no `features`).
+  if (entry.undeclared?.length > 0) {
+    const features = entry.undeclared.map((feature) => `"${feature}"`).join(', ');
+    return language === 'fr'
+      ? `déclaré sur ${claimed}, qui ne déclare pas ce qu'il a décodé : ajoutez ${features} ` +
+          'à ses « features »'
+      : `declared on ${claimed}, which does not declare what it decoded: add ${features} to ` +
+          'its "features"';
+  }
+  // Decoded to an order all the same (a TOGGLE heard by a switch): the
+  // protocol is fine, the device type or the remote attached is not, and
+  // pointing at partial decoding sent the user after the wrong fix.
+  if (ordersOf(entry.readings).length > 0) {
+    return language === 'fr'
+      ? `déclaré sur ${claimed}, qui ne fait rien de l'ordre décodé : vérifiez le type ` +
+          'déclaré sur airsend.cloud (une télécommande qui envoie TOGGLE commande un Bouton, ' +
+          'type 4096), ou que la bonne télécommande est rattachée'
+      : `declared on ${claimed}, which does nothing with the order decoded: check the type ` +
+          'declared on airsend.cloud (a remote sending TOGGLE drives a Button, type 4096), or ' +
+          'that the right remote is attached';
   }
   return language === 'fr'
     ? `déclaré sur ${claimed}, mais ses trames ne portent aucun ordre rejouable (protocole ` +
@@ -553,8 +673,13 @@ export function describeFate(config, entry, language) {
  * Said as the check to run rather than as a verdict: a user who has only ever
  * pressed one button has one note too, and the answer is the same either way.
  */
-function describeOneNote(entry, language) {
+function describeOneNote(entry, claimants, language) {
   if (entry.frames < 3 || entry.notes?.size !== 1) {
+    return '';
+  }
+  // A Button only ever hears one order (a spare remote sending TOGGLE), and
+  // that is all a scene trigger needs: nothing here is half understood.
+  if (claimants.every((device) => device.rtype === DEVICE_TYPES.BUTTON)) {
     return '';
   }
   const note = [...entry.notes][0];

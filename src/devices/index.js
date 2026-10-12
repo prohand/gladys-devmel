@@ -15,8 +15,11 @@
 //   - applyReadings(gladys, {...})   (optional): publish decoded radio notes
 //   - restoreStates(gladys, {...})   (optional): resume from the states Gladys kept
 //   - identify(gladys, {...})        (optional): make the device signal itself
+//   - notCarried(gladys, {...})      (optional): undo an order the box never carried
+//   - undeclared(device, readings)   (optional): what the device would publish, if declared
 // -----------------------------------------------------------------------------
 
+import { DEVICE_TRANSPORTS } from '@gladysassistant/integration-sdk';
 import { createLogger } from '../logging.js';
 import { gateway } from './gateway.js';
 import { sensor } from './sensor.js';
@@ -27,6 +30,7 @@ import { light } from './light.js';
 import { decodeNotes, describeReadings, isSameChannel } from '../devmel/notes.js';
 import { describeEventType, explainFailure, isErrorEvent } from '../devmel/events.js';
 import { heardChannels } from '../devmel/heard.js';
+import { channelToType } from '../devmel/listening.js';
 import { sentOrders } from '../devmel/orders.js';
 import { idsFor } from './helpers.js';
 import { DEVICE_TYPES } from '../config.js';
@@ -136,9 +140,22 @@ export async function replayDeviceStates(gladys, gladysDevice, context) {
   return true;
 }
 
-/** Drop every timer the device modules hold (integration shutdown). */
-export function stopDeviceTracking() {
+/**
+ * Settle what the device modules have under way, then drop every timer they
+ * hold (integration shutdown): a shutter driven to a position gets its STOP
+ * now, and Gladys the position it is left at (see `ShutterTravel.settle`).
+ */
+export async function stopDeviceTracking() {
+  await shutter.settle();
   shutter.travel.clear();
+}
+
+/**
+ * Milliseconds until a timed shutter has a STOP to send, or null when none is
+ * waiting for one (see `ShutterTravel.untilArrival`).
+ */
+export function stopDueIn() {
+  return shutter.travel.untilArrival();
 }
 
 /**
@@ -160,6 +177,24 @@ export function buildTransportEntries(gladys, config, client) {
     entries.push({ external_id: idsFor(gladys, blueprint.key, device).device, ...entry });
   }
   return entries;
+}
+
+/**
+ * Gladys takes at most this many transport badges per request (the SDK throws
+ * above it, before anything is sent).
+ */
+const MAX_TRANSPORTS_PER_REQUEST = 100;
+
+/**
+ * Publish the transport badge of every device, in as many requests as it
+ * takes: a house past a hundred devices sent them all at once, and every
+ * (re)connection failed on it.
+ */
+export async function publishTransportEntries(gladys, config, client) {
+  const entries = buildTransportEntries(gladys, config, client);
+  for (let start = 0; start < entries.length; start += MAX_TRANSPORTS_PER_REQUEST) {
+    await gladys.publishTransports(entries.slice(start, start + MAX_TRANSPORTS_PER_REQUEST));
+  }
 }
 
 function expectedTransport(client, device) {
@@ -228,6 +263,8 @@ export async function setKnownPosition(gladys, config, externalId, position) {
  *   tests do not share the registry of the running integration
  * @param {object} [orders] the orders we sent, same reason
  * @param {object} [scenes] where the scene triggers are fired, same reason
+ * @param {object} [client] the AirSend driver, told when a remote gave a device
+ *   a newer order than the one it is still repeating (see `client.supersede`)
  * @returns {Promise<number>} how many devices acted on a frame
  */
 export async function applyEvents(
@@ -237,10 +274,25 @@ export async function applyEvents(
   registry = heardChannels,
   orders = sentOrders,
   scenes = sceneEvents,
+  client = null,
 ) {
   if (!Array.isArray(events)) {
     return 0;
   }
+  // An order is sometimes found failed outside of any verdict: its repeat
+  // dropped behind a remote pressed, or refused by a restarting service (see
+  // `SentOrders.close`). Reported right then, the way a verdict is below —
+  // and this is where Gladys, the configuration and the scenes are known.
+  orders?.reportTo?.(async (entry, verdict) => {
+    try {
+      await orderNotCarried(gladys, config, { type: verdict.type }, entry, verdict, {
+        scenes,
+        client,
+      });
+    } catch (err) {
+      logger.error(`Could not report the failed order sent to "${entry.name}"`, err);
+    }
+  });
   let applied = 0;
   for (const event of events) {
     // Ours, coming back? Asked before anything else: an order that failed to
@@ -252,25 +304,38 @@ export async function applyEvents(
       // route back into the integration, which is half of "my remote does not
       // show up" answered before anyone touches a configuration screen.
       registry.received({ own: true });
-      applied += await applyOwnEcho(gladys, config, event, echo, scenes);
+      applied += await applyOwnEcho(gladys, config, event, echo, { orders, scenes, client });
+      continue;
+    }
+
+    // Listening turned off (listening channel 0) stops the renewals, but there
+    // is no call to end a subscription already made: the box keeps pushing
+    // what it hears until it leaves reception. Those frames are what the user
+    // asked not to follow any more — a remote still moving shutters while
+    // every screen says listening is off. Our own answers above still count.
+    if (config.listen_channel === 0) {
+      logger.debug(`Listening is off: ignored a frame from ${describeChannel(event?.channel)}`);
       continue;
     }
 
     const unusable = whyUnusable(event, config);
     registry.received({ dropped: unusable });
     if (unusable) {
+      // What it carried: it is the whole difference between a frame worth
+      // rescuing (it decodes to an order, and "Accept unreliable frames" will
+      // let it through) and one that carries nothing to rescue — said in the
+      // line below, and remembered for "Attach a remote", which says it too.
+      const droppedReadings = decodeNotes(event?.thingnotes?.notes);
       // Remembered all the same when the box named the emitter: a frame graded
       // too low is an emitter heard, and leaving it out of the registry is what
       // made a box drowning in frames report exactly the same "nothing heard"
       // as a box listening to the wrong protocol.
       const dropped = registry.record(event?.channel, {
         dropped: unusable,
+        droppedReadings,
         timestamp: event?.timestamp,
       });
-      // What it carried, spelled out: it is the whole difference between a
-      // frame worth rescuing (it decodes to an order, and "Accept unreliable
-      // frames" will let it through) and one that carries nothing to rescue.
-      const carried = describeReadings(decodeNotes(event?.thingnotes?.notes));
+      const carried = describeReadings(droppedReadings);
       const line =
         `Ignored a radio frame (${unusable}): ${describeChannel(event?.channel)}, ` +
         `${carried ? `carrying ${carried}` : 'carrying no note the service could decode'}.`;
@@ -279,7 +344,12 @@ export async function applyEvents(
       // line per press of a neighbour's gate remote is noise — but a user
       // hunting a remote that never shows up must not have to enable debug
       // logs to learn that something WAS heard.
-      if (registry.announce(dropped, 'dropped')) {
+      // Never for a bad copy of a press another box just delivered well: the
+      // press was followed, and "Accept unreliable frames" would only let the
+      // far box's garbled copies through as well.
+      if (dropped?.copyOfPress) {
+        logger.debug(`${line} Another copy of the same press was usable.`);
+      } else if (registry.announce(dropped, 'dropped')) {
         logger.info(`${line} ${adviseOnDropped(event, unusable)}`);
       } else {
         logger.debug(line);
@@ -345,9 +415,17 @@ export async function applyEvents(
       }
       continue;
     }
-    const createdAt = toDate(event.timestamp);
+    const createdAt = pastDateOf(event.timestamp);
     const pressed = ordersOf(readings);
     for (const device of listeners) {
+      // First of all, before anything is published: a repeat of the previous
+      // Gladys order may still be waiting its turn on the radio, and once it
+      // goes out it undoes what the wall remote just said.
+      if (pressed.length > 0) {
+        client?.supersede(device);
+        // Nor may the late echo of a group order sent before this press.
+        orders?.pressed?.(device.platformId);
+      }
       // Someone pressed a remote: whatever the device makes of it below, a
       // scene may want to know. A plain BUTTON publishes nothing, and a spare
       // remote attached to one is exactly a scene trigger.
@@ -356,6 +434,13 @@ export async function applyEvents(
       if (!blueprint || typeof blueprint.applyReadings !== 'function') {
         // A push-only device type (a plain BUTTON) has nothing to publish when
         // it hears itself: normal, and not worth an info line.
+        //
+        // An order it heard was acted on all the same: it fired the scene
+        // trigger above, which is all a spare remote on a Button is for. Left
+        // "not understood", every screen called that working remote mute.
+        if (blueprint && pressed.length > 0 && heard) {
+          heard.understood = true;
+        }
         logger.debug(
           `Heard ${describeChannel(event.channel)} for "${device.name}", a device type that ` +
             'publishes nothing on radio frames',
@@ -390,11 +475,40 @@ export async function applyEvents(
         // attached, and the user has just attached it. So say what the frame
         // decoded to — that is what tells "wrong device declared" apart from
         // "this protocol carries no order Gladys can replay".
+        //
+        // And when it decoded fine into readings the device merely does not
+        // declare, say that instead: blaming a rolling-code protocol sent the
+        // owner of a thermometer pasted without `features` looking for a
+        // decoder problem that was a missing word.
+        const missing = blueprint.undeclared?.(device, readings) ?? [];
+        if (missing.length > 0) {
+          if (heard) {
+            heard.undeclared = missing;
+          }
+          const undeclared =
+            `Heard ${describeChannel(event.channel)} for "${device.name}": ` +
+            `${describeReadings(readings)}, which this device does not declare. Add ` +
+            `${missing.map((feature) => `"${feature}"`).join(', ')} to its "features" to ` +
+            `publish ${missing.length === 1 ? 'it' : 'them'}.`;
+          if (registry.announce(heard, `undeclared:${device.platformId}:${shapeOf(readings)}`)) {
+            logger.info(undeclared);
+          } else {
+            logger.debug(undeclared);
+          }
+          continue;
+        }
+        // A frame that did decode to an order (a TOGGLE heard by a switch) is
+        // the first case, and blaming partial decoding sent the user after the
+        // wrong fix.
         const unfollowed =
           `Heard ${describeChannel(event.channel)} for "${device.name}", but it says nothing ` +
-          `this device can follow: ${describeReadings(readings)}. A rolling-code 868 MHz ` +
-          'remote (Profalux, Somfy io) is only partially decoded: its frames prove the radio ' +
-          'works, they carry no order to replay.';
+          `this device can follow: ${describeReadings(readings)}. ` +
+          (pressed.length > 0
+            ? 'That order was decoded, and this device type does nothing with it: check the ' +
+              'type declared on airsend.cloud (a remote sending TOGGLE drives a Button, type ' +
+              '4096), or that the right remote is attached.'
+            : 'A rolling-code 868 MHz remote (Profalux, Somfy io) is only partially decoded: ' +
+              'its frames prove the radio works, they carry no order to replay.');
         if (registry.announce(heard, `unfollowed:${device.platformId}:${shapeOf(readings)}`)) {
           logger.info(unfollowed);
         } else {
@@ -413,9 +527,19 @@ export async function applyEvents(
  * taken out.
  *
  * The orders it carries are not news — the integration published them, and
- * started the travel of the shutter, at the moment it sent them. What may be
- * news is anything else the frame holds: a device that reports where it
+ * started the travel of the shutter, at the moment it sent them. That includes
+ * the percentage and the ON/OFF it sent, which come back as plain readings: read
+ * as a report, the echo of a 4099 sent to 30 % cancelled its travel a second
+ * after it set off, and a late one landed over the order given since. What may
+ * be news is anything else the frame holds: a device that reports where it
  * actually is answers on this very route, and that reading is worth publishing.
+ *
+ * Only to the device the order was sent to. Another device that lists that
+ * channel in its `remotes` (a group channel driving it with others) never acted
+ * on the order: for it, the frame is an order like any other, and dropping it
+ * left it showing open while its motor closed. Once, though: every further echo
+ * of that order, and any echo of it after an order the device was given since,
+ * is old news to it as well.
  *
  * The one echo worth an info line is the one that says the order never made it
  * to the air. Nothing moved, and until now nothing said so: a command that
@@ -424,57 +548,194 @@ export async function applyEvents(
  *
  * @returns {Promise<number>} how many devices acted on the leftovers
  */
-async function applyOwnEcho(gladys, config, event, echo, scenes = null) {
+async function applyOwnEcho(gladys, config, event, echo, { orders, scenes, client } = {}) {
+  // Only the answer to one of our transfers carries a uid: the one we gave it.
+  // The box hearing itself carries none, nor does a remote. Told by the frame,
+  // not by what it matched: an answer later than the uid window matches the
+  // voice, which has no uid — taken for a press, the late answer of an UP sent
+  // a shutter positioned at 40 % to the top.
+  const answer = Boolean(event?.thingnotes?.uid);
+  // A verdict on an emission only when it names the order it matched (see
+  // `SentOrders.settle`).
+  const ours = answer && echo.uid !== undefined && String(event.thingnotes.uid) === echo.uid;
+  const verdict = (ours ? orders?.settle?.(echo, event?.type) : null) ?? {
+    failed: isErrorEvent(event?.type),
+    uncarried: false,
+    latest: false,
+  };
+  // Orders a newer one replaced before it was known that nothing more of them
+  // would come (see `SentOrders.replace`).
+  for (const earlier of verdict.earlier ?? []) {
+    await orderNotCarried(gladys, config, { ...event, type: earlier.type }, echo, earlier, {
+      scenes,
+      client,
+    });
+  }
   if (isErrorEvent(event?.type)) {
-    // Named, not numbered. The box says WHERE the order died — refused
-    // connection string, link out of step, another client holding the radio —
-    // and each of those is a different thing to go and check. A line that
-    // called them all "could not transmit" sent every one of them to "Command
-    // repeats", which answers none.
-    logger.info(
-      `The box did not carry the order sent to "${echo.name}". ${explainFailure(event.type)}`,
-    );
-    const device = config.devmelDevices.find(
-      (candidate) => candidate.platformId === echo.platformId,
-    );
-    const blueprint = device && findBlueprintByType(device.rtype);
-    if (blueprint && scenes) {
-      await scenes.orderFailed(gladys, {
-        externalId: idsFor(gladys, blueprint.key, device).device,
-        name: device.name,
-        reason: eventReason(event.type),
-        message: explainFailure(event.type),
-      });
+    if (!verdict.failed) {
+      // One emission refused while another went out, or may still: a repeat
+      // that fails changes nothing, the order is on the air.
+      logger.debug(
+        `One emission of the order sent to "${echo.name}" was not carried, the order is not ` +
+          `failed: ${describeEventType(event.type)}`,
+      );
+      return 0;
     }
+    await orderNotCarried(gladys, config, event, echo, verdict, { scenes, client });
     return 0;
   }
 
-  const readings = decodeNotes(event?.thingnotes?.notes).filter((reading) => !reading.command);
+  const all = decodeNotes(event?.thingnotes?.notes);
+  const channel = event?.channel ?? echo.channel;
+  const said = new Set(decodeNotes(orders?.said?.(channel, { all: answer }) ?? []).map(readingKey));
+  const unsaid = all.filter((reading) => !said.has(readingKey(reading)));
+  if (!answer) {
+    // The box hearing itself: that emission is accounted for (see `said`).
+    orders?.echoed?.(channel, event?.thingnotes?.notes);
+  }
+  // A frame on our voice that says something we did not, and is not the answer
+  // to one of our transfers, is a remote sharing the address being pressed: a
+  // press, not an echo, for every device that follows that channel — the one
+  // the voice belongs to included, the way applyEvents handles any press.
+  // Handled as an echo for its own device, the copied remote's UP left a gate
+  // shown closed while it opened, the repeat of Gladys' ON still queued went
+  // out after the remote's OFF, and no remote_pressed fired.
+  const foreign = !answer && unsaid.length > 0;
+  // Only a frame applyEvents would follow, too: listening on, and graded
+  // within the window it trusts. Within the minute after a Gladys order, a
+  // badly graded frame, or one heard with listening off, otherwise set a gate
+  // off and fired remote_pressed, where the same frame a minute later was
+  // dropped.
+  const overheard = foreign && config.listen_channel !== 0 && !whyUnusable(event, config);
+  if (foreign && !overheard) {
+    logger.debug(
+      `Ignored a frame on the address of "${echo.name}" that is not an order of ours: ` +
+        `${describeChannel(event?.channel)}, ` +
+        (config.listen_channel === 0 ? 'listening is off' : whyUnusable(event, config)),
+    );
+    return 0;
+  }
+  if (overheard) {
+    orders?.overheard?.(channel);
+  }
+  const pressed = overheard ? ordersOf(all) : [];
+  const leftovers = unsaid.filter((reading) => !reading.command);
   logger.debug(
-    `Own order echoed back for "${echo.name}": ${describeChannel(event?.channel)}` +
-      `${readings.length === 0 ? '' : `, also reporting ${describeReadings(readings)}`}`,
+    `${overheard ? 'Remote sharing the address of' : 'Own order echoed back for'} ` +
+      `"${echo.name}": ${describeChannel(event?.channel)}` +
+      `${leftovers.length === 0 ? '' : `, also reporting ${describeReadings(leftovers)}`}`,
   );
-  if (readings.length === 0) {
-    return 0;
-  }
 
-  const createdAt = toDate(event.timestamp);
+  const createdAt = pastDateOf(event.timestamp);
   let applied = 0;
   for (const device of config.devmelDevices.filter((candidate) =>
     hearsChannel(candidate, event.channel),
   )) {
+    const own = device.platformId === echo.platformId;
+    if (overheard) {
+      // Before anything is published, as for any press (see applyEvents).
+      if (pressed.length > 0) {
+        client?.supersede(device);
+      }
+      orders?.pressed?.(device.platformId);
+      await firePresses(gladys, scenes, device, pressed, channel);
+    }
     const blueprint = findBlueprintByType(device.rtype);
     if (!blueprint || typeof blueprint.applyReadings !== 'function') {
       continue;
     }
+    let readings = overheard ? all : leftovers;
+    if (!own && !overheard) {
+      // A group order is followed once, and never over an order the device
+      // was given since (see `SentOrders.follows`). Asked only of an echo
+      // that says something: following uses the order up, and the transfer
+      // answer that says nothing (PENDING, SENT) used it up before the box
+      // was heard with the DOWN — the member never followed the group.
+      const follows =
+        all.length > 0 &&
+        orders?.follows?.(echo, device.platformId, event?.thingnotes?.notes) !== false;
+      readings = follows ? all : [];
+    }
+    if (readings.length === 0) {
+      continue;
+    }
     try {
-      const handled = await blueprint.applyReadings(gladys, { device, readings, createdAt });
+      const handled = await blueprint.applyReadings(gladys, {
+        device,
+        readings,
+        createdAt,
+        // Some readings carry no `command` and are orders all the same to the
+        // device that hears them (an ON to a shutter): in an echo they are ours.
+        echo: own && !overheard,
+      });
       applied += Number(handled) > 0 ? 1 : 0;
     } catch (err) {
       logger.error(`Could not publish the states of "${device.name}"`, err);
     }
   }
   return applied;
+}
+
+/**
+ * The box said an order failed, every emission of it. Said out loud, fired to
+ * the scenes, and — when the box said each time that nothing went out — undone:
+ * Gladys was answered when the service took the order (`wait: false`), so the
+ * badge, and the travel of a timed shutter with the STOP it would send at the
+ * end, still went by an order the motor never heard.
+ */
+async function orderNotCarried(gladys, config, event, echo, verdict, { scenes, client }) {
+  // Named, not numbered. The box says WHERE the order died — refused
+  // connection string, link out of step, another client holding the radio —
+  // and each of those is a different thing to go and check. A line that
+  // called them all "could not transmit" sent every one of them to "Command
+  // repeats", which answers none.
+  logger.info(
+    `The box did not carry the order sent to "${echo.name}". ${explainFailure(event.type)}`,
+  );
+  const device = config.devmelDevices.find((candidate) => candidate.platformId === echo.platformId);
+  const blueprint = device && findBlueprintByType(device.rtype);
+  if (!blueprint) {
+    return;
+  }
+  if (scenes) {
+    await scenes.orderFailed(gladys, {
+      externalId: idsFor(gladys, blueprint.key, device).device,
+      name: device.name,
+      reason: eventReason(event.type),
+      message: explainFailure(event.type),
+    });
+  }
+  // Only the device's last order, and only when nothing can have gone out: a
+  // link that dropped mid-exchange (TIMEOUT) may well have moved the motor.
+  if (!verdict.uncarried || !verdict.latest) {
+    return;
+  }
+  // An order the same feature was given another one after (see `replace` in
+  // orders.js) leaves the badge to that newer one, which may have gone out.
+  if (!verdict.superseded) {
+    client?.rememberTransport(device, DEVICE_TRANSPORTS.UNREACHABLE);
+  }
+  if (typeof blueprint.notCarried === 'function') {
+    try {
+      // Which order failed, so the device undoes that one and no other: a
+      // PING of "identify" refused undid the ON carried minutes before it.
+      await blueprint.notCarried(gladys, {
+        device,
+        since: verdict.since,
+        seq: verdict.seq ?? null,
+        uid: echo.uid,
+        superseded: Boolean(verdict.superseded),
+        until: verdict.until ?? null,
+      });
+    } catch (err) {
+      logger.error(`Could not publish the states of "${device.name}"`, err);
+    }
+  }
+}
+
+/** A reading as a key: what an echo says, to compare with what was sent. */
+function readingKey(reading) {
+  return `${reading.kind}:${reading.command ?? ''}:${reading.switched ? 'switched' : ''}:${reading.value}`;
 }
 
 /** Fire the `remote_pressed` trigger for each order a frame gave a device. */
@@ -506,8 +767,11 @@ function adviseOnDropped(event, reason) {
   if (event?.channel?.source === undefined) {
     return (
       `The box picked up protocol ${event?.channel?.id} without decoding it (no address, no ` +
-      'grade it trusts). Set the listening channel to that pid so the box listens to its own ' +
-      'decoder, and run "Test the connection" to see what it says about it.'
+      'grade it trusts). Set the listening channel to ' +
+      // Through channelToType, like every other advice on that field: pid 1
+      // typed as is reads as "deduce" and would change nothing.
+      `${channelToType(event?.channel?.id)} so the box listens to its own decoder, and run ` +
+      '"Test the connection" to see what it says about it.'
     );
   }
   return (
@@ -627,9 +891,26 @@ function isDeclaredRemote(channel, config) {
   );
 }
 
-function toDate(timestampMs) {
+/**
+ * How old a frame must be, by the box timestamp, to be published as a past
+ * state rather than as the current one.
+ */
+const LATE_FRAME_MS = 30 * 1000;
+
+/**
+ * The date to publish a frame's readings with: none for a frame heard just
+ * now, its box timestamp for one that arrived late.
+ *
+ * Gladys files a dated state as history and runs no scene trigger on it — only
+ * a state published undated is checked against the scenes. Every frame carries
+ * a timestamp, and dating them all meant a scene "when the click of the keyfob
+ * is pressed" or "when the outdoor temperature drops below 0" never ran. Only
+ * a frame relayed well after the fact (Gladys Plus catching up) still keeps
+ * its date: it must not pass for the current reading, nor run a scene late.
+ */
+function pastDateOf(timestampMs, now = Date.now()) {
   const timestamp = Number(timestampMs);
-  if (!Number.isFinite(timestamp) || timestamp <= 0) {
+  if (!Number.isFinite(timestamp) || timestamp <= 0 || now - timestamp < LATE_FRAME_MS) {
     return undefined;
   }
   return new Date(timestamp).toISOString();

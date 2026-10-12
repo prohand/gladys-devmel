@@ -96,6 +96,10 @@ test('a movement order is told apart from a position the hardware reported', () 
   assert.equal(level.command, undefined);
   assert.equal(up.value, 100);
   assert.equal(level.value, 100);
+  // The ON says which way a shutter on an on/off protocol was sent, though.
+  assert.equal(on.switched, true);
+  assert.equal(up.switched, undefined);
+  assert.equal(level.switched, undefined);
 });
 
 test('unreadable notes are ignored instead of crashing the event loop', () => {
@@ -112,7 +116,6 @@ test('a channel is identified by its id and its source', () => {
 test('an order may be said twice only when it means the same thing twice', () => {
   // The whole basis of repeating orders on a lossy one-way radio.
   assert.ok(isRepeatable([stateNote(STATE_VALUES.UP)]));
-  assert.ok(isRepeatable([stateNote(STATE_VALUES.STOP)]));
   assert.ok(isRepeatable([stateNote('ON')]));
   assert.ok(isRepeatable([levelNote(40)]));
   assert.ok(isRepeatable([stateNote(STATE_VALUES.DOWN), levelNote(0)]));
@@ -125,4 +128,14 @@ test('an order may be said twice only when it means the same thing twice', () =>
   assert.ok(!isRepeatable([queryNote('STATE')]));
   assert.ok(!isRepeatable([levelNote(40), stateNote(STATE_VALUES.TOGGLE)]));
   assert.ok(!isRepeatable([]));
+});
+
+test('a STOP is said once: a second one sends a Somfy shutter to its favourite position', () => {
+  // On Somfy RTS, STOP and the "my" button are one frame: it stops a shutter
+  // that moves, and sends a still one to the position programmed in its motor.
+  // A repeat is a second press, reaching a shutter the first one just stopped.
+  assert.ok(!isRepeatable([stateNote(STATE_VALUES.STOP)]));
+  assert.ok(!isRepeatable([stateNote('STOP')]));
+  assert.ok(!isRepeatable([stateNote(STATE_VALUES.USERPOSITION)]));
+  assert.ok(!isRepeatable([stateNote(STATE_VALUES.MIDDLE)]));
 });

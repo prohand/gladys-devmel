@@ -35,6 +35,7 @@ const REAL_TIMERS = {
 export function createListenLoop({ renew, intervalMs, timers = REAL_TIMERS }) {
   let timer = null;
   let generation = 0;
+  let stops = 0;
   let chain = Promise.resolve();
 
   function clear() {
@@ -52,7 +53,15 @@ export function createListenLoop({ renew, intervalMs, timers = REAL_TIMERS }) {
      *   there is a subscription worth renewing
      */
     start(arm) {
+      // A stop cancels the requests already asked for, not only the one
+      // binding: a request queued behind it used to run after the
+      // disconnection, bind the box and arm a timer nothing cleared until
+      // Gladys came back.
+      const asked = stops;
       const run = chain.then(async () => {
+        if (asked !== stops) {
+          return;
+        }
         clear();
         generation += 1;
         const mine = generation;
@@ -68,6 +77,7 @@ export function createListenLoop({ renew, intervalMs, timers = REAL_TIMERS }) {
 
     /** Stop renewing, including for a request still binding. */
     stop() {
+      stops += 1;
       generation += 1;
       clear();
     },

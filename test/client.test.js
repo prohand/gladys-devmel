@@ -201,6 +201,32 @@ test('a device with no transport reports itself unreachable', async () => {
   assert.equal(calls.length, 0);
 });
 
+test('a badge learnt by another route gives way to what the new configuration allows', async () => {
+  // A configuration saved republishes the badges: the one a failed order left
+  // must not survive the connection string that fixes it, nor `local` the
+  // removal of that string.
+  stubFetch(() => jsonResponse(200));
+  const client = clientWith({ spurl: '' });
+  await assert.rejects(() => client.transfer(DEVICE, [stateNote(STATE_VALUES.ON)]));
+  assert.equal(client.transportOf(DEVICE).transport, 'unreachable');
+
+  const fixed = normalizeConfig({
+    service_url: 'http://192.168.1.50:33863',
+    spurl: 'sp://pass@192.168.1.50',
+  });
+  client.configure(fixed);
+  assert.equal(client.transportOf(DEVICE), undefined);
+
+  await client.transfer(DEVICE, [stateNote(STATE_VALUES.ON)]);
+  assert.deepEqual(client.transportOf(DEVICE), { transport: 'local', degraded: false });
+  // The same configuration again (a reconnection): what it taught us stays.
+  client.configure(fixed);
+  assert.equal(client.transportOf(DEVICE).transport, 'local');
+
+  client.configure(normalizeConfig({ service_url: 'http://192.168.1.50:33863', spurl: '' }));
+  assert.equal(client.transportOf(DEVICE), undefined);
+});
+
 test('a refused connection string is reported with what to fix', async () => {
   stubFetch(() => jsonResponse(401));
   const client = clientWith();
@@ -223,6 +249,32 @@ test('bind subscribes the box to a radio channel', async () => {
     duration: 0,
     callback: 'https://webhook.example/gladys',
   });
+});
+
+test('every bind waits for what the integration holds it back for, outside the queue', async () => {
+  // A bind holds the radio while the box subscribes: the STOP of a timed
+  // shutter falling due meanwhile waited behind it. The hold is the client's,
+  // so no path that binds can forget it.
+  stubFetch(() => jsonResponse(200));
+  const client = clientWith();
+  let release = null;
+  client.beforeBind = () =>
+    new Promise((resolve) => {
+      release = resolve;
+    });
+
+  const binding = client.bind(1, 'https://webhook.example/gladys', DEVICE);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(calls.length, 0, 'nothing bound while held back');
+  // Held OUTSIDE the queue: what falls due meanwhile goes out first.
+  await client.transfer(DEVICE, [stateNote(STATE_VALUES.STOP)]);
+  release();
+  await binding;
+
+  assert.deepEqual(
+    calls.map((call) => call.url.split('/').at(-1)),
+    ['transfer', 'bind'],
+  );
 });
 
 test('listChannels reads the protocol table of the service', async () => {
@@ -311,12 +363,136 @@ test('a newer order to the same device drops the repeats of the older one', asyn
   await client.idle();
 
   const sent = calls.map((call) => JSON.parse(call.options.body).thingnotes.notes[0].value);
-  assert.equal(sent.at(-1), STATE_VALUES.STOP);
-  assert.deepEqual(sent.slice(sent.indexOf(STATE_VALUES.STOP)), [
-    STATE_VALUES.STOP,
-    STATE_VALUES.STOP,
-    STATE_VALUES.STOP,
-  ]);
+  // Nothing after the STOP, which is itself said once (see the next test).
+  assert.deepEqual(sent.slice(sent.indexOf(STATE_VALUES.STOP)), [STATE_VALUES.STOP]);
+});
+
+test('a STOP goes out once, whatever the repeats: a second one is the Somfy "my" press', async () => {
+  // A repeat is a separate press, reaching a shutter the first STOP has just
+  // stopped: on Somfy RTS that sends it to its favourite position, while
+  // Gladys shows where it was stopped.
+  stubFetch(() => jsonResponse(200, { type: 3 }));
+  const client = clientWith({ command_repeat: 2 });
+
+  await client.transfer(DEVICE, [stateNote(STATE_VALUES.STOP)]);
+  await client.idle();
+
+  assert.equal(calls.length, 1);
+});
+
+test('a STOP that may have gone out is not sent a second time', async () => {
+  stubFetch(() => jsonResponse(500));
+  const client = clientWith();
+
+  await assert.rejects(
+    () => client.transfer(DEVICE, [stateNote(STATE_VALUES.STOP)]),
+    /no radio confirmation/,
+  );
+  assert.equal(calls.length, 1);
+});
+
+test('an order retried behind a newer one is dropped, not sent after it', async () => {
+  // UP hangs until the request times out, though its frame may well have gone
+  // out: the shutter moves, the user clicks STOP, which waits behind it. A
+  // retry of UP sent after that STOP set the shutter off again.
+  let hung = null;
+  stubFetch(() => {
+    if (calls.length === 1) {
+      return new Promise((resolve, reject) => {
+        hung = () =>
+          reject(Object.assign(new Error('The operation timed out'), { name: 'TimeoutError' }));
+      });
+    }
+    return jsonResponse(200, { type: 3 });
+  });
+  const client = clientWith();
+  let transports = 0;
+  client.rememberTransport = (device, transport) => {
+    transports += 1;
+    assert.equal(transport, 'local', "the badge is the STOP's, which went through");
+  };
+
+  const up = client.transfer(DEVICE, [stateNote(STATE_VALUES.UP)]);
+  await new Promise(setImmediate);
+  const stop = client.transfer(DEVICE, [stateNote(STATE_VALUES.STOP)]);
+  hung();
+
+  // UP did fail: nothing says it reached the shutter, and nothing must now
+  // announce it open and start tracking a travel to the top.
+  await assert.rejects(up, /timed out/);
+  await stop;
+  await client.idle();
+
+  assert.deepEqual(
+    calls.map((call) => JSON.parse(call.options.body).thingnotes.notes[0].value),
+    [STATE_VALUES.UP, STATE_VALUES.STOP],
+  );
+  assert.equal(transports, 1);
+});
+
+test('a repeat waiting behind other devices is dropped once a remote overrode its order', async () => {
+  // A scene opens two shutters at once: the repeat of the first one queues
+  // behind the second one's order. The wall remote pressed STOP meanwhile, and
+  // the repeated UP must not undo it.
+  const SECOND = { ...DEVICE, name: 'Office plug', platformId: '201-2', channel: { id: 201 } };
+  let release = null;
+  stubFetch((url, options) => {
+    if (JSON.parse(options.body).channel.id === SECOND.channel.id && !release) {
+      return new Promise((resolve) => {
+        release = () => resolve(jsonResponse(200, { type: 3 }));
+      });
+    }
+    return jsonResponse(200, { type: 3 });
+  });
+  const client = clientWith({ command_repeat: 1 });
+
+  const first = client.transfer(DEVICE, [stateNote(STATE_VALUES.UP)]);
+  const second = client.transfer(SECOND, [stateNote(STATE_VALUES.UP)]);
+  await first;
+  await new Promise(setImmediate);
+  client.supersede(DEVICE);
+  release();
+  await second;
+  await client.idle();
+
+  const onFirst = calls.filter((call) => JSON.parse(call.options.body).channel.id === 200);
+  assert.equal(onFirst.length, 1);
+  // The other shutter was told nothing new: its repeat still goes out.
+  assert.equal(calls.length - onFirst.length, 2);
+});
+
+test('an order that no longer applies when its turn comes is dropped unsent', async () => {
+  // The STOP that ends a timed travel waits behind another shutter's order;
+  // meanwhile a wall remote sets the shutter off again. Sent anyway, the STOP
+  // stopped the shutter the user had just sent somewhere else.
+  const SECOND = { ...DEVICE, name: 'Office plug', platformId: '201-2', channel: { id: 201 } };
+  let release = null;
+  stubFetch((url, options) => {
+    if (JSON.parse(options.body).channel.id === SECOND.channel.id) {
+      return new Promise((resolve) => {
+        release = () => resolve(jsonResponse(200, { type: 3 }));
+      });
+    }
+    return jsonResponse(200, { type: 3 });
+  });
+  const client = clientWith();
+  let stale = false;
+
+  const second = client.transfer(SECOND, [stateNote(STATE_VALUES.UP)]);
+  const stop = client.transfer(DEVICE, [stateNote(STATE_VALUES.STOP)], { stale: () => stale });
+  await new Promise(setImmediate);
+  stale = true;
+  release();
+  await second;
+
+  const answer = await stop;
+  assert.equal(answer.dropped, true);
+  assert.deepEqual(
+    calls.map((call) => JSON.parse(call.options.body).channel.id),
+    [SECOND.channel.id],
+  );
+  // Nothing failed: the badge has nothing to say about it.
+  assert.equal(client.transportOf(DEVICE), undefined);
 });
 
 test('a repeat that fails changes nothing: the order did go out', async () => {
@@ -486,6 +662,105 @@ test('an order is remembered, so its echo is not replayed as a fresh one', async
   assert.equal(client.orders.match(echo)?.name, DEVICE.name);
 });
 
+test('an order repeated is one order to the box, refused only when every emission is', async () => {
+  // The verdict of each emission comes back later, all under one uid: a repeat
+  // the box refused must not make an order that went out a failed one.
+  stubFetch(() => jsonResponse(200, { type: 0 }));
+  const client = clientWith({ command_repeat: 1 });
+  const uid = toThingUid('feature-1');
+
+  await client.transfer(DEVICE, [stateNote(STATE_VALUES.ON)], { uid: 'feature-1' });
+  await client.idle();
+  const order = client.orders.match({ thingnotes: { uid } });
+  assert.equal(order.emissions, 2);
+  assert.equal(client.orders.settle(order, 1).failed, false);
+  assert.equal(client.orders.settle(order, 0x104).failed, false);
+
+  // The OFF given next starts over: the ON going out says nothing about it.
+  await client.transfer(DEVICE, [stateNote(STATE_VALUES.OFF)], { uid: 'feature-1' });
+  await client.idle();
+  assert.equal(client.orders.settle(order, 0x104).failed, false);
+  const { failed, uncarried, latest, since, superseded, until } = client.orders.settle(
+    order,
+    0x104,
+  );
+  assert.deepEqual(
+    { failed, uncarried, latest, since, superseded, until },
+    {
+      failed: true,
+      uncarried: true,
+      latest: true,
+      since: order.since,
+      superseded: false,
+      until: null,
+    },
+  );
+});
+
+test('an order the service never received is owed no verdict', async () => {
+  // The bundled service restarting refuses the connection: the ON never
+  // reached it. The ON given again goes out, and both its emissions are
+  // refused — that order failed, it does not pay for the one before.
+  const refused = Object.assign(new TypeError('fetch failed'), {
+    cause: { code: 'ECONNREFUSED' },
+  });
+  let down = true;
+  stubFetch(() => {
+    if (down) {
+      throw refused;
+    }
+    return jsonResponse(200, { type: 0 });
+  });
+  const client = clientWith({ command_repeat: 1 });
+  const uid = toThingUid('feature-1');
+  await captureLogs(() =>
+    assert.rejects(() =>
+      client.transfer(DEVICE, [stateNote(STATE_VALUES.ON)], { uid: 'feature-1' }),
+    ),
+  ).result;
+  down = false;
+  const sent = await client.transfer(DEVICE, [stateNote(STATE_VALUES.ON)], { uid: 'feature-1' });
+  await client.idle();
+
+  const order = client.orders.match({ thingnotes: { uid } });
+  assert.equal(client.orders.settle(order, 0x101).failed, false);
+  const verdict = client.orders.settle(order, 0x101);
+  assert.equal(verdict.failed, true);
+  assert.equal(verdict.superseded, false);
+  assert.equal(verdict.seq, sent.seq);
+  assert.deepEqual(verdict.earlier, []);
+});
+
+test('a repeat dropped behind a newer order is owed no verdict', async () => {
+  // ON then OFF clicked together over a slow link: the ON's repeat comes
+  // after the OFF and is dropped. Three emissions, three verdicts.
+  stubFetch(async () => {
+    await new Promise(setImmediate);
+    return jsonResponse(200, { type: 0 });
+  });
+  const client = clientWith({ command_repeat: 1 });
+  const uid = toThingUid('feature-1');
+  const on = client.transfer(DEVICE, [stateNote(STATE_VALUES.ON)], { uid: 'feature-1' });
+  const off = client.transfer(DEVICE, [stateNote(STATE_VALUES.OFF)], { uid: 'feature-1' });
+  const [onSent, offSent] = await Promise.all([on, off]);
+  await client.idle();
+  assert.deepEqual(
+    calls.map((call) => JSON.parse(call.options.body).thingnotes.notes[0].value),
+    [STATE_VALUES.ON, STATE_VALUES.OFF, STATE_VALUES.OFF],
+  );
+
+  const order = client.orders.match({ thingnotes: { uid } });
+  const first = client.orders.settle(order, 0x101);
+  assert.equal(first.failed, true);
+  assert.equal(first.seq, onSent.seq);
+  assert.equal(first.superseded, true);
+  assert.equal(client.orders.settle(order, 0x101).failed, false);
+  const last = client.orders.settle(order, 0x101);
+  assert.equal(last.failed, true);
+  assert.equal(last.seq, offSent.seq);
+  assert.equal(last.superseded, false);
+});
+
 test('an order that took its time says where the time went', async () => {
   // "It reacts, but three seconds later" has two causes that look identical
   // from the sofa: the queue, which is ours, and the box, which is not.
@@ -592,6 +867,9 @@ test('a box that goes cold quickly is touched more often, down to a floor', asyn
     return client.keepWarm(BOX);
   };
 
+  // The first contact builds the session: slow whatever the interval, it
+  // teaches nothing (see the test below).
+  await wake(50);
   assert.equal(client.warmAfter, WARM_AFTER_MS);
   await wake(3000);
   assert.equal(client.warmAfter, WARM_AFTER_MS / 2);
@@ -612,6 +890,9 @@ test('a box that goes cold quickly is touched more often, down to a floor', asyn
 test('a fresh configuration forgets what the old box taught us', async () => {
   const tick = { at: 0 };
   const client = clientOnClock(tick);
+  stubFetch(() => jsonResponse(200, { type: 3, thingnotes: { notes: [] } }));
+  tick.at += WARM_AFTER_MS;
+  await client.keepWarm(BOX);
   stubFetch(() => {
     tick.at += 3000;
     return jsonResponse(200, { type: 3, thingnotes: { notes: [] } });
@@ -623,4 +904,150 @@ test('a fresh configuration forgets what the old box taught us', async () => {
 
   client.configure(normalizeConfig({ spurl: 'sp://pass@[fe80::2]?rhost=192.168.1.51' }));
   assert.equal(client.warmAfter, WARM_AFTER_MS);
+});
+
+test('the first contact with a box, slow by nature, does not shorten the interval', async () => {
+  // Nothing had reached the box since start-up: that wake builds the session,
+  // and its slowness says nothing about how fast the link goes cold.
+  const tick = { at: Date.parse('2026-10-11T08:00:00Z') };
+  const client = clientOnClock(tick);
+  stubFetch(() => {
+    tick.at += 1200;
+    return jsonResponse(200, { type: 3, thingnotes: { notes: [] } });
+  });
+
+  const lines = captureLogs(() => client.keepWarm(BOX));
+
+  assert.equal(await lines.result, true);
+  assert.equal(client.warmAfter, WARM_AFTER_MS);
+  assert.equal(lines.of('INFO').length, 0);
+});
+
+test('a box that is off does not bring the interval down, nor fill the log', async () => {
+  // Every wake of a box that is unplugged lasts the whole timeout: that is the
+  // box missing, not a link going cold.
+  const tick = { at: 0 };
+  const client = clientOnClock(tick);
+  stubFetch(() => jsonResponse(200, { type: 3, thingnotes: { notes: [] } }));
+  tick.at += WARM_AFTER_MS;
+  await client.keepWarm(BOX);
+
+  const lines = captureLogs(async () => {
+    for (const failure of [
+      () => {
+        tick.at += 8000;
+        throw Object.assign(new Error('The operation timed out'), { name: 'TimeoutError' });
+      },
+      // The service is there, the box is not.
+      () => {
+        tick.at += 3000;
+        return jsonResponse(200, { type: 0x101 });
+      },
+      () => {
+        tick.at += 3000;
+        return jsonResponse(200, { type: 0x105 });
+      },
+    ]) {
+      stubFetch(failure);
+      tick.at += client.warmAfter;
+      assert.equal(await client.keepWarm(BOX), true);
+    }
+  });
+  await lines.result;
+
+  assert.equal(client.warmAfter, WARM_AFTER_MS);
+  assert.equal(lines.of('INFO').length, 0);
+});
+
+test('every box is kept warm, each after its own silence', async () => {
+  // Two boxes are two radios: the first one woken used to make the second
+  // look busy, and its traffic made the second look recently used.
+  const tick = { at: 0 };
+  const client = clientOnClock(tick);
+  const second = {
+    ...BOX,
+    name: 'Garage box',
+    platformId: '1-garage',
+    spurl: 'sp://pass@[fe80::2]?rhost=192.168.1.51',
+  };
+  stubFetch(() => jsonResponse(200, { type: 3, thingnotes: { notes: [] } }));
+
+  tick.at += WARM_AFTER_MS;
+  // Called the way index.js does: same tick, not awaited one after the other.
+  assert.deepEqual(await Promise.all([client.keepWarm(BOX), client.keepWarm(second)]), [
+    true,
+    true,
+  ]);
+  const reached = calls.map((call) => call.options.headers.Authorization);
+  assert.equal(new Set(reached).size, 2);
+
+  // Orders through the first box are no news for the second one.
+  tick.at += WARM_AFTER_MS - 1000;
+  await client.transfer(DEVICE, [stateNote(STATE_VALUES.ON)]);
+  tick.at += 1000;
+  assert.deepEqual(await Promise.all([client.keepWarm(BOX), client.keepWarm(second)]), [
+    false,
+    true,
+  ]);
+});
+
+test('one box written two ways is one radio: one transmission at a time', async () => {
+  // The device list declares the box with its parameters in another order than
+  // the global string: connection.js takes it for the global box, and so must
+  // the queue. Keyed on the text, the keep-warm and the listening renewal went
+  // out through the box's string while the shutter order went out through the
+  // global one, at the same moment, to the same radio.
+  const declared = { ...BOX, spurl: 'sp://pass@[fe80::1]?rhost=192.168.1.50&gw=0' };
+  let inFlight = 0;
+  let most = 0;
+  stubFetch(async () => {
+    inFlight += 1;
+    most = Math.max(most, inFlight);
+    await new Promise(setImmediate);
+    inFlight -= 1;
+    return jsonResponse(200, { type: 3, thingnotes: { notes: [] } });
+  });
+  const client = clientWith({ spurl: 'sp://pass@[fe80::1]?gw=0&rhost=192.168.1.50' });
+
+  await Promise.all([
+    client.keepWarm(declared),
+    client.transfer(DEVICE, [stateNote(STATE_VALUES.ON)]),
+    client.bind(5, 'http://127.0.0.1:9999/', declared),
+  ]);
+
+  assert.equal(calls.length, 3);
+  assert.equal(most, 1);
+  // And the shutter orders are news for the keep-warm: a box just used is not
+  // woken again.
+  assert.equal(await client.keepWarm(declared), false);
+  assert.equal(calls.length, 3);
+});
+
+test('a box that does not answer holds up only its own orders', async () => {
+  // Two boxes, the first one unplugged: each request to it hangs until the
+  // timeout. The STOP that ends a timed travel through the second box used to
+  // wait behind it, and the shutter ran on.
+  const garage = {
+    ...DEVICE,
+    name: 'Garage door',
+    platformId: '300-3',
+    channel: { id: 300 },
+    spurl: 'sp://pass@[fe80::2]?rhost=192.168.1.51',
+  };
+  stubFetch((url, options) => {
+    if (options.headers.Authorization.includes('fe80::1')) {
+      return new Promise(() => {});
+    }
+    return jsonResponse(200, { type: 3 });
+  });
+  const client = clientWith();
+
+  client.bind(5, 'http://127.0.0.1:9999/', BOX).catch(() => {});
+  await new Promise(setImmediate);
+  await client.transfer(garage, [stateNote(STATE_VALUES.STOP)]);
+
+  assert.equal(calls.length, 2);
+  assert.match(calls[1].url, /airsend\/transfer$/);
+  // And the integration knows a box is still busy: listening waits for it.
+  assert.equal(client.busy, true);
 });

@@ -131,7 +131,7 @@ export class AirSendService {
   async apply(config) {
     this.wanted = config?.embeddedService === true;
     if (!this.wanted) {
-      await this.stop();
+      await this.stop({ unlessWantedAgain: true });
       return false;
     }
     try {
@@ -164,6 +164,19 @@ export class AirSendService {
       this.pid = await this.readPid();
       this.running = true;
       logger.info(`AirSend Web Service already running on ${this.url}`);
+      this.armWatchdog();
+      return true;
+    }
+
+    // Silent is not dead (see FAILED_PROBES_BEFORE_RESTART), and apply() runs on
+    // every reconnection and configuration save, often while the daemon is busy
+    // with the box. Launching a second one there would delete the live one's
+    // lock, fail to bind the port, and lose the pid the watchdog needs to end a
+    // hang. A daemon of ours still alive is kept: the watchdog decides.
+    if (this.pid && isAlive(this.pid)) {
+      this.failedProbes = 1;
+      this.running = true;
+      logger.warn(`The AirSend Web Service (pid ${this.pid}) is slow to answer, keeping it`);
       this.armWatchdog();
       return true;
     }
@@ -222,7 +235,22 @@ export class AirSendService {
     });
   }
 
-  async stop() {
+  /**
+   * @param {object} [options]
+   * @param {boolean} [options.unlessWantedAgain] give up when, by the time a
+   *   start in flight has finished, a newer configuration wants the service
+   *   again (apply). Shutdown stops it whatever the configuration says.
+   */
+  async stop({ unlessWantedAgain = false } = {}) {
+    // A start in flight launches the daemon after we would have looked for its
+    // pid, and arms the watchdog: let it finish, then end what it started.
+    await this.starting?.catch(() => {});
+    // Unless a save made while we waited asked for it back: that apply joined
+    // the same start and answered true, and stopping now killed the daemon it
+    // had just launched — wanted, not running, and no watchdog to notice.
+    if (unlessWantedAgain && this.wanted) {
+      return;
+    }
     this.disarmWatchdog();
     const pid = this.pid ?? (await this.readPid());
     this.running = false;
@@ -370,6 +398,10 @@ export class AirSendService {
     const pid = this.pid ?? (await this.readPid());
     this.pid = null;
     await this.terminate(pid);
+    // The user may have switched to a service of their own meanwhile.
+    if (!this.wanted) {
+      return;
+    }
     const restarted = await this.start().catch((err) => {
       this.error = err.message;
       logger.error(`Could not restart the AirSend Web Service: ${err.message}`);

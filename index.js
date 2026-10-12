@@ -15,27 +15,31 @@
 // -----------------------------------------------------------------------------
 
 import { resetGatewayReads } from './src/devices/gateway.js';
+import { isRadioFailure } from './src/devices/helpers.js';
 import { GladysIntegration } from '@gladysassistant/integration-sdk';
-import { normalizeConfig } from './src/config.js';
+import { logSettingsOf, normalizeConfig } from './src/config.js';
 import { applyLogLevel, applyLogTimeZone, createLogger } from './src/logging.js';
 import { AirSendClient } from './src/devmel/client.js';
 import {
   applyEvents,
   buildDiscoveredDevices,
-  buildTransportEntries,
   findDeviceByExternalId,
   identifyDevice,
+  publishTransportEntries,
   replayDeviceStates,
   restoreDeviceStates,
   setKnownPosition,
   stopDeviceTracking,
+  stopDueIn,
 } from './src/devices/index.js';
 import { boxDevices, describeConnection, testConnection } from './src/devmel/connection.js';
 import { AirSendService } from './src/devmel/service.js';
-import { CallbackServer } from './src/devmel/callback.js';
-import { indexChannels, planListening } from './src/devmel/listening.js';
+import { CallbackServer, eventsOf } from './src/devmel/callback.js';
+import { indexChannels } from './src/devmel/listening.js';
+import { armListening, rearmedChannel, renewListening } from './src/devmel/subscription.js';
 import { createListenLoop } from './src/devmel/listenLoop.js';
 import { heardChannels } from './src/devmel/heard.js';
+import { sentOrders } from './src/devmel/orders.js';
 import { attachHeardRemote } from './src/devmel/remotes.js';
 import { findProtocol } from './src/devmel/protocols.js';
 import { failureReason, SCENE_ACTIONS, sceneEvents } from './src/capabilities/scenes.js';
@@ -61,6 +65,9 @@ const client = new AirSendClient();
 // Transmitting takes the box out of reception: every exchange is a reason to
 // make sure it is still listening (see `scheduleRebind`).
 client.afterTransmit = () => scheduleRebind();
+// And no bind goes in front of the STOP of a timed travel, whoever asks for it
+// (see `holdBindForStop`).
+client.beforeBind = () => holdBindForStop();
 
 // The AirSend Web Service, running in this very container unless the user
 // pointed the configuration at one of their own.
@@ -78,6 +85,11 @@ const callbackServer = new CallbackServer();
 // Current configuration (hot-reloaded via onConfigUpdated).
 let config = normalizeConfig();
 
+// The raw configuration it was built from, as `configKey` spells it: what
+// tells a configuration that changed from the same one read again after a
+// reconnection.
+let appliedConfigKey = null;
+
 // Public URL of the `events` webhook, relayed by Gladys Plus. It is the only
 // way in for frames when the AirSend Web Service runs on ANOTHER machine, which
 // cannot reach our loopback.
@@ -93,9 +105,7 @@ const LISTEN_REFRESH_MS = 10 * 60 * 1000;
 const listenLoop = createListenLoop({
   intervalMs: LISTEN_REFRESH_MS,
   renew: () =>
-    bindBoxes(radioCallbackUrl(), { renewal: true }).catch((err) =>
-      logger.error('Could not renew the radio listener', err),
-    ),
+    renewSubscription().catch((err) => logger.error('Could not renew the radio listener', err)),
 });
 
 // And re-arms it shortly after the integration has used the radio itself: a box
@@ -104,6 +114,15 @@ const listenLoop = createListenLoop({
 // above — ten minutes of a Gladys that stopped following the house.
 let rebindTimer = null;
 const REBIND_AFTER_COMMAND_MS = 2000;
+// How close the STOP of a timed travel may be before a bind is held back for it
+// (see `holdBindForStop`): a bind lasts well under a second on a warm link, a
+// few on a cold one.
+const BIND_CLEARANCE_MS = 5000;
+
+// How long a graceful shutdown gives the shutters under way to be stopped and
+// published (see `stopDeviceTracking`) before it stops the service anyway:
+// `docker stop` kills the container after ten seconds.
+const SETTLE_TIMEOUT_MS = 5000;
 
 // Keeps the link to the box from going cold. Nothing here is on a schedule: it
 // only looks at how long the box has been left alone, which is why it ticks
@@ -150,13 +169,16 @@ gladys.onSetValue(async (device, feature, value) => {
     });
   } catch (err) {
     // The one failure of a radio order anything can report: a scene may want
-    // to know (a notification, a retry later).
-    await sceneEvents.orderFailed(gladys, {
-      externalId: device.external_id,
-      name: found.device.name,
-      reason: failureReason(err),
-      message: err.message,
-    });
+    // to know (a notification, a retry later). Only the order's own: a state
+    // Gladys refused once it was on the air is not a radio order that failed.
+    if (isRadioFailure(err)) {
+      await sceneEvents.orderFailed(gladys, {
+        externalId: device.external_id,
+        name: found.device.name,
+        reason: failureReason(err),
+        message: err.message,
+      });
+    }
     throw err;
   } finally {
     // A failed order is exactly when the badge has something new to say: the
@@ -180,7 +202,11 @@ gladys.onPoll(async (device) => {
     callbackUrl: radioCallbackUrl(),
     config,
   });
-  await publishDeviceTransports();
+  // The read worked: a badge Gladys refused is no reason to report the poll
+  // as failed.
+  await publishDeviceTransports().catch((err) =>
+    logger.debug(`Could not publish the transports: ${err.message}`),
+  );
 });
 
 // --- Device created / updated by the user ------------------------------------
@@ -210,22 +236,41 @@ gladys.onDeviceUpdated((device) => onDeviceSaved(device, 'onDeviceUpdated'));
 // Every frame the box hears on the listening channel — a wall remote pressed by
 // hand, a weather sensor waking up, the confirmation of an order we sent —
 // reaches this function, whichever route carried it: the loopback callback
-// above, or the `events` webhook relayed by Gladys Plus. Sensor readings are
-// dated with the box timestamp, because relayed events can arrive out of
-// order; the state of what a remote drives is not (see helpers.js).
+// above, or the `events` webhook relayed by Gladys Plus. Sensor readings that
+// arrive late are dated with the box timestamp, because relayed events can
+// arrive out of order; the state of what a remote drives is not (see
+// helpers.js).
 async function handleRadioEvents(events, route) {
-  const applied = await applyEvents(gladys, config, events);
+  // The client too: an order heard from a wall remote cancels the repeats of
+  // the Gladys order it overrides, and an order the box says it never carried
+  // turns the badge of its device to unreachable.
+  const badges = JSON.stringify([...client.transports]);
+  const applied = await applyEvents(
+    gladys,
+    config,
+    events,
+    heardChannels,
+    sentOrders,
+    sceneEvents,
+    client,
+  );
   logger.debug(`${route}: ${events?.length ?? 0} event(s), ${applied} device(s) updated`);
+  if (JSON.stringify([...client.transports]) !== badges) {
+    await publishDeviceTransports().catch((err) =>
+      logger.debug(`Could not publish the transports: ${err.message}`),
+    );
+  }
   refreshWidget();
 }
 
-// `fire_and_forget` mode: the caller only awaits an acknowledgement.
+// `fire_and_forget` mode: the caller only awaits an acknowledgement. Read like
+// the loopback callback, every shape included: it is the same service posting.
 gladys.onWebhook('events', async (request) => {
-  const payload = parseWebhookBody(request);
-  if (!payload) {
+  const events = eventsOf(request?.body, 'webhook payload');
+  if (events.length === 0) {
     return;
   }
-  await handleRadioEvents(payload.events, 'Webhook');
+  await handleRadioEvents(events, 'Webhook');
 });
 
 // The Gladys Plus link changed: pick up the fresh URL and re-register it at the
@@ -322,24 +367,14 @@ gladys.onConfigUpdated(async (newConfig) => {
   logger.info('onConfigUpdated -> new configuration received');
   // A new `refresh` applies from the next tick.
   resetGatewayReads();
-  await initialize(newConfig);
+  await initializeOrReport(async () => newConfig, 'Initialization after a configuration save');
 });
 
 // --- Connection lifecycle ----------------------------------------------------
 // The SDK itself logs the WebSocket lifecycle under the `gladys-sdk` name: these
 // handlers only run the integration's own (re)initialization.
 gladys.on('connected', async () => {
-  try {
-    await initialize(await gladys.getConfig());
-  } catch (err) {
-    logger.error('Post-connection initialization failed', err);
-    await gladys
-      .setConnectionStatus(false, {
-        en: 'Initialization failed, check the integration logs.',
-        fr: "L'initialisation a échoué, consultez les logs de l'intégration.",
-      })
-      .catch(() => {});
-  }
+  await initializeOrReport(() => gladys.getConfig(), 'Post-connection initialization');
 });
 
 gladys.on('disconnected', () => {
@@ -348,21 +383,65 @@ gladys.on('disconnected', () => {
 });
 
 /**
+ * `initialize`, with its failure said: in the logs, and in the status of the
+ * Configuration screen. Whatever a handler throws, the SDK swallows into its
+ * own debug output, which no setting of the integration turns on — a save
+ * that failed used to leave no trace at all, and the old status in place.
+ *
+ * @param {() => Promise<object>} readConfig the raw configuration to apply
+ * @param {string} what the step, as the log line names it
+ */
+async function initializeOrReport(readConfig, what) {
+  try {
+    await initialize(await readConfig());
+  } catch (err) {
+    logger.error(`${what} failed`, err);
+    await gladys
+      .setConnectionStatus(false, {
+        en: 'Initialization failed, check the integration logs.',
+        fr: "L'initialisation a échoué, consultez les logs de l'intégration.",
+      })
+      .catch(() => {});
+  }
+}
+
+/**
+ * A raw configuration as one comparable string, whatever order Gladys lists
+ * its keys in (the save and the read-back after a reconnection come by two
+ * different routes).
+ */
+function configKey(rawConfig) {
+  const entries = Object.entries(rawConfig ?? {}).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
+  return JSON.stringify(entries);
+}
+
+/**
  * Apply a configuration and (re)build everything that depends on it: the
  * devices, their transport badge, the radio listener and the status shown in
  * the Configuration screen.
  */
 async function initialize(rawConfig) {
-  config = normalizeConfig(rawConfig);
   // First, so that everything this initialization logs already obeys the level
-  // the user just asked for — the frames of a freshly armed listener included.
-  applyLogLevel(config);
-  applyLogTimeZone(config);
+  // the user just asked for — the parsing of the configuration itself and the
+  // frames of a freshly armed listener included.
+  const logSettings = logSettingsOf(rawConfig);
+  applyLogLevel(logSettings);
+  applyLogTimeZone(logSettings);
+  config = normalizeConfig(rawConfig);
   // A configuration is changed because something did not work, and the frames
   // that would say whether it works now belong to emitters the logs have
   // already had their say about. Re-arm those once-only lines: the next press
   // of the remote is the one the user is watching for.
   heardChannels.reannounce();
+  // And forget what the frames did under the previous configuration — only
+  // when there was one: this also runs on every reconnection to Gladys, with
+  // the very same configuration, and every remote being followed then read
+  // "not heard since the configuration changed".
+  const key = configKey(rawConfig);
+  if (key !== appliedConfigKey) {
+    heardChannels.forgetVerdicts();
+    appliedConfigKey = key;
+  }
   // The protocol table belongs to the service the configuration points at.
   channelTable = new Map();
 
@@ -381,8 +460,16 @@ async function initialize(rawConfig) {
   client.configure(config);
   logger.info(`${config.devmelDevices.length} Devmel device(s) configured`);
 
-  // publishDiscoveredDevices is idempotent (upsert by external_id).
-  await gladys.publishDiscoveredDevices(buildDiscoveredDevices(gladys, config));
+  // publishDiscoveredDevices is idempotent (upsert by external_id). A Gladys
+  // that refuses it does not make the box any less reachable: what only
+  // depends on the box — listening to the protocol just chosen, keeping the
+  // link warm — is still put in place, and the failure reported after that.
+  let discovery = null;
+  try {
+    await gladys.publishDiscoveredDevices(buildDiscoveredDevices(gladys, config));
+  } catch (err) {
+    discovery = err;
+  }
 
   // Resume where the last run left off: the position of a shutter is computed
   // from the travel of its motor, so it has to start from the value Gladys
@@ -396,11 +483,32 @@ async function initialize(rawConfig) {
     logger.info(`${restored} device(s) resumed from their last known state`);
   }
 
-  eventsWebhookUrl = webhookUrlOf(await gladys.getWebhooks().catch(() => null));
+  // Only an answer changes the relay URL. A read that failed says nothing
+  // about Gladys Plus — one timeout during a save dropped a working URL, and
+  // a service on another machine lost its listening and its order verdicts
+  // until the next save. A relay that did go away says so (`available:
+  // false`), here or through `onWebhookUpdated`.
+  try {
+    eventsWebhookUrl = webhookUrlOf(await gladys.getWebhooks());
+  } catch (err) {
+    logger.warn(
+      `Could not read the Gladys Plus webhook: ${err.message} -> ${
+        eventsWebhookUrl ? 'keeping the last known one' : 'no relay known'
+      }`,
+    );
+  }
   await startListening();
 
-  await publishDeviceTransports();
+  // A badge is a nicety: one Gladys refused must not cost the keep-warm and
+  // the status below.
+  await publishDeviceTransports().catch((err) =>
+    logger.warn(`Could not publish the transports: ${err.message}`),
+  );
   startKeepingWarm();
+
+  if (discovery) {
+    throw discovery;
+  }
 
   // Application-level status, shown in the Configuration screen: distinct from
   // the container state machine, an integration can be RUNNING and still unable
@@ -437,92 +545,36 @@ function radioCallbackUrl() {
  */
 async function startListening() {
   stopRebind();
-  await listenLoop.start(armListening);
-}
-
-/** @returns {Promise<boolean>} whether a subscription was made, worth renewing */
-async function armListening() {
-  const callbackUrl = radioCallbackUrl();
-  listenState.url = null;
-  listenState.error = null;
-  listenState.plan = planListening(config, await knownChannels());
-
-  if (!listenState.plan.enabled) {
-    logger.info('Listening disabled (listening channel set to 0)');
-    return false;
-  }
-  if (!callbackUrl) {
-    logger.info('No route for the radio frames -> sensors are refreshed by polling only');
-    return false;
-  }
-  if (boxDevices(config).length === 0) {
-    // Nothing to bind through: without a connection string there is no box to
-    // ask, and a renewal timer would bind nothing every ten minutes.
-    logger.info('No AirSend box to listen through: paste the sp:// connection string first');
-    return false;
-  }
-  if (listenState.plan.fallback) {
-    // Binding still happens: generic 433 MHz is the only useful guess before
-    // anything is declared. But it is a default, and a default that cannot
-    // hear an 868 MHz remote at all — which is indistinguishable, from the
-    // outside, from a listener that was never armed.
-    logger.warn(
-      `No radio device declared: listening to generic 433 MHz (channel ${listenState.plan.channel}). ` +
-        'An 868 MHz protocol (Profalux, Somfy io) is not heard on it -> declare a device on it, ' +
-        'or set the listening channel to its pid.',
-    );
-  }
-
-  await bindBoxes(callbackUrl);
-  announceBlindSpots(listenState.plan);
-  return true;
-}
-
-/**
- * What the protocol just bound will NOT bring back.
- *
- * The box has one radio and listens to one protocol at a time, so every choice
- * of channel is also a list of things that will never be heard again. Until now
- * that list only existed in the "Test the connection" report — a screen nobody
- * opens while everything looks fine — and its absence is what makes a perfectly
- * armed listener indistinguishable from a broken one.
- */
-function announceBlindSpots(plan) {
-  if (!plan?.enabled || !listenState.url) {
-    return;
-  }
-  for (const device of plan.uncovered) {
-    logger.warn(
-      `"${device.name}" speaks protocol ${device.channel?.id}, not the ${plan.channel} the box ` +
-        'listens to: nothing it emits will be heard. One radio, one protocol at a time.',
-    );
-  }
-  for (const { device, remote } of plan.unheardRemotes) {
-    logger.warn(
-      `The remote declared on "${device.name}" (pid ${remote.id}) speaks another protocol than ` +
-        `the ${plan.channel} the box listens to: pressing it will do nothing in Gladys. Fill in ` +
-        `${remote.id} as the listening channel to hear it instead.`,
-    );
-  }
-  if (plan.echoOnly) {
-    // The silence this explains is total: the box is listening, the route works,
-    // and nothing will ever come through it — because nothing declared on that
-    // protocol ever speaks first.
-    logger.info(
-      `Nothing declared on channel ${plan.channel} emits by itself: shutters, switches and lamps ` +
-        'are talked to, they do not talk. The box will hear the echo of Gladys own orders and ' +
-        'nothing else. A wall remote has its own protocol and its own address: press it, then ' +
-        'run "Attach a remote" — if nothing turns up, the box is not listening to ITS protocol.',
-    );
-  }
+  // This request's own outcome, for the re-arm to answer from: the shared
+  // state may already belong to the next request by the time it reads it.
+  let outcome = null;
+  await listenLoop.start(async () => {
+    outcome = await armListening({
+      config,
+      callbackUrl: radioCallbackUrl(),
+      table: await knownChannels(),
+      client,
+    });
+    // Stored once the attempt is over, never half-way: "Test the connection"
+    // and the widget read it at any moment.
+    listenState.plan = outcome.plan;
+    listenState.url = outcome.url;
+    listenState.error = outcome.error;
+    return outcome.renewable;
+  });
+  return outcome;
 }
 
 /**
  * The protocol table of the service, or an empty one when it cannot be read: a
  * protocol whose decoder is unknown is then listened to on its own channel,
  * which is what the table says for most of them anyway.
+ *
+ * @param {object} [options]
+ * @param {boolean} [options.quiet] a failure said at debug level only — the
+ *   renewals ask again after every order, and the arm already said it once
  */
-async function knownChannels() {
+async function knownChannels({ quiet = false } = {}) {
   if (channelTable.size > 0 || !config.effectiveServiceUrl) {
     return channelTable;
   }
@@ -530,32 +582,32 @@ async function knownChannels() {
     channelTable = indexChannels(await client.listChannels());
     logger.debug(`${channelTable.size} radio protocol(s) known by the AirSend Web Service`);
   } catch (err) {
-    logger.warn(`Could not read the radio protocols of the AirSend Web Service: ${err.message}`);
+    logger[quiet ? 'debug' : 'warn'](
+      `Could not read the radio protocols of the AirSend Web Service: ${err.message}`,
+    );
   }
   return channelTable;
 }
 
-async function bindBoxes(callbackUrl, { renewal = false } = {}) {
-  const channel = listenState.plan?.channel;
-  if (!callbackUrl || !(channel > 0)) {
-    return;
-  }
-  for (const box of boxDevices(config)) {
-    try {
-      await client.bind(channel, callbackUrl, box);
-      listenState.url = callbackUrl;
-      listenState.error = null;
-      // A renewal says nothing new: it repeats, every ten minutes and after
-      // every order, a line the user already read when listening was armed.
-      logger[renewal ? 'debug' : 'info'](
-        `Listening on channel ${channel} through "${box.name}" -> ${callbackUrl}`,
-      );
-    } catch (err) {
-      if (!listenState.url) {
-        listenState.error = err.message;
-      }
-      logger.warn(`Could not listen through "${box.name}": ${err.message}`);
-    }
+/**
+ * Bind the boxes again (renewal timer, after an order), and record what came
+ * of it — a failure included: the reports describe the last attempt.
+ */
+async function renewSubscription() {
+  const plan = listenState.plan;
+  const renewed = await renewListening({
+    config,
+    plan,
+    callbackUrl: radioCallbackUrl(),
+    table: await knownChannels({ quiet: true }),
+    client,
+  });
+  // An arm that completed meanwhile says more than this renewal of the plan
+  // it replaced.
+  if (renewed && listenState.plan === plan) {
+    listenState.plan = renewed.plan;
+    listenState.url = renewed.url;
+    listenState.error = renewed.error;
   }
 }
 
@@ -588,13 +640,44 @@ function rebindNow() {
   // An order queued behind a subscription is an order the user waits for: the
   // box has one radio, and a bind holds it for as long as it takes. Listening
   // can wait — it has nobody watching a slider.
-  if (client.busy) {
+  //
+  // Nor in front of the STOP of a timed travel (see `holdBindForStop`): put
+  // off here rather than waited for, since that STOP, once sent, asks for its
+  // own rebind — waiting would bind twice.
+  const stopIn = stopDueIn();
+  if (client.busy || (stopIn !== null && stopIn < BIND_CLEARANCE_MS)) {
     scheduleRebind();
     return;
   }
-  bindBoxes(radioCallbackUrl(), { renewal: true }).catch((err) =>
+  renewSubscription().catch((err) =>
     logger.debug(`Could not re-arm the radio listener after a command: ${err.message}`),
   );
+}
+
+/**
+ * Hold a bind back, before it takes the radio queue, while the STOP of a timed
+ * travel falls due within a bind's length. That STOP waits in a travel timer,
+ * not in the queue: falling due during a bind, it went out a bind late — a
+ * shutter asked 88 % stopped at 84 %, one asked 40 % on a cold link near 17 %,
+ * and Gladys showed the target. Every bind waits here (see
+ * `client.beforeBind`): the ten-minute renewal, a configuration saved, a
+ * reconnection, the re-arm buttons — one path that did not was enough.
+ *
+ * Once its timer has fired the STOP is in the queue, and the bind queues
+ * behind it. A STOP further away than a bind lasts is left to come: the box
+ * listens meanwhile. Bounded, so that shutters set off one after the other
+ * cannot keep listening down for good.
+ */
+async function holdBindForStop() {
+  const deadline = Date.now() + 2 * BIND_CLEARANCE_MS;
+  for (;;) {
+    const stopIn = stopDueIn();
+    if (stopIn === null || stopIn >= BIND_CLEARANCE_MS || Date.now() >= deadline) {
+      return;
+    }
+    // Just past the travel timer, so that it fires first and queues the STOP.
+    await new Promise((resolve) => setTimeout(resolve, stopIn + 10));
+  }
 }
 
 /**
@@ -604,24 +687,9 @@ function rebindNow() {
  * @returns {Promise<number>} the channel listened to
  */
 async function rearmListening() {
-  await startListening();
-  const plan = listenState.plan;
-  if (!plan?.enabled) {
-    throw new Error('Listening is turned off (listening channel set to 0)');
-  }
-  if (boxDevices(config).length === 0) {
-    // Said as what it is: "no route" sent the user after a relay that was
-    // working, when what is missing is the connection string.
-    throw new Error('No AirSend box to listen through: paste the sp:// connection string first');
-  }
-  if (listenState.error) {
-    throw new Error(`The box refused the subscription: ${listenState.error}`);
-  }
-  if (!listenState.url) {
-    throw new Error('No route for the radio frames: nothing to bind');
-  }
+  const channel = rearmedChannel(await startListening(), config);
   refreshWidget();
-  return plan.channel;
+  return channel;
 }
 
 /** Nudge the dashboard widget, at most once per window. */
@@ -693,10 +761,7 @@ function stopKeepingWarm() {
  * rendered as a badge in the Gladys UI.
  */
 async function publishDeviceTransports() {
-  const entries = buildTransportEntries(gladys, config, client);
-  if (entries.length > 0) {
-    await gladys.publishTransports(entries);
-  }
+  await publishTransportEntries(gladys, config, client);
 }
 
 function webhookUrlOf(info) {
@@ -706,31 +771,21 @@ function webhookUrlOf(info) {
   return info.webhooks?.find((webhook) => webhook.key === 'events')?.url ?? null;
 }
 
-function parseWebhookBody(request) {
-  const body = request?.body;
-  if (!body) {
-    return null;
-  }
-  // The relay hands the body over as text, but nothing in the SDK contract
-  // promises it: an object already decoded went through `JSON.parse` as
-  // "[object Object]", and every frame of the relay was dropped.
-  if (typeof body === 'object' && !Buffer.isBuffer(body)) {
-    return body;
-  }
-  try {
-    return JSON.parse(String(body));
-  } catch (err) {
-    logger.warn(`Ignoring an unreadable webhook payload: ${err.message}`);
-    return null;
-  }
-}
-
 // --- Graceful shutdown -------------------------------------------------------
 gladys.handleShutdown(async (signal) => {
   logger.info(`Received ${signal} -> graceful shutdown`);
   stopListening();
   stopKeepingWarm();
-  stopDeviceTracking();
+  // While the radio and the service still work: a shutter driven to 40 % gets
+  // its STOP, and Gladys where it is left (see `stopDeviceTracking`).
+  let settleTimer = null;
+  await Promise.race([
+    stopDeviceTracking().catch((err) => logger.warn(`Shutters not settled: ${err.message}`)),
+    new Promise((resolve) => {
+      settleTimer = setTimeout(resolve, SETTLE_TIMEOUT_MS);
+    }),
+  ]);
+  clearTimeout(settleTimer);
   if (widgetRefreshTimer) {
     clearTimeout(widgetRefreshTimer);
     widgetRefreshTimer = null;

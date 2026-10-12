@@ -9,6 +9,7 @@ import {
   normalizeConfig,
   parseDevices,
 } from '../src/config.js';
+import { captureLogs } from './helpers/captureLogs.js';
 
 test('normalizeConfig falls back to the defaults', () => {
   const config = normalizeConfig();
@@ -134,6 +135,34 @@ test('parseDevices survives a broken paste', () => {
   assert.deepEqual(parseDevices(undefined), []);
 });
 
+test('a device list that does not parse never logs the connection string in it', async () => {
+  const secret = 'Xk9pQ2mZ7wLr4tVb';
+  const pastes = [
+    // The connection string pasted into the wrong field.
+    `sp://${secret}@fe80::1?gw=0&rhost=192.168.1.50`,
+    'sp://hunter2@fe80::1',
+    // A box string whose quotes a note-taking app turned typographic.
+    `[{"name":"Box","type":0,"spurl":\u201csp://${secret}@fe80::1\u201d}]`,
+  ];
+  const logs = captureLogs(async () => {
+    for (const paste of pastes) {
+      assert.deepEqual(parseDevices(paste), []);
+    }
+    // A position, when V8 gives one, is kept: it is what finds the mistake.
+    parseDevices('{"devices":[{"name":"Plug" "type":4097}]}');
+  });
+  await logs.result;
+
+  const errors = logs.of('ERROR');
+  assert.equal(errors.length, 4, errors.join('\n'));
+  for (const line of errors) {
+    assert.doesNotMatch(line, /sp:\/\/\w|Xk9p|hunter2/, line);
+  }
+  assert.match(errors[0], /belongs in the Connection string field/);
+  assert.match(errors[2], /Unexpected token '\u201c'$/);
+  assert.match(errors[3], /at position 27/);
+});
+
 test('a sensor declares the readings it emits, and clicks by default', () => {
   const [withFeatures, bare] = parseDevices(
     `[{"name":"Outdoor sensor","type":1,"features":["temperature","humidity","nonsense"],
@@ -144,10 +173,34 @@ test('a sensor declares the readings it emits, and clicks by default', () => {
   assert.deepEqual(bare.features, ['click']);
 });
 
+test('a sensor feature listed twice is published once', () => {
+  const featuresOf = (features) =>
+    parseDevices(JSON.stringify([{ name: 'Sensor', type: 1, pid: 1368, addr: 542, features }]))[0]
+      .features;
+  assert.deepEqual(featuresOf(['temperature', 'humidity', 'Temperature']), [
+    'temperature',
+    'humidity',
+  ]);
+  assert.deepEqual(featuresOf('temperature, temperature'), ['temperature']);
+  assert.deepEqual(featuresOf(['click', 'Click']), ['click']);
+});
+
 test('hostFromSpurl extracts the box address', () => {
   assert.equal(hostFromSpurl('sp://pass@[fe80::1234]?gw=0&rhost=192.168.1.50'), '192.168.1.50');
   assert.equal(hostFromSpurl('sp://pass@[fe80::1234]?gw=0'), 'fe80::1234');
   assert.equal(hostFromSpurl(''), null);
+});
+
+test('a password containing an @ never ends up in the id of the box', () => {
+  assert.equal(hostFromSpurl('sp://pa@ss@fe80::1?gw=0'), 'fe80::1');
+  assert.equal(hostFromSpurl('sp://pa@ss@[fe80::1]?gw=0'), 'fe80::1');
+  assert.equal(hostFromSpurl('sp://pa@ss@fe80::1?gw=0&rhost=192.168.1.50'), '192.168.1.50');
+
+  // The id of a box without rhost= is its address, whatever the password.
+  const idOf = (spurl) =>
+    parseDevices(JSON.stringify([{ name: 'Box', type: 0, spurl, sensors: true }]))[0].platformId;
+  assert.equal(idOf('sp://myP@ssword@fe80::1?gw=0'), 'fe80-1');
+  assert.equal(idOf('sp://myP@sswordNEW@fe80::1?gw=0'), 'fe80-1');
 });
 
 test('the bundled service serves the local channel out of the box', () => {
@@ -350,6 +403,18 @@ test('a connection string declared on the box serves every device when the globa
   assert.deepEqual(config.spurlProblems, []);
   // The global field, once filled, still wins.
   assert.equal(normalizeConfig({ devices, spurl: global }).spurl, global);
+});
+
+test('a mistyped string on a second box is checked too, and named', () => {
+  const garage = 'sp://pass2@fe80:2:3?gw=0&rhost=192.168.1.60';
+  const config = normalizeConfig({
+    spurl: 'sp://pass@fe80::1?gw=0&rhost=192.168.1.50',
+    devices: JSON.stringify([{ name: 'Box garage', type: 0, spurl: garage }]),
+  });
+  assert.deepEqual(
+    config.spurlProblems.map((problem) => problem.en.slice(0, 32)),
+    ['on "Box garage", "fe80:2:3" is n'],
+  );
 });
 
 test('an entry whose type was left empty is reported, not read as a box', () => {

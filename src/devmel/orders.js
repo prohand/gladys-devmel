@@ -42,9 +42,37 @@
 // (a remote copied into the AirSend app, the usual way for a fixed-code gate)
 // speaks with that voice too, and a voice that never expired turned every press
 // of that remote, an hour after a single order from Gladys, into an echo.
+//
+// It also keeps the box's verdict on each order. With `wait: false` the HTTP
+// answer only says the service took the order; whether the box carried it
+// comes back later, once per emission — the first one and every repeat, all
+// under the same uid. One emission refused while another went out is an order
+// that went out: only an order whose every emission was refused failed.
+//
+// Which order a verdict is about is the whole difficulty, and the model is
+// the radio's own:
+//
+//   - one radio per box, so the service answers the emissions in the order
+//     it was handed them;
+//   - a uid names a feature, not an order: the STOP that ends a timed
+//     positioning carries the uid of the UP that started it, the OFF the uid
+//     of the ON before it;
+//   - an emission the service never received (its request was refused, a
+//     repeat dropped behind a newer order) is never answered;
+//   - the box hearing itself (a GOT with no uid) answers no emission at all.
+//
+// So each uid keeps a queue of the emissions handed to the service, each
+// tagged with its order, and a verdict is charged to the oldest one waiting.
+// An order is judged once every emission it handed over is answered and no
+// other can follow — the newest order of its feature replaced it, or all its
+// repeats went out. Charged to the newest order instead, the box refusing an
+// ON undid the OFF given after it, a refused repeat of the UP of a short
+// positioning read as a refused STOP that ran a stopped shutter to its end
+// stop, and a carried one hid the STOP the box did refuse.
 // -----------------------------------------------------------------------------
 
 import { isSameChannel } from './notes.js';
+import { describeFailure, EVENT_TYPES, isErrorEvent } from './events.js';
 
 /** How long the answer to a transfer may take to come back, in ms. */
 export const DEFAULT_TTL_MS = 30000;
@@ -66,6 +94,9 @@ export const DEFAULT_VOICE_WINDOW_MS = 60000;
 
 /** How many orders are remembered at once, oldest evicted first. */
 export const DEFAULT_LIMIT = 64;
+
+/** How many recent orders are kept per voice, to recognize them in an echo. */
+const SAID_LIMIT = 8;
 
 export class SentOrders {
   /**
@@ -101,6 +132,39 @@ export class SentOrders {
      * @type {Map<string, object>}
      */
     this.voices = new Map();
+    /**
+     * The uid of the last order given to each device, keyed by platform id: a
+     * verdict on an older one says nothing about where the device is now.
+     *
+     * @type {Map<string, string>}
+     */
+    this.latest = new Map();
+    /**
+     * Every new order is numbered, and each device keeps the number of the
+     * newest one it acted on: its own, or a group's it followed (see
+     * `follows`). Numbers, not times: a scene gives two orders in the same
+     * millisecond, and which came second is the whole question.
+     */
+    this.sequence = 0;
+    /** @type {Map<string, number>} keyed by platform id */
+    this.actedOn = new Map();
+    /**
+     * Who is told of an order found failed once nothing more of it can come
+     * (see `close`), given its entry and its verdict.
+     *
+     * @type {?((entry: object, verdict: object) => unknown)}
+     */
+    this.onFailed = null;
+  }
+
+  /**
+   * Say who reports the orders found failed outside of a verdict (see
+   * `close`): the handler of the frames, which knows Gladys and the scenes.
+   *
+   * @param {(entry: object, verdict: object) => unknown} listener
+   */
+  reportTo(listener) {
+    this.onFailed = typeof listener === 'function' ? listener : null;
   }
 
   /**
@@ -108,8 +172,16 @@ export class SentOrders {
    *
    * @param {string} uid the `thingnotes.uid` the transfer carried
    * @param {object} device the normalized Devmel device it was sent to
+   * @param {object} [order]
+   * @param {Array<object>} [order.notes] the notes it carried
+   * @param {boolean} [order.fresh] a new order rather than a repeat or a retry
+   *   of the one before: the verdicts start over
+   * @param {number} [order.emissions] how many times it is to go out, repeats
+   *   included: the verdicts it waits for before it is judged
+   * @param {boolean} [order.wait] answered by the transfer itself: no verdict
+   *   of it comes back on the callback
    */
-  remember(uid, device = {}) {
+  remember(uid, device = {}, { notes = null, fresh = false, emissions = null, wait = false } = {}) {
     const key = String(uid ?? '');
     if (!key) {
       return null;
@@ -121,12 +193,73 @@ export class SentOrders {
       platformId: device.platformId,
       channel: device.channel,
       emissions: 0,
+      queue: [],
+      due: [],
     };
+    // A uid names a feature, not an order: the CLOSE after an OPEN carries the
+    // same one. A new order starts its own verdicts; the one it replaces keeps
+    // whatever of its emissions the service still has to answer.
+    if (!known || fresh) {
+      const since = this.now();
+      const previous = entry.order;
+      entry.order = {
+        uid: key,
+        seq: ++this.sequence,
+        since,
+        at: since,
+        // Emissions it is to make, repeats included; null when nobody said.
+        planned: null,
+        handed: 0,
+        carried: 0,
+        failed: 0,
+        uncarried: 0,
+        type: null,
+        closed: false,
+        judged: false,
+        silent: false,
+        until: null,
+        // When a remote pressed before its repeats went out overtook it (see
+        // `close`).
+        overtaken: null,
+        // Answered by its own transfer: the service had it, whatever the
+        // queue says (see `withdraw`).
+        waited: false,
+        // The order it replaced, while that one may still need restoring (see
+        // `withdraw`). One link only: the chain would otherwise keep every
+        // order of the feature alive.
+        replaced: previous ?? null,
+      };
+      // Except through an order the service has not received yet: it may
+      // never, and then the one before it is what Gladys shows again. An OFF
+      // refused, then an ON tapped during its retry delay and refused too,
+      // put the dead OFF back in place of the ON before it.
+      if (previous && (previous.handed > 0 || previous.waited)) {
+        previous.replaced = null;
+      }
+      entry.since = since;
+      entry.seq = entry.order.seq;
+      this.replace(entry, previous);
+      this.latest.set(entry.platformId, key);
+      this.actedOn.set(entry.platformId, entry.seq);
+    }
+    const order = entry.order;
+    if (Number.isFinite(emissions)) {
+      order.planned = emissions;
+    }
+    // Answered by the transfer itself (`wait: true`): nothing of it comes back
+    // on the callback, so nothing waits there for it.
+    if (!wait) {
+      order.handed += 1;
+      entry.queue.push({ order, at: this.now() });
+    } else {
+      order.waited = true;
+    }
     // A repeat of the same order refreshes it rather than adding another one:
     // the echoes of both emissions must be recognized, and they are the same
     // order twice.
     entry.emissions += 1;
     entry.at = this.now();
+    order.at = entry.at;
 
     this.entries.delete(key);
     this.entries.set(key, entry);
@@ -138,18 +271,415 @@ export class SentOrders {
     // runs: an echo that comes back after the window above is still ours.
     const voice = channelKey(device.channel);
     if (voice) {
+      // What was said with it, too. The echo of a percentage or of an ON comes
+      // back as a plain reading, with no order to tell it from a report — and
+      // a late one landed over the order given since (see `said`).
+      const said = (this.voices.get(voice)?.said ?? []).filter(
+        (spoken) => entry.at - spoken.at <= this.voiceWindowMs,
+      );
+      // Numbered: an echo of the order before, heard after the next one was
+      // given, is that order's (see `follows`).
+      if (notes) {
+        said.push({ notes, at: entry.at, seq: entry.seq });
+      }
       this.voices.delete(voice);
       this.voices.set(voice, {
         name: entry.name,
         platformId: entry.platformId,
         channel: voice,
         at: entry.at,
+        seq: entry.seq,
+        said: said.slice(-SAID_LIMIT),
       });
       while (this.voices.size > this.limit) {
         this.voices.delete(this.voices.keys().next().value);
       }
     }
     return entry;
+  }
+
+  /**
+   * A new order replaces the one this entry holds. Everything that order will
+   * ever hand the service is handed by now: a repeat queued behind the new
+   * order is dropped at its turn (see `isOverridden` in client.js). So it is
+   * judged on the emissions it made, and on nothing more.
+   *
+   * Except emissions still unanswered a channel window after their order last
+   * went out: the box answers within the second, so those verdicts were lost,
+   * and waiting for them would hand that order the new one's — an 8 s
+   * positioning whose UP was never answered took the refusal of its STOP for
+   * the UP's, and took the travel back instead of running it on. An order
+   * missing a verdict is not judged at all: one refusal is not every one.
+   */
+  replace(entry, previous) {
+    if (!previous) {
+      return;
+    }
+    const since = entry.order.since;
+    previous.until = since;
+    entry.queue = entry.queue.filter((emission) => {
+      if (since - emission.order.at <= this.channelWindowMs) {
+        return true;
+      }
+      emission.order.judged = true;
+      return false;
+    });
+    // Reported with the next verdict on its uid, the new order's, rather than
+    // right now: the caller of the order it was may not even have recorded it
+    // yet (the new one is handed over as soon as the old one's answer is
+    // in), and a failure found before its order was recorded undid nothing.
+    previous.closed = true;
+    const verdict = this.judge(entry, previous);
+    if (verdict?.failed) {
+      entry.due.push(verdict);
+    }
+  }
+
+  /**
+   * No more emission of this order will reach the service: the first one
+   * failed for good (`silent`: its caller was told, and showed nothing), a
+   * repeat failed or was dropped, a newer order replaced it. Judged now if its
+   * verdicts are all in, and reported now (see `report`) — unless a newer
+   * order replaced it (see `replace`).
+   *
+   * Not with the next verdict on its uid. That one may never come, and when
+   * it does it is a later order's: an Open refused, its repeat dropped behind
+   * a STOP pressed on the wall, came out with the SENT of the Close given ten
+   * seconds later — whose movement was taken back as the Open's, with an
+   * order_failed and an "unreachable" badge for an order that went out.
+   *
+   * `overtaken` is when a remote pressed since dropped its repeats (see
+   * `client.supersede`): the device was given a newer order, by hand, and
+   * what it did from then on is not this order's to undo.
+   *
+   * @param {object} order what `remember` filed as `entry.order`
+   * @param {object} [options]
+   * @param {boolean} [options.silent] never reported as a failed order
+   * @param {?number} [options.overtaken] when a remote press replaced it
+   * @returns {?Promise<void>} the report, when there is one
+   */
+  close(order, { silent = false, overtaken = null } = {}) {
+    if (!order) {
+      return null;
+    }
+    order.closed = true;
+    order.silent = order.silent || silent;
+    if (Number.isFinite(overtaken)) {
+      order.overtaken = order.overtaken ?? overtaken;
+    }
+    const entry = this.entries.get(order.uid);
+    if (!entry) {
+      return null;
+    }
+    if (silent) {
+      this.withdraw(entry, order);
+    }
+    return this.report(entry, this.judge(entry, order));
+  }
+
+  /**
+   * An order the service never received any emission of (each request
+   * refused, the service restarting) and whose caller was told so never
+   * replaced the order before it: Gladys got an error for it, and shows the
+   * order before. Left in its place, the refusal of that older order read as
+   * "superseded" — the newer order still on its way — and Gladys kept
+   * showing a plug ON that the box never switched.
+   *
+   * A refusal of it already judged, and waiting for the next verdict on its
+   * uid (see `replace`), is reported now, as the last order's: no verdict of
+   * the dead order will ever come to carry it.
+   */
+  withdraw(entry, order) {
+    if (entry.order !== order || order.handed > 0 || order.waited) {
+      return;
+    }
+    // Past every order closed without the service ever receiving it: none of
+    // them is what Gladys shows. One still open may yet be retried, and is
+    // put back to be withdrawn in its turn.
+    let previous = order.replaced;
+    while (previous?.closed && previous.handed === 0 && !previous.waited) {
+      previous = previous.replaced;
+    }
+    if (!previous) {
+      return;
+    }
+    entry.order = previous;
+    entry.since = previous.since;
+    entry.seq = previous.seq;
+    previous.until = null;
+    const parked = entry.due.filter((verdict) => verdict.seq === previous.seq);
+    entry.due = entry.due.filter((verdict) => verdict.seq !== previous.seq);
+    for (const verdict of parked) {
+      this.report(entry, {
+        ...verdict,
+        latest: this.latest.get(entry.platformId) === entry.uid,
+        superseded: previous.overtaken !== null,
+        until: previous.overtaken,
+      });
+    }
+  }
+
+  /**
+   * Tell the scenes, the badge and the device about an order found failed
+   * outside of a verdict (see `close`). A report that throws is the
+   * listener's to log: it must not break the radio queue it runs from.
+   */
+  report(entry, verdict) {
+    if (!verdict?.failed || typeof this.onFailed !== 'function') {
+      return null;
+    }
+    try {
+      return Promise.resolve(this.onFailed(entry, verdict)).catch(() => {});
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * The request of an emission never reached the service (connection
+   * refused): no verdict will ever answer it. Its retry, if any, is filed
+   * again by `remember`.
+   */
+  unsent(order) {
+    const entry = order && this.entries.get(order.uid);
+    if (entry?.queue.at(-1)?.order !== order) {
+      return;
+    }
+    entry.queue.pop();
+    order.handed -= 1;
+    const verdict = order.closed ? this.judge(entry, order) : null;
+    if (!verdict?.failed) {
+      return null;
+    }
+    // Closed by now: replaced by a newer order (see `replace`), whose verdict
+    // will carry it.
+    if (order !== entry.order) {
+      entry.due.push(verdict);
+      return null;
+    }
+    return this.report(entry, verdict);
+  }
+
+  /**
+   * The verdict on a whole order, once there is one: every emission it handed
+   * over answered, and none still to come. Given once.
+   *
+   * @returns {object|null} see `settle`; null while verdicts are missing
+   */
+  judge(entry, order) {
+    const answered = order.carried + order.failed;
+    const due = order.closed ? order.handed : Math.max(order.planned ?? 0, order.handed);
+    if (order.judged || answered < due) {
+      return null;
+    }
+    order.judged = true;
+    const failed = !order.silent && order.carried === 0 && order.failed > 0;
+    return {
+      failed,
+      uncarried: failed && order.uncarried >= order.failed,
+      latest: this.latest.get(entry.platformId) === entry.uid,
+      since: order.since,
+      superseded: order !== entry.order || order.overtaken !== null,
+      until: earliest(order.until, order.overtaken),
+      seq: order.seq,
+      type: order.type,
+    };
+  }
+
+  /**
+   * The notes recently sent on this channel, oldest first: whatever an echo
+   * heard on it says that matches one of them is our own order coming back.
+   *
+   * The answer to a transfer may repeat any of them, however late (`all`).
+   * The box hearing itself repeats an emission once: an emission it was
+   * already heard repeating is over, unless it is the newest order on the
+   * voice — a press repeating that one changes nothing either way. Matched
+   * against the whole minute, a remote copied onto a plug and pressed ON
+   * after Gladys sent ON then OFF was dropped as the echo of that ON, and
+   * Gladys showed the plug off while it was on.
+   *
+   * @param {object} channel
+   * @param {object} [options]
+   * @param {boolean} [options.all] every emission of the minute, heard or not
+   * @returns {Array<object>}
+   */
+  said(channel, { all = false } = {}) {
+    const spoken = this.spoken(channel);
+    const newest = Math.max(...spoken.map((emission) => emission.seq ?? 0));
+    return spoken
+      .filter((emission) => all || !emission.heard || emission.seq === newest)
+      .flatMap((emission) => emission.notes);
+  }
+
+  /**
+   * The box was heard repeating one of our emissions on this channel (a frame
+   * with no uid of ours): the oldest emission still waiting for it, since the
+   * radio sends them in turn. See `said`.
+   */
+  echoed(channel, notes) {
+    const heard = new Set((Array.isArray(notes) ? notes : []).map(noteKey));
+    const emission = this.spoken(channel).find(
+      (candidate) =>
+        !candidate.heard && (candidate.notes ?? []).some((note) => heard.has(noteKey(note))),
+    );
+    if (emission) {
+      emission.heard = true;
+    }
+  }
+
+  /** The emissions of the last minute on this channel, oldest first. */
+  spoken(channel) {
+    const voice = this.voices.get(channelKey(channel));
+    const now = this.now();
+    return (voice?.said ?? []).filter((spoken) => now - spoken.at <= this.voiceWindowMs);
+  }
+
+  /**
+   * Someone else spoke with this voice: a press of a remote sharing the
+   * address, applied as such. What Gladys said with it before is no longer
+   * what the next frame repeats — matched against the whole minute, the
+   * remote's OFF after its ON was dropped as the echo of an OFF Gladys sent
+   * earlier, and Gladys showed the plug on while it was off.
+   */
+  overheard(channel) {
+    const voice = this.voices.get(channelKey(channel));
+    if (voice) {
+      voice.said = [];
+    }
+  }
+
+  /**
+   * Should a device that hears the channel of an order sent to another one (a
+   * group channel in its `remotes`) act on this echo of it?
+   *
+   * Once per order, and only when it is newer than anything that device acted
+   * on since. The order comes back several times, and late: the answer to each
+   * emission and the box hearing itself. Followed every time, a member set to
+   * 50 % right after the group was closed was sent the group's DOWN again by
+   * the next echo, which cancelled the STOP of its own travel: it ran to the
+   * bottom.
+   *
+   * Which order, though, is the echo's own: a uid — and the channel window,
+   * and the voice — name the newest order on that feature. "Close all", then
+   * "Stop all": a late echo of the DOWN, taken for the STOP, was replayed as
+   * the newer order, and the STOP's own echo was then refused as already
+   * followed — the member ran to the bottom while the group stopped. What the
+   * echo says tells them apart: it is the newest order sent with those notes.
+   *
+   * @param {object} order what `match` returned for the event
+   * @param {string} platformId the device that hears it
+   * @param {Array<object>} [notes] what the echo says
+   */
+  follows(order, platformId, notes = null) {
+    const seq = this.orderOf(order, notes);
+    if (!Number.isFinite(seq)) {
+      return true;
+    }
+    if (seq <= (this.actedOn.get(platformId) ?? 0)) {
+      return false;
+    }
+    this.actedOn.set(platformId, seq);
+    return true;
+  }
+
+  /** The number of the order an echo repeats: see `follows`. */
+  orderOf(order, notes) {
+    const heard = new Set((Array.isArray(notes) ? notes : []).map(noteKey));
+    if (heard.size === 0) {
+      return order?.seq;
+    }
+    // A voice is keyed already; an order carries the channel itself.
+    const key = typeof order?.channel === 'string' ? order.channel : channelKey(order?.channel);
+    const said = this.voices.get(key)?.said ?? [];
+    for (const spoken of [...said].reverse()) {
+      if (
+        Number.isFinite(spoken.seq) &&
+        spoken.seq <= order.seq &&
+        (spoken.notes ?? []).some((note) => heard.has(noteKey(note)))
+      ) {
+        return spoken.seq;
+      }
+    }
+    return order?.seq;
+  }
+
+  /**
+   * A remote gave this device an order: every order of ours sent before it is
+   * older news, and its echo must not undo that press (see `follows`).
+   */
+  pressed(platformId) {
+    this.actedOn.set(platformId, this.sequence);
+  }
+
+  /**
+   * Record the box's verdict on one emission, and say what it means for the
+   * order that emission belongs to — the oldest one still waiting on that
+   * uid (see the top of this file).
+   *
+   * Only the answers to our transfers are verdicts: the event carries the
+   * entry's uid. A PENDING says nothing yet, and the box hearing itself (no
+   * uid) answers no emission — counted as one, a late GOT of the UP marked
+   * the STOP sent after it as carried, and the refusal of that STOP went
+   * unreported while the motor ran on.
+   *
+   * @param {object} order what `match` returned for the event
+   * @param {number} type the event type: below 0x100 it went out
+   * @returns {{failed: boolean, uncarried: boolean, latest: boolean, since: ?number,
+   *   superseded: boolean, until: ?number, seq: ?number, type: ?number, earlier: Array<object>}}
+   *   `failed` once every emission of that order was refused and none went
+   *   out; `uncarried` when, on top of that, the box said each time that
+   *   nothing reached the air; `latest` when no order went to another feature
+   *   of the device since; `since` when it was first sent and `seq` its
+   *   number; `superseded` when the same uid carried a newer order since
+   *   (or a remote pressed did), given at `until`; `type` the last refusal;
+   *   `earlier` the failed orders a newer one replaced before it was known
+   *   none of theirs would follow (see `replace`), to report first
+   */
+  settle(order, type) {
+    // A voice, not an order: older than any verdict should be. Taken at its
+    // word, as a failure of its own, and nothing more.
+    if (!order || !Array.isArray(order.queue)) {
+      return atItsWord(type);
+    }
+    if (Number(type) === EVENT_TYPES.PENDING) {
+      // Taken, not sent yet: the verdict on that emission is still to come.
+      return atItsWord(type);
+    }
+    const now = this.now();
+    order.queue = order.queue.filter((emission) => {
+      if (now - emission.at <= this.ttlMs) {
+        return true;
+      }
+      emission.order.judged = true;
+      return false;
+    });
+    const earlier = order.due.splice(0);
+    const emission = order.queue.shift();
+    if (!emission) {
+      // Nothing of ours waits for it: said, never charged to an order.
+      return { ...atItsWord(type), earlier };
+    }
+    const judged = emission.order;
+    if (isErrorEvent(type)) {
+      judged.failed += 1;
+      judged.type = type;
+      if (describeFailure(type).carried === false) {
+        judged.uncarried += 1;
+      }
+    } else {
+      judged.carried += 1;
+    }
+    const verdict = this.judge(order, judged) ?? {
+      failed: false,
+      uncarried: false,
+      latest: false,
+      since: judged.since,
+      superseded: judged !== order.order || judged.overtaken !== null,
+      until: earliest(judged.until, judged.overtaken),
+      seq: judged.seq,
+      type: judged.type,
+    };
+    return { ...verdict, earlier };
   }
 
   /**
@@ -201,7 +731,37 @@ export class SentOrders {
   clear() {
     this.entries.clear();
     this.voices.clear();
+    this.latest.clear();
+    this.actedOn.clear();
   }
+}
+
+/** A verdict nobody waits for: a failure if it says so, charged to no order. */
+function atItsWord(type) {
+  return {
+    failed: isErrorEvent(type),
+    uncarried: false,
+    latest: false,
+    since: null,
+    superseded: false,
+    until: null,
+    seq: null,
+    type,
+    earlier: [],
+  };
+}
+
+/** The earlier of two moments, either of which may be unknown. */
+function earliest(a, b) {
+  if (!Number.isFinite(a)) {
+    return Number.isFinite(b) ? b : null;
+  }
+  return Number.isFinite(b) ? Math.min(a, b) : a;
+}
+
+/** A note as a key: what it says, whatever the frame wrapped it in. */
+function noteKey(note) {
+  return `${note?.type}:${note?.value}`;
 }
 
 /**

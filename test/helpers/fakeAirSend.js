@@ -12,6 +12,11 @@ export function createFakeClient({ answers = [], config = {} } = {}) {
     config,
 
     async transfer(device, notes, options = {}) {
+      // Like the real client: an order that no longer applies by its turn is
+      // dropped unsent (here, its turn is now).
+      if (options.stale?.()) {
+        return { transport: null, degraded: false, notes: [], dropped: true };
+      }
       sent.push({ device: device.name, notes, options });
       return {
         transport: 'local',

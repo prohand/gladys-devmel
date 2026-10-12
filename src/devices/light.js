@@ -15,7 +15,7 @@ import {
 import { createLogger } from '../logging.js';
 import { DEVICE_TYPES } from '../config.js';
 import { clampLevel, levelNote, READINGS, stateNote, STATE_VALUES } from '../devmel/notes.js';
-import { idsFor, isOn, publishState, sendNotes } from './helpers.js';
+import { idsFor, isOn, publishState, sendNotes, ShownStates } from './helpers.js';
 
 const KEY = 'light';
 
@@ -28,6 +28,16 @@ const FEATURE = {
 
 // Brightness to restore when the light is switched back on, per device.
 const lastBrightness = new Map();
+
+// The brightness order written into `lastBrightness` before the radio carried
+// it, per device: an On that read its level and went out on the air settles
+// it, so a failure of that order no longer takes the level back.
+const pendingBrightness = new Map();
+
+// What Gladys shows of each light, to undo an order the box never carried; and
+// the brightness to restore that the last order replaced, to undo it as well.
+const shown = new ShownStates();
+const replacedBrightness = new Map();
 
 export const light = {
   key: KEY,
@@ -72,13 +82,48 @@ export const light = {
     if (feature.external_id === ids.feature(FEATURE.BRIGHTNESS)) {
       const level = clampLevel(value);
       logger.info(`"${device.name}" -> ${level} %`);
-      await sendNotes(client, device, [levelNote(level)], {
-        uid: feature.external_id,
-        callbackUrl,
-      });
+      // Written down before the radio carries it. Gladys runs the orders for
+      // one lamp side by side and the radio sends them in arrival order: an On
+      // that arrived while this level still waited for the air restored the
+      // level before it, and sent it right after this one.
+      const previous = lastBrightness.get(device.platformId);
+      shown.begin(device.platformId);
+      const pending = { level, carried: false, failed: false };
       if (level > 0) {
         lastBrightness.set(device.platformId, level);
+        pendingBrightness.set(device.platformId, pending);
       }
+      let sent;
+      try {
+        sent = await sendNotes(client, device, [levelNote(level)], {
+          uid: feature.external_id,
+          callbackUrl,
+        });
+      } catch (err) {
+        // Never on the air: the lamp is still at the level before — unless an
+        // On queued behind this order carried the same level (a transient box
+        // error, its retry then dropped behind the On): the lamp is at it.
+        pending.failed = true;
+        if (
+          level > 0 &&
+          !pending.carried &&
+          pendingBrightness.get(device.platformId) === pending &&
+          lastBrightness.get(device.platformId) === level
+        ) {
+          restoreBrightness(device.platformId, previous);
+        }
+        throw err;
+      }
+      if (pendingBrightness.get(device.platformId) === pending) {
+        pendingBrightness.delete(device.platformId);
+      }
+      shown.sent(
+        device.platformId,
+        { onOff: level > 0 ? 1 : 0, brightness: level },
+        feature.external_id,
+        sent?.seq,
+      );
+      replacedBrightness.set(device.platformId, previous);
       await publishState(gladys, feature.external_id, level);
       await publishState(gladys, ids.feature(FEATURE.ON_OFF), level > 0 ? 1 : 0);
       return;
@@ -88,13 +133,106 @@ export const light = {
     // Switching on means "go back to the last brightness"; the protocol has no
     // "restore" order, so the level is what turns the lamp on.
     const level = lastBrightness.get(device.platformId) ?? 100;
+    // The level of a brightness order still waiting for the air, if that is
+    // what this On is about to carry.
+    const pending = pendingBrightness.get(device.platformId);
+    const carrying = on && pending?.level === level ? pending : null;
     logger.info(`"${device.name}" -> ${on ? `ON (${level} %)` : 'OFF'}`);
-    await sendNotes(client, device, [on ? levelNote(level) : stateNote(STATE_VALUES.OFF)], {
-      uid: feature.external_id,
-      callbackUrl,
-    });
+    shown.begin(device.platformId);
+    const sent = await sendNotes(
+      client,
+      device,
+      [on ? levelNote(level) : stateNote(STATE_VALUES.OFF)],
+      {
+        uid: feature.external_id,
+        callbackUrl,
+      },
+    );
+    if (carrying) {
+      carrying.carried = true;
+      // That order already failed and took its level back: this On put the
+      // lamp at it all the same, so it is the one to switch back on at.
+      if (carrying.failed && pendingBrightness.get(device.platformId) === carrying) {
+        lastBrightness.set(device.platformId, level);
+      }
+    }
+    shown.sent(
+      device.platformId,
+      { onOff: on ? 1 : 0, brightness: on ? level : 0 },
+      feature.external_id,
+      sent?.seq,
+    );
+    replacedBrightness.delete(device.platformId);
     await publishState(gladys, feature.external_id, on ? 1 : 0);
     await publishState(gladys, ids.feature(FEATURE.BRIGHTNESS), on ? level : 0);
+  },
+
+  /**
+   * Pick the brightness to restore back up from the one Gladys kept: held in
+   * memory only, it was lost on every restart, and the first On afterwards
+   * sent the lamp to 100 %. Only when memory knows nothing — this also runs on
+   * every reconnection and every saved configuration, when memory is newer.
+   */
+  restoreStates(gladys, { device, features }) {
+    const ids = idsFor(gladys, KEY, device);
+    const stored = features?.find(
+      (feature) => feature.external_id === ids.feature(FEATURE.BRIGHTNESS),
+    );
+    const level = clampLevel(stored?.last_value);
+    // And what Gladys shows, so the first order after a restart can be undone
+    // too (see `notCarried`).
+    const onOff = features?.find((feature) => feature.external_id === ids.feature(FEATURE.ON_OFF));
+    if (
+      !shown.get(device.platformId) &&
+      stored?.last_value !== null &&
+      Number.isFinite(Number(stored?.last_value)) &&
+      onOff?.last_value !== null &&
+      Number.isFinite(Number(onOff?.last_value))
+    ) {
+      shown.set(device.platformId, {
+        onOff: Number(onOff.last_value) > 0 ? 1 : 0,
+        brightness: level,
+      });
+    }
+    if (lastBrightness.has(device.platformId)) {
+      return;
+    }
+    // An Off publishes 0 %: a lamp off at the restart has nothing to give back.
+    if (level > 0) {
+      lastBrightness.set(device.platformId, level);
+      logger.debug(`"${device.name}" will switch back on at ${level} %`);
+    }
+  },
+
+  /**
+   * The box said, after Gladys was answered and shown the new state, that the
+   * last order never reached the air: Gladys is shown the state from before,
+   * and the next On restores the brightness from before.
+   *
+   * @returns {Promise<boolean>} whether anything was taken back
+   */
+  async notCarried(gladys, { device, uid = null, seq = null, superseded = false }) {
+    // An order given before the last one only changes what undoing the next
+    // one goes back to: see `ShownStates`.
+    const before = shown.notCarried(device.platformId, { uid, seq, superseded });
+    if (!before) {
+      return false;
+    }
+    if (before.onOff && before.brightness > 0) {
+      // The level the lamp is at: the one before the last order may be an
+      // order that failed too (30, 50, 70 dragged, none carried).
+      lastBrightness.set(device.platformId, before.brightness);
+    } else if (replacedBrightness.has(device.platformId)) {
+      restoreBrightness(device.platformId, replacedBrightness.get(device.platformId));
+    }
+    replacedBrightness.delete(device.platformId);
+    logger.info(
+      `"${device.name}" did not change: shown ${before.onOff ? `ON (${before.brightness} %)` : 'OFF'} again`,
+    );
+    const ids = idsFor(gladys, KEY, device);
+    await publishState(gladys, ids.feature(FEATURE.BRIGHTNESS), before.brightness);
+    await publishState(gladys, ids.feature(FEATURE.ON_OFF), before.onOff);
+    return true;
   },
 
   /**
@@ -110,9 +248,21 @@ export const light = {
         continue;
       }
       handled += 1;
+      if (reading.switched && reading.value > 0) {
+        // A plain ON from a wall remote: a dimmer goes back to the level it
+        // had, and the one remembered here is the best guess of it. Taken as
+        // 100 %, Gladys showed full brightness and the next On it sent did put
+        // the lamp at full brightness.
+        const brightness = lastBrightness.get(device.platformId) ?? 100;
+        shown.set(device.platformId, { onOff: 1, brightness });
+        await publishState(gladys, ids.feature(FEATURE.BRIGHTNESS), brightness);
+        await publishState(gladys, ids.feature(FEATURE.ON_OFF), 1);
+        continue;
+      }
       if (reading.value > 0) {
         lastBrightness.set(device.platformId, reading.value);
       }
+      shown.set(device.platformId, { onOff: reading.value > 0 ? 1 : 0, brightness: reading.value });
       await publishState(gladys, ids.feature(FEATURE.BRIGHTNESS), reading.value);
       await publishState(gladys, ids.feature(FEATURE.ON_OFF), reading.value > 0 ? 1 : 0);
     }
@@ -123,3 +273,12 @@ export const light = {
     await sendNotes(client, device, [stateNote(STATE_VALUES.PING)], { callbackUrl });
   },
 };
+
+/** Put back the brightness to restore an order replaced (none: forget it). */
+function restoreBrightness(platformId, previous) {
+  if (previous === undefined) {
+    lastBrightness.delete(platformId);
+  } else {
+    lastBrightness.set(platformId, previous);
+  }
+}

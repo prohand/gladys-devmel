@@ -111,19 +111,23 @@ export function levelNote(level) {
  * twice is back where it started, and PROG heard twice is a pairing undone. A
  * lossy one-way radio is a good reason to say things twice, never a good enough
  * one to say them wrong.
+ *
+ * Neither STOP nor the favourite position (MIDDLE, USERPOSITION) is here. On
+ * Somfy RTS they are one and the same frame, the "my" button: it stops a
+ * shutter that moves and sends a still one to the position programmed in its
+ * motor. A repeat is a second press, not a held button — so the STOP repeated
+ * behind the one that had just stopped a shutter at 40 % sent it to its
+ * favourite position, while Gladys kept showing 40 %.
  */
 const REPEATABLE_STATES = new Set([
-  STATE_VALUES.STOP,
   STATE_VALUES.OFF,
   STATE_VALUES.ON,
   STATE_VALUES.CLOSE,
   STATE_VALUES.OPEN,
-  STATE_VALUES.MIDDLE,
   STATE_VALUES.DOWN,
   STATE_VALUES.UP,
   STATE_VALUES.LEFT,
   STATE_VALUES.RIGHT,
-  STATE_VALUES.USERPOSITION,
 ]);
 
 /**
@@ -183,8 +187,13 @@ export function clampLevel(level) {
  * level of an UP is a destination, and a reader that cares about the journey —
  * a shutter — must not mistake it for a measured position.
  *
+ * An ON/OFF additionally carries `switched`. To a switch it is where it now
+ * is; to a shutter driven by an on/off protocol (Chacon DiO) it is which way
+ * it was sent, and the motor takes its whole travel to get there; to a
+ * dimmer an ON is "on", not a level (it goes back to the level it had).
+ *
  * @param {Array<{type: number|string, value: unknown}>} notes
- * @returns {Array<{ kind: string, value: number|string, command?: string }>}
+ * @returns {Array<{ kind: string, value: number|string, command?: string, switched?: boolean }>}
  */
 export function decodeNotes(notes) {
   if (!Array.isArray(notes)) {
@@ -238,9 +247,11 @@ function decodeStateNote(raw) {
     case STATE_VALUES.TOGGLE:
       return { kind: READINGS.TOGGLE, value: STATE_LABELS[value] };
     case STATE_VALUES.OFF:
-      return { kind: READINGS.LEVEL, value: 0 };
+      return { kind: READINGS.LEVEL, value: 0, switched: true };
     case STATE_VALUES.ON:
-      return { kind: READINGS.LEVEL, value: 100 };
+      // `switched`: ON names no level. A dimmer goes back to the one it had,
+      // so the 100 here only means "on" and must not be remembered as a level.
+      return { kind: READINGS.LEVEL, value: 100, switched: true };
     case STATE_VALUES.DOWN:
     case STATE_VALUES.CLOSE:
       return { kind: READINGS.LEVEL, value: 0, command: COMMANDS.DOWN };

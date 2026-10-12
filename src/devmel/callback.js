@@ -142,17 +142,28 @@ export class CallbackServer {
  * The events carried by a callback body. The service posts `{ events: [...] }`;
  * a lone event object is accepted too, because that is what the answer to a
  * fire-and-forget `transfer` looks like.
+ *
+ * The `events` webhook relayed by Gladys Plus reads its body here too: it
+ * carries the very same posts, from a service running elsewhere. Reading only
+ * `payload.events` there dropped every transfer answer — and with them the one
+ * frame that says an order never went out.
+ *
+ * @param {string|Buffer|object} body the raw body, or an object already
+ *   decoded (nothing in the SDK contract promises the relay hands over text)
+ * @param {string} [route] how an unreadable body is named in the logs
  */
-export function eventsOf(body) {
+export function eventsOf(body, route = 'AirSend callback') {
   if (!body) {
     return [];
   }
-  let payload;
-  try {
-    payload = JSON.parse(body);
-  } catch (err) {
-    logger.warn(`Ignoring an unreadable AirSend callback: ${err.message}`);
-    return [];
+  let payload = body;
+  if (typeof body !== 'object' || Buffer.isBuffer(body)) {
+    try {
+      payload = JSON.parse(String(body));
+    } catch (err) {
+      logger.warn(`Ignoring an unreadable ${route}: ${err.message}`);
+      return [];
+    }
   }
   if (!payload || typeof payload !== 'object') {
     return [];

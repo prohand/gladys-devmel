@@ -221,6 +221,49 @@ test('a channel typed by the user wins over the deduction', () => {
   );
 });
 
+test('a forced pid the generic decoder covers is listened to on channel 1, and heard', () => {
+  // What the connection test and "Find a radio protocol" tell the user to do:
+  // type the pid of the device that is not heard.
+  const lamp = { name: 'Lampe', type: 4097, pid: 1368, addr: 12 };
+  const config = configWith([SHUTTER, OTHER_SHUTTER, lamp, CHEAP_SENSOR], {
+    listen_channel: '1368',
+  });
+  const plan = planListening(config, TABLE);
+
+  assert.equal(plan.deduced, false);
+  assert.equal(plan.channel, 1);
+  assert.deepEqual(
+    plan.covered.map((device) => device.name),
+    ['Lampe', 'Capteur exterieur'],
+  );
+  assert.equal(plan.echoOnly, false);
+});
+
+test('a remote attached to every shutter is one emitter, not one per shutter', () => {
+  // One general remote written into the `remotes` of four shutters, against
+  // three thermometers on another protocol: three emitters beat one.
+  const shutters = [101, 102, 103, 104].map((addr) => ({
+    name: `Volet ${addr}`,
+    type: 4098,
+    pid: 25455,
+    addr,
+    remotes: [{ pid: 25455, addr: 777 }],
+  }));
+  const thermometers = [11, 12, 13].map((addr) => ({
+    name: `Thermometre ${addr}`,
+    type: 1,
+    pid: 26848,
+    addr,
+  }));
+  const plan = planListening(configWith([...shutters, ...thermometers]), TABLE);
+
+  assert.equal(plan.channel, 26848);
+  assert.deepEqual(
+    plan.covered.map((device) => device.name),
+    ['Thermometre 11', 'Thermometre 12', 'Thermometre 13'],
+  );
+});
+
 test('the box itself never decides what is listened to', () => {
   // A box carries the connection string, not a radio protocol: it answers on
   // channel 1 like every other box, which says nothing about the equipment.

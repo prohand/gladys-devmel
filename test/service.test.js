@@ -150,6 +150,101 @@ test('a daemon that hangs is killed before a new one is started', async () => {
   assert.notEqual(service.pid, hungPid);
 });
 
+test('a reconnection while the daemon is slow keeps it, and its pid, instead of starting another', async () => {
+  const port = await freePort();
+  const { service, workDir } = await serviceWithFakeBinary(port);
+
+  await service.apply({ embeddedService: true });
+  const daemonPid = service.pid;
+
+  // Gladys reconnects (or the configuration is saved) while the daemon is busy
+  // with the box: one probe goes unanswered.
+  const realProbe = service.probe.bind(service);
+  let unanswered = 1;
+  service.probe = async () => {
+    if (unanswered > 0) {
+      unanswered -= 1;
+      return false;
+    }
+    return realProbe();
+  };
+  assert.equal(await service.apply({ embeddedService: true }), true);
+
+  // Same daemon, same pid, lock untouched: a later hang can still be ended.
+  assert.equal(service.pid, daemonPid);
+  assert.ok(isAlive(daemonPid));
+  const lock = Number(await readFile(join(workDir, 'AirSendWebService.lock'), 'utf8'));
+  assert.equal(lock, daemonPid);
+  assert.equal(service.status().running, true);
+});
+
+test('switching to a service of your own while the bundled one starts leaves nothing running', async () => {
+  const port = await freePort();
+  const { service } = await serviceWithFakeBinary(port);
+
+  // The configuration is saved with a URL typed while the start of the
+  // 'connected' event is still launching the daemon.
+  const starting = service.apply({ embeddedService: true });
+  assert.equal(await service.apply({ embeddedService: false }), false);
+  await starting;
+
+  assert.equal(service.status().running, false);
+  assert.equal(service.watchdog, null);
+  assert.equal(await service.probe(), false);
+});
+
+test('a URL typed then cleared while the bundled service starts leaves it running and supervised', async () => {
+  const port = await freePort();
+  const { service } = await serviceWithFakeBinary(port);
+
+  // The 'connected' start is still launching the daemon when the configuration
+  // is saved twice: a URL typed, then cleared. The stop of the first save used
+  // to wait for that start, then kill what the second save had joined.
+  const results = await Promise.all([
+    service.apply({ embeddedService: true }),
+    service.apply({ embeddedService: false }),
+    service.apply({ embeddedService: true }),
+  ]);
+
+  assert.deepEqual(results, [true, false, true]);
+  assert.equal(service.status().running, true);
+  assert.notEqual(service.watchdog, null);
+  assert.equal(await service.probe(), true);
+});
+
+test('switching to a service of your own while the watchdog ends a hung daemon starts no new one', async () => {
+  const port = await freePort();
+  const { service } = await serviceWithFakeBinary(port, { stopGraceMs: 2000 });
+
+  await service.apply({ embeddedService: true });
+  service.disarmWatchdog();
+  const hungPid = service.pid;
+
+  const realProbe = service.probe.bind(service);
+  let hung = true;
+  service.probe = async () => (hung ? false : realProbe());
+  const realTerminate = service.terminate.bind(service);
+  let stopping = null;
+  service.terminate = async (pid) => {
+    stopping = service.apply({ embeddedService: false });
+    await realTerminate(pid);
+    hung = false;
+  };
+  let restarted = 0;
+  service.onRestarted = () => {
+    restarted += 1;
+  };
+
+  service.failedProbes = 2;
+  await service.check();
+  await stopping;
+
+  assert.equal(isAlive(hungPid), false);
+  assert.equal(restarted, 0);
+  assert.equal(service.status().running, false);
+  assert.equal(await realProbe(), false);
+});
+
 function isAlive(pid) {
   try {
     process.kill(pid, 0);

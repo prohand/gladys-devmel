@@ -18,6 +18,7 @@
 // -----------------------------------------------------------------------------
 
 import { describeReadings } from './notes.js';
+import { PRESS_WINDOW_MS } from '../capabilities/scenes.js';
 
 /** How many distinct emitters are remembered, oldest evicted first. */
 export const DEFAULT_LIMIT = 32;
@@ -93,8 +94,16 @@ export class HeardChannels {
    * @param {string} [details.dropped] why the frame went no further, when it
    *   was dropped on the way: an emitter heard and thrown away is still an
    *   emitter heard, and hiding it is what makes a noisy install look silent
+   * @param {Array<object>} [details.droppedReadings] what a dropped frame's
+   *   notes decoded to — kept apart from `readings`, which only routed frames
+   *   write: "Attach a remote" needs to know whether the frames it cannot see
+   *   carried anything at all, and a low-graded copy must not pass for what
+   *   the remote says
    */
-  record(channel, { readings, claimed, understood = false, timestamp, dropped = null } = {}) {
+  record(
+    channel,
+    { readings, claimed, understood = false, timestamp, dropped = null, droppedReadings } = {},
+  ) {
     const id = Number(channel?.id);
     if (!Number.isFinite(id)) {
       return null;
@@ -120,10 +129,45 @@ export class HeardChannels {
       // every button of it into the same order" — which is the difference
       // between a remote Gladys can follow and one it can only acknowledge.
       notes: new Set(),
+      // Sticky, like `understood`: some frame of this emitter — routed or
+      // dropped — decoded at least one reading. `readings` and
+      // `droppedReadings` only hold the LAST frame of each kind, and a weak
+      // press or a released button decodes nothing: "Attach a remote" told a
+      // remote whose earlier press carried UP that it "will not follow".
+      decoded: false,
       dropped: null,
     };
     entry.frames += 1;
-    entry.dropped = dropped;
+    // A bad copy of a press a good copy already delivered says nothing about
+    // the emitter: with two boxes on the same callback, the far one grades
+    // every press of a remote the near one hears well, and the last copy in
+    // won — a remote being followed showed "dropped" and the advice to accept
+    // unreliable frames, which would let the far box's garbage through too.
+    // Arrival time, not the box timestamp: two boxes do not share a clock.
+    const arrived = this.now();
+    const samePress =
+      Boolean(dropped) &&
+      known?.usableAt !== undefined &&
+      arrived - known.usableAt < PRESS_WINDOW_MS;
+    if (!samePress) {
+      entry.dropped = dropped;
+      entry.droppedReadings = dropped ? droppedReadings : undefined;
+      // Not for a copy of a press: a low-graded copy must not pass for what
+      // the remote says (see `droppedReadings`).
+      if (dropped && droppedReadings?.length > 0) {
+        entry.decoded = true;
+      }
+      // Dropped under the configuration in force: that verdict is current too.
+      if (dropped) {
+        entry.stale = false;
+      }
+    }
+    // Told to the caller too, for the same reason: its log line must not give
+    // that advice either (see `applyEvents`).
+    entry.copyOfPress = samePress;
+    if (!dropped) {
+      entry.usableAt = arrived;
+    }
     // Sticky: a remote that was understood once is understood, even when its
     // next frame carries nothing (a released button, a repeated frame).
     entry.understood = entry.understood || understood;
@@ -132,9 +176,14 @@ export class HeardChannels {
     // actually established is written down.
     if (claimed !== undefined) {
       entry.claimed = claimed;
+      // Routed under the configuration in force: its verdict is current again.
+      entry.stale = false;
     }
     if (readings !== undefined) {
       entry.readings = readings;
+      if (readings.length > 0) {
+        entry.decoded = true;
+      }
       const said = describeReadings(readings);
       if (said && entry.notes.size < DISTINCT_NOTES) {
         entry.notes.add(said);
@@ -197,6 +246,27 @@ export class HeardChannels {
    */
   reannounce() {
     this.generation += 1;
+  }
+
+  /**
+   * Forget what the frames did under the previous configuration: who claimed
+   * them and whether a device acted on them were answers about devices that
+   * may no longer be declared that way. A remote heard before it was attached
+   * was routed to nobody, so "understood" stayed false, and every screen called
+   * the remote just attached mute until it was pressed again. Until its next
+   * frame, an emitter is "not heard since the change".
+   *
+   * Only for a configuration that did change: run on every reconnection to
+   * Gladys too (a Gladys restart, a network blip), it called every remote
+   * being followed "not heard since the configuration changed" when nothing
+   * had.
+   */
+  forgetVerdicts() {
+    for (const entry of this.entries.values()) {
+      entry.stale = true;
+      entry.understood = false;
+      delete entry.undeclared;
+    }
   }
 
   /** Every emitter heard, most recent first. */
