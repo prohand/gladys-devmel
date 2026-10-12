@@ -123,9 +123,7 @@ export const sensor = {
    */
   undeclared(device, readings) {
     const declared = new Set(device.features);
-    const missing = readings
-      .map((reading) => FEATURE_BY_READING[reading.kind])
-      .filter((feature) => feature && !declared.has(feature));
+    const missing = readings.map(featureFor).filter((feature) => feature && !declared.has(feature));
     return [...new Set(missing)];
   },
 
@@ -141,9 +139,7 @@ export const sensor = {
     const declared = new Set(device.features);
     let handled = 0;
     for (const reading of readings) {
-      // Any order is a press: the STOP and "my" buttons of a three-button
-      // remote decode to a state, not to a level, and clicked nothing.
-      const feature = reading.command ? FEATURE.CLICK : FEATURE_BY_READING[reading.kind];
+      const feature = featureFor(reading);
       if (!feature || !declared.has(feature)) {
         continue;
       }
@@ -171,6 +167,16 @@ function isSamePress(device, reading, now) {
   const last = lastClicks.get(key);
   lastClicks.set(key, now);
   return last !== undefined && now - last < PRESS_WINDOW_MS;
+}
+
+/**
+ * The feature a reading feeds. Shared with `undeclared`, so the advice for a
+ * dropped reading names the feature that would have published it.
+ */
+function featureFor(reading) {
+  // Any order is a press: the STOP and "my" buttons of a three-button remote
+  // decode to a state, not to a level, and clicked nothing.
+  return reading.command ? FEATURE.CLICK : FEATURE_BY_READING[reading.kind];
 }
 
 const FEATURE_BY_READING = {

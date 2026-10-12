@@ -29,6 +29,11 @@ const FEATURE = {
 // Brightness to restore when the light is switched back on, per device.
 const lastBrightness = new Map();
 
+// The brightness order written into `lastBrightness` before the radio carried
+// it, per device: an On that read its level and went out on the air settles
+// it, so a failure of that order no longer takes the level back.
+const pendingBrightness = new Map();
+
 // What Gladys shows of each light, to undo an order the box never carried; and
 // the brightness to restore that the last order replaced, to undo it as well.
 const shown = new ShownStates();
@@ -83,8 +88,10 @@ export const light = {
       // level before it, and sent it right after this one.
       const previous = lastBrightness.get(device.platformId);
       shown.begin(device.platformId);
+      const pending = { level, carried: false, failed: false };
       if (level > 0) {
         lastBrightness.set(device.platformId, level);
+        pendingBrightness.set(device.platformId, pending);
       }
       try {
         await sendNotes(client, device, [levelNote(level)], {
@@ -92,15 +99,22 @@ export const light = {
           callbackUrl,
         });
       } catch (err) {
-        // Never on the air: the lamp is still at the level before.
-        if (level > 0 && lastBrightness.get(device.platformId) === level) {
-          if (previous === undefined) {
-            lastBrightness.delete(device.platformId);
-          } else {
-            lastBrightness.set(device.platformId, previous);
-          }
+        // Never on the air: the lamp is still at the level before — unless an
+        // On queued behind this order carried the same level (a transient box
+        // error, its retry then dropped behind the On): the lamp is at it.
+        pending.failed = true;
+        if (
+          level > 0 &&
+          !pending.carried &&
+          pendingBrightness.get(device.platformId) === pending &&
+          lastBrightness.get(device.platformId) === level
+        ) {
+          restoreBrightness(device.platformId, previous);
         }
         throw err;
+      }
+      if (pendingBrightness.get(device.platformId) === pending) {
+        pendingBrightness.delete(device.platformId);
       }
       shown.sent(device.platformId, { onOff: level > 0 ? 1 : 0, brightness: level });
       replacedBrightness.set(device.platformId, previous);
@@ -113,12 +127,24 @@ export const light = {
     // Switching on means "go back to the last brightness"; the protocol has no
     // "restore" order, so the level is what turns the lamp on.
     const level = lastBrightness.get(device.platformId) ?? 100;
+    // The level of a brightness order still waiting for the air, if that is
+    // what this On is about to carry.
+    const pending = pendingBrightness.get(device.platformId);
+    const carrying = on && pending?.level === level ? pending : null;
     logger.info(`"${device.name}" -> ${on ? `ON (${level} %)` : 'OFF'}`);
     shown.begin(device.platformId);
     await sendNotes(client, device, [on ? levelNote(level) : stateNote(STATE_VALUES.OFF)], {
       uid: feature.external_id,
       callbackUrl,
     });
+    if (carrying) {
+      carrying.carried = true;
+      // That order already failed and took its level back: this On put the
+      // lamp at it all the same, so it is the one to switch back on at.
+      if (carrying.failed && pendingBrightness.get(device.platformId) === carrying) {
+        lastBrightness.set(device.platformId, level);
+      }
+    }
     shown.sent(device.platformId, { onOff: on ? 1 : 0, brightness: on ? level : 0 });
     replacedBrightness.delete(device.platformId);
     await publishState(gladys, feature.external_id, on ? 1 : 0);
@@ -175,12 +201,7 @@ export const light = {
       return false;
     }
     if (replacedBrightness.has(device.platformId)) {
-      const previous = replacedBrightness.get(device.platformId);
-      if (previous === undefined) {
-        lastBrightness.delete(device.platformId);
-      } else {
-        lastBrightness.set(device.platformId, previous);
-      }
+      restoreBrightness(device.platformId, replacedBrightness.get(device.platformId));
       replacedBrightness.delete(device.platformId);
     }
     logger.info(
@@ -230,3 +251,12 @@ export const light = {
     await sendNotes(client, device, [stateNote(STATE_VALUES.PING)], { callbackUrl });
   },
 };
+
+/** Put back the brightness to restore an order replaced (none: forget it). */
+function restoreBrightness(platformId, previous) {
+  if (previous === undefined) {
+    lastBrightness.delete(platformId);
+  } else {
+    lastBrightness.set(platformId, previous);
+  }
+}

@@ -428,6 +428,86 @@ test('a brightness the radio never carried is not the one the light switches bac
   assert.deepEqual(client.noteAt(2), { method: 1, type: NOTE_TYPES.LEVEL, value: 60 });
 });
 
+/**
+ * A box whose transfers are settled by hand, one call at a time: `settle(i,
+ * error)` answers the ith transfer, sending its note on success.
+ */
+function handSettledClient(client) {
+  const pending = [];
+  return {
+    pending,
+    using: {
+      ...client,
+      transfer(...args) {
+        return new Promise((resolve, reject) => pending.push({ args, resolve, reject }));
+      },
+    },
+    async settle(index, error) {
+      while (pending.length <= index) {
+        await new Promise((resolve) => setImmediate(resolve));
+      }
+      const call = pending[index];
+      if (error) {
+        call.reject(error);
+      } else {
+        call.resolve(await client.transfer(...call.args));
+      }
+    },
+  };
+}
+
+for (const onFirst of [false, true]) {
+  test(`a failed brightness order an On carried all the same stays the one to restore${onFirst ? ', the On answered first' : ''}`, async () => {
+    // A transient box error on the slider's order, the On queued behind it
+    // carrying the same level: the lamp is at 30 % and Gladys shows it, yet
+    // the failure put 60 % back and the next On sent the lamp there.
+    const { gladys, client, set } = setupLamp(onFirst ? 516 : 515);
+    await set('brightness', 60);
+    await set('on-off', 0);
+    const box = handSettledClient(client);
+
+    const brightness = set('brightness', 30, box.using);
+    const on = set('on-off', 1, box.using);
+    if (onFirst) {
+      await box.settle(1);
+      await on;
+      await box.settle(0, new Error('box busy'));
+    } else {
+      await box.settle(0, new Error('box busy'));
+      await assert.rejects(brightness, /box busy/);
+      await box.settle(1);
+    }
+    await assert.rejects(brightness, /box busy/);
+    await on;
+    await set('on-off', 0);
+    await set('on-off', 1);
+
+    assert.deepEqual(client.noteAt(2), { method: 1, type: NOTE_TYPES.LEVEL, value: 30 });
+    assert.deepEqual(client.noteAt(4), { method: 1, type: NOTE_TYPES.LEVEL, value: 30 });
+    assert.deepEqual(
+      gladys.statesOf(`light:${onFirst ? 516 : 515}-5:brightness`),
+      [60, 0, 30, 0, 30],
+    );
+  });
+}
+
+test('a brightness order and the On carrying its level both failing switch back on at the level before', async () => {
+  const { client, set } = setupLamp(517);
+  await set('brightness', 60);
+  await set('on-off', 0);
+  const box = handSettledClient(client);
+
+  const brightness = set('brightness', 30, box.using);
+  const on = set('on-off', 1, box.using);
+  await box.settle(0, new Error('box busy'));
+  await box.settle(1, new Error('box busy'));
+  await assert.rejects(brightness, /box busy/);
+  await assert.rejects(on, /box busy/);
+  await set('on-off', 1);
+
+  assert.deepEqual(client.noteAt(2), { method: 1, type: NOTE_TYPES.LEVEL, value: 60 });
+});
+
 test('a wall remote switching a dimmer on leaves the brightness to restore alone', async () => {
   // A plain ON names no level: the dimmer goes back to its own. Read as
   // 100 %, Gladys showed full brightness and its next On sent the lamp there.
@@ -2964,6 +3044,35 @@ test('every button of a three-button remote clicks, stop and "my" included', asy
     logs.of('INFO').filter((line) => line.includes('says nothing')),
     [],
   );
+});
+
+test('a stop press on a sensor without "click" is told to add it, like up', async (t) => {
+  // STOP and "my" click since any order is a press: the advice blamed the
+  // device type and the remote instead of naming the missing feature.
+  resetSensorClicks();
+  t.after(resetSensorClicks);
+  const gladys = createFakeGladys();
+  const config = normalizeConfig({
+    devices: JSON.stringify({
+      devices: { T: { type: 1, features: ['temperature'], channel: { id: 300, source: 9 } } },
+    }),
+  });
+  const heard = new HeardChannels();
+  const press = (value) => ({
+    type: 3,
+    channel: { id: 300, source: 9 },
+    thingnotes: { notes: [{ type: NOTE_TYPES.STATE, value }] },
+  });
+
+  for (const value of [STATE_VALUES.STOP, STATE_VALUES.USERPOSITION, STATE_VALUES.UP]) {
+    const logs = captureLogs(() =>
+      applyEvents(gladys, config, [press(value)], heard, new SentOrders(), null),
+    );
+    assert.equal(await logs.result, 0);
+    assert.equal(logs.of('INFO').length, 1);
+    assert.match(logs.of('INFO')[0], /Add "click" to its "features"/);
+    assert.match(describeFate(config, heard.list()[0], 'en'), /add "click" to its "features"/);
+  }
 });
 
 test('a click and a reading heard live are current states, so Gladys scenes run on them', async (t) => {
