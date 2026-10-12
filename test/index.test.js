@@ -23,6 +23,8 @@ const api = {
   config: BASE_CONFIG,
   /** What GET /webhook answers: Gladys Plus, linked or not. */
   webhooks: { available: false, webhooks: [] },
+  /** How many GET /webhook to fail before answering again. */
+  failWebhooks: 0,
   failDiscovery: false,
   posts: [],
   postsTo(route) {
@@ -38,6 +40,10 @@ const fakeHttpClient = {
       case '/device':
         return [];
       case '/webhook':
+        if (api.failWebhooks > 0) {
+          api.failWebhooks -= 1;
+          throw new Error('GET /webhook timed out');
+        }
         return api.webhooks;
       default:
         return {};
@@ -183,12 +189,14 @@ test('the save that turns detailed logs on already logs the connection string it
 
 /**
  * An AirSend Web Service on the loopback: every bind waits `bindDelayMs`, then
- * answers the next status of `bindAnswers` (200 once they run out).
+ * answers the next status of `bindAnswers` (200 once they run out). `heard`
+ * lists what reached it, in order: 'bind', or the notes of a transfer.
  */
 async function startFakeService() {
-  const service = { bindAnswers: [], bindDelayMs: 0, binds: 0 };
+  const service = { bindAnswers: [], bindDelayMs: 0, binds: 0, heard: [] };
   const server = http.createServer((request, response) => {
-    request.resume();
+    const chunks = [];
+    request.on('data', (chunk) => chunks.push(chunk));
     request.on('end', () => {
       const answer = (status, body) => {
         response.writeHead(status, { 'Content-Type': 'application/json' });
@@ -196,7 +204,12 @@ async function startFakeService() {
       };
       if (request.url.startsWith('/channels')) {
         answer(200, []);
+      } else if (request.url.startsWith('/airsend/transfer')) {
+        const body = JSON.parse(Buffer.concat(chunks).toString() || '{}');
+        service.heard.push(body.thingnotes?.notes);
+        answer(200, { type: 1 });
       } else if (request.url.startsWith('/airsend/bind')) {
+        service.heard.push('bind');
         service.binds += 1;
         service.onBind?.();
         const status = service.bindAnswers.shift() ?? 200;
@@ -308,4 +321,103 @@ test('a reconnection to Gladys keeps what the remotes did; a configuration chang
   await saveConfig({ ...config, listen_channel: '25455' });
   assert.equal(entry.stale, true);
   assert.equal(entry.understood, false);
+});
+
+test('a failed read of the Gladys Plus webhook keeps the relay it knew', async (t) => {
+  // A service on another machine has no other way in than the relay: one
+  // timeout of GET /webhook during a save dropped it, and with it listening
+  // and the verdicts of every order, until the next save.
+  const service = await startFakeService();
+  api.webhooks = {
+    available: true,
+    webhooks: [{ key: 'events', url: 'https://plus.example/webhook/events' }],
+  };
+  t.after(async () => {
+    api.webhooks = { available: false, webhooks: [] };
+    api.failWebhooks = 0;
+    await saveConfig(BASE_CONFIG);
+    await service.close();
+  });
+  const config = radioConfig(service);
+  await saveConfig(config);
+
+  api.failWebhooks = 1;
+  api.config = { ...config, debug_logs: false };
+  const logs = captureLogs(() =>
+    fromGladys('external-integration.config-updated', { config: api.config }),
+  );
+  await logs.result;
+
+  assert.ok(
+    logs
+      .of('WARN')
+      .some((line) => line.includes('GET /webhook timed out -> keeping the last known one')),
+    logs.of('WARN').join('\n'),
+  );
+  assert.ok(
+    logs.of('INFO').some((line) => line.includes('-> https://plus.example/webhook/events')),
+    logs.of('INFO').join('\n'),
+  );
+  const answer = await captureLogs(() => gladys.handlers['widgetAction:radio']('rearm')).result;
+  assert.equal(answer.en, 'Listening re-armed on channel 25455.');
+
+  // Gladys Plus saying it is gone still clears it.
+  api.webhooks = { available: false, webhooks: [] };
+  await saveConfig(config);
+  await assert.rejects(
+    captureLogs(() => gladys.handlers['widgetAction:radio']('rearm')).result,
+    /No route for the radio frames/,
+  );
+});
+
+test('a re-arm asked just before a timed STOP lets that STOP go out first', async (t) => {
+  // The STOP of a timed travel waits in a timer, not in the radio queue: a
+  // bind queued just before it fell due held the radio while the box
+  // subscribed, and the shutter ran a bind past its target while Gladys showed
+  // the target. Every bind waits for it, not only the one after a command.
+  const service = await startFakeService();
+  api.webhooks = {
+    available: true,
+    webhooks: [{ key: 'events', url: 'https://plus.example/webhook/events' }],
+  };
+  t.after(async () => {
+    api.webhooks = { available: false, webhooks: [] };
+    await saveConfig(BASE_CONFIG);
+    await service.close();
+  });
+  await saveConfig(
+    radioConfig(service, {
+      command_repeat: 0,
+      devices: JSON.stringify({
+        devices: [
+          { name: 'Volet', type: 4098, pid: 25455, addr: 8295, travel_up: 2, travel_down: 2 },
+        ],
+      }),
+    }),
+  );
+  const shutter = api
+    .postsTo('/discovered_device')
+    .at(-1)
+    .devices.find((device) => device.name === 'Volet');
+  const position = shutter.features.find((feature) => feature.external_id.endsWith('position'));
+
+  const run = captureLogs(async () => {
+    await gladys.handlers['sceneAction:set_known_position']({
+      device: shutter.external_id,
+      position: 100,
+    });
+    // Down to 40 %: its STOP is due 1.2 s from now.
+    await gladys.handlers.setValue(shutter, position, 40);
+    service.heard.length = 0;
+    service.bindDelayMs = 1000;
+    await new Promise((resolve) => setTimeout(resolve, 700));
+    await gladys.handlers['widgetAction:radio']('rearm');
+  });
+  await run.result;
+
+  const stop = service.heard.findIndex(
+    (notes) => Array.isArray(notes) && notes.some((note) => note.value === 17),
+  );
+  assert.ok(stop >= 0, JSON.stringify(service.heard));
+  assert.ok(stop < service.heard.indexOf('bind'), JSON.stringify(service.heard));
 });

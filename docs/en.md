@@ -142,7 +142,9 @@ The **AirSend Web Service URL** is only needed in the case described above: a
 service of your own.
 
 Each device shows as a badge the channel that carried its last order — `local`
-when your box answered, `unreachable` when it could not be reached.
+when your box answered, `unreachable` when it could not be reached. Once you
+change the service or the connection string, the badge shows what the new
+configuration allows until the device's next order.
 
 ## The device list
 

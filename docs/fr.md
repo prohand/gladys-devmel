@@ -151,7 +151,9 @@ service à vous.
 
 Chaque appareil affiche en pastille le canal qui a porté son dernier ordre :
 `local` quand votre boîtier a répondu, `unreachable` quand il n'a pas pu être
-joint.
+joint. Après un changement du service ou de la chaîne de connexion, la pastille
+indique ce que permet la nouvelle configuration, jusqu'au prochain ordre de
+l'appareil.
 
 ## La liste d'appareils
 

@@ -124,7 +124,10 @@ export class AirSendClient {
   constructor({ sleep = defaultSleep, now = () => Date.now(), orders = sentOrders } = {}) {
     /** @type {import('../config.js').DevmelConfig | null} */
     this.config = null;
-    /** Last known transport per device platform id, for the Gladys badge. */
+    /**
+     * Last known transport per device platform id, for the Gladys badge, with
+     * the route it was learnt by (see `transportOf`).
+     */
     this.transports = new Map();
     this.sleep = sleep;
     this.now = now;
@@ -152,6 +155,15 @@ export class AirSendClient {
      * @type {(() => void) | null}
      */
     this.afterTransmit = null;
+    /**
+     * Awaited by every bind before it takes the radio queue. A bind holds the
+     * radio for as long as the box takes to subscribe, and what falls due
+     * meanwhile waits behind it — the STOP of a timed shutter among others,
+     * which waits in a travel timer, not in the queue, so the queue cannot put
+     * it first (see `holdBindForStop` in index.js).
+     * @type {(() => Promise<void>) | null}
+     */
+    this.beforeBind = null;
   }
 
   /** Apply a new configuration (called on connection and on every config update). */
@@ -787,6 +799,11 @@ export class AirSendClient {
         transport: DEVICE_TRANSPORTS.LOCAL,
       });
     }
+    // Every bind, whoever asked for it (renewal, configuration saved,
+    // reconnection, re-arm): one path that forgot to wait sent a STOP late.
+    if (typeof this.beforeBind === 'function') {
+      await this.beforeBind();
+    }
     // Through the radio queue like an order: subscribing switches the box to
     // permanent reception, and doing that while it is transmitting is how a
     // subscription silently fails to take.
@@ -842,12 +859,33 @@ export class AirSendClient {
   }
 
   rememberTransport(device, transport) {
-    this.transports.set(device.platformId, { transport, degraded: false });
+    this.transports.set(device.platformId, {
+      transport,
+      degraded: false,
+      route: this.routeOf(device),
+    });
   }
 
-  /** Last known transport of a device, or `undefined` if never contacted. */
+  /**
+   * Last known transport of a device, or `undefined` if never contacted — or
+   * contacted by a route the configuration has changed since. A configuration
+   * saved to fix a connection string republishes the badges: kept, the one
+   * learnt without it still said `unreachable` next to a status saying
+   * connected, and a box whose string was removed still said `local` while
+   * every order failed at once. What the new route allows is the badge until
+   * that route has carried something.
+   */
   transportOf(device) {
-    return this.transports.get(device.platformId);
+    const known = this.transports.get(device.platformId);
+    if (!known || known.route !== this.routeOf(device)) {
+      return undefined;
+    }
+    return { transport: known.transport, degraded: known.degraded };
+  }
+
+  /** The service and connection string a device is reached by (never logged). */
+  routeOf(device) {
+    return `${this.serviceUrl ?? ''} ${this.spurlOf(device) ?? ''}`;
   }
 }
 

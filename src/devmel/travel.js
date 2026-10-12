@@ -316,7 +316,7 @@ export class ShutterTravel {
    * How long until the next STOP a movement under way has to send (its
    * `arrive`), in milliseconds, or null when none is waiting for one. That STOP
    * waits here, in a timer, not in the radio queue: whoever wants the radio for
-   * something slow has to ask (see `rebindNow` in index.js).
+   * something slow has to ask (see `holdBindForStop` in index.js).
    */
   untilArrival() {
     let soonest = null;

@@ -65,6 +65,9 @@ const client = new AirSendClient();
 // Transmitting takes the box out of reception: every exchange is a reason to
 // make sure it is still listening (see `scheduleRebind`).
 client.afterTransmit = () => scheduleRebind();
+// And no bind goes in front of the STOP of a timed travel, whoever asks for it
+// (see `holdBindForStop`).
+client.beforeBind = () => holdBindForStop();
 
 // The AirSend Web Service, running in this very container unless the user
 // pointed the configuration at one of their own.
@@ -112,8 +115,8 @@ const listenLoop = createListenLoop({
 let rebindTimer = null;
 const REBIND_AFTER_COMMAND_MS = 2000;
 // How close the STOP of a timed travel may be before a bind is held back for it
-// (see `rebindNow`): a bind lasts well under a second on a warm link, a few on
-// a cold one.
+// (see `holdBindForStop`): a bind lasts well under a second on a warm link, a
+// few on a cold one.
 const BIND_CLEARANCE_MS = 5000;
 
 // How long a graceful shutdown gives the shutters under way to be stopped and
@@ -480,7 +483,20 @@ async function initialize(rawConfig) {
     logger.info(`${restored} device(s) resumed from their last known state`);
   }
 
-  eventsWebhookUrl = webhookUrlOf(await gladys.getWebhooks().catch(() => null));
+  // Only an answer changes the relay URL. A read that failed says nothing
+  // about Gladys Plus — one timeout during a save dropped a working URL, and
+  // a service on another machine lost its listening and its order verdicts
+  // until the next save. A relay that did go away says so (`available:
+  // false`), here or through `onWebhookUpdated`.
+  try {
+    eventsWebhookUrl = webhookUrlOf(await gladys.getWebhooks());
+  } catch (err) {
+    logger.warn(
+      `Could not read the Gladys Plus webhook: ${err.message} -> ${
+        eventsWebhookUrl ? 'keeping the last known one' : 'no relay known'
+      }`,
+    );
+  }
   await startListening();
 
   // A badge is a nicety: one Gladys refused must not cost the keep-warm and
@@ -625,10 +641,9 @@ function rebindNow() {
   // box has one radio, and a bind holds it for as long as it takes. Listening
   // can wait — it has nobody watching a slider.
   //
-  // Nor in front of the STOP of a timed travel: it waits in a travel timer, not
-  // in the queue, and falling due during the bind it went out a bind late — a
-  // shutter asked 88 % stopped at 84 %. One further away than a bind lasts
-  // leaves the box listening meanwhile; once sent, it asks for its own rebind.
+  // Nor in front of the STOP of a timed travel (see `holdBindForStop`): put
+  // off here rather than waited for, since that STOP, once sent, asks for its
+  // own rebind — waiting would bind twice.
   const stopIn = stopDueIn();
   if (client.busy || (stopIn !== null && stopIn < BIND_CLEARANCE_MS)) {
     scheduleRebind();
@@ -637,6 +652,32 @@ function rebindNow() {
   renewSubscription().catch((err) =>
     logger.debug(`Could not re-arm the radio listener after a command: ${err.message}`),
   );
+}
+
+/**
+ * Hold a bind back, before it takes the radio queue, while the STOP of a timed
+ * travel falls due within a bind's length. That STOP waits in a travel timer,
+ * not in the queue: falling due during a bind, it went out a bind late — a
+ * shutter asked 88 % stopped at 84 %, one asked 40 % on a cold link near 17 %,
+ * and Gladys showed the target. Every bind waits here (see
+ * `client.beforeBind`): the ten-minute renewal, a configuration saved, a
+ * reconnection, the re-arm buttons — one path that did not was enough.
+ *
+ * Once its timer has fired the STOP is in the queue, and the bind queues
+ * behind it. A STOP further away than a bind lasts is left to come: the box
+ * listens meanwhile. Bounded, so that shutters set off one after the other
+ * cannot keep listening down for good.
+ */
+async function holdBindForStop() {
+  const deadline = Date.now() + 2 * BIND_CLEARANCE_MS;
+  for (;;) {
+    const stopIn = stopDueIn();
+    if (stopIn === null || stopIn >= BIND_CLEARANCE_MS || Date.now() >= deadline) {
+      return;
+    }
+    // Just past the travel timer, so that it fires first and queues the STOP.
+    await new Promise((resolve) => setTimeout(resolve, stopIn + 10));
+  }
 }
 
 /**

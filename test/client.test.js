@@ -201,6 +201,32 @@ test('a device with no transport reports itself unreachable', async () => {
   assert.equal(calls.length, 0);
 });
 
+test('a badge learnt by another route gives way to what the new configuration allows', async () => {
+  // A configuration saved republishes the badges: the one a failed order left
+  // must not survive the connection string that fixes it, nor `local` the
+  // removal of that string.
+  stubFetch(() => jsonResponse(200));
+  const client = clientWith({ spurl: '' });
+  await assert.rejects(() => client.transfer(DEVICE, [stateNote(STATE_VALUES.ON)]));
+  assert.equal(client.transportOf(DEVICE).transport, 'unreachable');
+
+  const fixed = normalizeConfig({
+    service_url: 'http://192.168.1.50:33863',
+    spurl: 'sp://pass@192.168.1.50',
+  });
+  client.configure(fixed);
+  assert.equal(client.transportOf(DEVICE), undefined);
+
+  await client.transfer(DEVICE, [stateNote(STATE_VALUES.ON)]);
+  assert.deepEqual(client.transportOf(DEVICE), { transport: 'local', degraded: false });
+  // The same configuration again (a reconnection): what it taught us stays.
+  client.configure(fixed);
+  assert.equal(client.transportOf(DEVICE).transport, 'local');
+
+  client.configure(normalizeConfig({ service_url: 'http://192.168.1.50:33863', spurl: '' }));
+  assert.equal(client.transportOf(DEVICE), undefined);
+});
+
 test('a refused connection string is reported with what to fix', async () => {
   stubFetch(() => jsonResponse(401));
   const client = clientWith();
@@ -223,6 +249,32 @@ test('bind subscribes the box to a radio channel', async () => {
     duration: 0,
     callback: 'https://webhook.example/gladys',
   });
+});
+
+test('every bind waits for what the integration holds it back for, outside the queue', async () => {
+  // A bind holds the radio while the box subscribes: the STOP of a timed
+  // shutter falling due meanwhile waited behind it. The hold is the client's,
+  // so no path that binds can forget it.
+  stubFetch(() => jsonResponse(200));
+  const client = clientWith();
+  let release = null;
+  client.beforeBind = () =>
+    new Promise((resolve) => {
+      release = resolve;
+    });
+
+  const binding = client.bind(1, 'https://webhook.example/gladys', DEVICE);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(calls.length, 0, 'nothing bound while held back');
+  // Held OUTSIDE the queue: what falls due meanwhile goes out first.
+  await client.transfer(DEVICE, [stateNote(STATE_VALUES.STOP)]);
+  release();
+  await binding;
+
+  assert.deepEqual(
+    calls.map((call) => call.url.split('/').at(-1)),
+    ['transfer', 'bind'],
+  );
 });
 
 test('listChannels reads the protocol table of the service', async () => {
