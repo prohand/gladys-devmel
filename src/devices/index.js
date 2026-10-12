@@ -567,18 +567,28 @@ async function applyOwnEcho(gladys, config, event, echo, { orders, scenes, clien
 
   const all = decodeNotes(event?.thingnotes?.notes);
   const channel = event?.channel ?? echo.channel;
-  const said = new Set(decodeNotes(orders?.said?.(channel) ?? []).map(readingKey));
+  const said = new Set(decodeNotes(orders?.said?.(channel, { all: answer }) ?? []).map(readingKey));
   const unsaid = all.filter((reading) => !said.has(readingKey(reading)));
+  if (!answer) {
+    // The box hearing itself: that emission is accounted for (see `said`).
+    orders?.echoed?.(channel, event?.thingnotes?.notes);
+  }
   // A frame on our voice that says something we did not, and is not the answer
   // to one of our transfers, is a remote sharing the address being pressed: a
-  // press, not an echo, for the devices that follow that channel.
+  // press, not an echo, for every device that follows that channel — the one
+  // the voice belongs to included, the way applyEvents handles any press.
+  // Handled as an echo for its own device, the copied remote's UP left a gate
+  // shown closed while it opened, the repeat of Gladys' ON still queued went
+  // out after the remote's OFF, and no remote_pressed fired.
   const overheard = !answer && unsaid.length > 0;
   if (overheard) {
     orders?.overheard?.(channel);
   }
+  const pressed = overheard ? ordersOf(all) : [];
   const leftovers = unsaid.filter((reading) => !reading.command);
   logger.debug(
-    `Own order echoed back for "${echo.name}": ${describeChannel(event?.channel)}` +
+    `${overheard ? 'Remote sharing the address of' : 'Own order echoed back for'} ` +
+      `"${echo.name}": ${describeChannel(event?.channel)}` +
       `${leftovers.length === 0 ? '' : `, also reporting ${describeReadings(leftovers)}`}`,
   );
 
@@ -588,24 +598,28 @@ async function applyOwnEcho(gladys, config, event, echo, { orders, scenes, clien
     hearsChannel(candidate, event.channel),
   )) {
     const own = device.platformId === echo.platformId;
+    if (overheard) {
+      // Before anything is published, as for any press (see applyEvents).
+      if (pressed.length > 0) {
+        client?.supersede(device);
+      }
+      orders?.pressed?.(device.platformId);
+      await firePresses(gladys, scenes, device, pressed, channel);
+    }
     const blueprint = findBlueprintByType(device.rtype);
     if (!blueprint || typeof blueprint.applyReadings !== 'function') {
       continue;
     }
-    let readings = leftovers;
-    if (!own) {
-      if (overheard) {
-        orders?.pressed?.(device.platformId);
-      }
+    let readings = overheard ? all : leftovers;
+    if (!own && !overheard) {
       // A group order is followed once, and never over an order the device
       // was given since (see `SentOrders.follows`). Asked only of an echo
       // that says something: following uses the order up, and the transfer
       // answer that says nothing (PENDING, SENT) used it up before the box
       // was heard with the DOWN — the member never followed the group.
       const follows =
-        overheard ||
-        (all.length > 0 &&
-          orders?.follows?.(echo, device.platformId, event?.thingnotes?.notes) !== false);
+        all.length > 0 &&
+        orders?.follows?.(echo, device.platformId, event?.thingnotes?.notes) !== false;
       readings = follows ? all : [];
     }
     if (readings.length === 0) {
@@ -618,7 +632,7 @@ async function applyOwnEcho(gladys, config, event, echo, { orders, scenes, clien
         createdAt,
         // Some readings carry no `command` and are orders all the same to the
         // device that hears them (an ON to a shutter): in an echo they are ours.
-        echo: own,
+        echo: own && !overheard,
       });
       applied += Number(handled) > 0 ? 1 : 0;
     } catch (err) {

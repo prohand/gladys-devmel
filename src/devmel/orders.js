@@ -363,14 +363,48 @@ export class SentOrders {
    * The notes recently sent on this channel, oldest first: whatever an echo
    * heard on it says that matches one of them is our own order coming back.
    *
+   * The answer to a transfer may repeat any of them, however late (`all`).
+   * The box hearing itself repeats an emission once: an emission it was
+   * already heard repeating is over, unless it is the newest order on the
+   * voice — a press repeating that one changes nothing either way. Matched
+   * against the whole minute, a remote copied onto a plug and pressed ON
+   * after Gladys sent ON then OFF was dropped as the echo of that ON, and
+   * Gladys showed the plug off while it was on.
+   *
+   * @param {object} channel
+   * @param {object} [options]
+   * @param {boolean} [options.all] every emission of the minute, heard or not
    * @returns {Array<object>}
    */
-  said(channel) {
+  said(channel, { all = false } = {}) {
+    const spoken = this.spoken(channel);
+    const newest = Math.max(...spoken.map((emission) => emission.seq ?? 0));
+    return spoken
+      .filter((emission) => all || !emission.heard || emission.seq === newest)
+      .flatMap((emission) => emission.notes);
+  }
+
+  /**
+   * The box was heard repeating one of our emissions on this channel (a frame
+   * with no uid of ours): the oldest emission still waiting for it, since the
+   * radio sends them in turn. See `said`.
+   */
+  echoed(channel, notes) {
+    const heard = new Set((Array.isArray(notes) ? notes : []).map(noteKey));
+    const emission = this.spoken(channel).find(
+      (candidate) =>
+        !candidate.heard && (candidate.notes ?? []).some((note) => heard.has(noteKey(note))),
+    );
+    if (emission) {
+      emission.heard = true;
+    }
+  }
+
+  /** The emissions of the last minute on this channel, oldest first. */
+  spoken(channel) {
     const voice = this.voices.get(channelKey(channel));
     const now = this.now();
-    return (voice?.said ?? [])
-      .filter((spoken) => now - spoken.at <= this.voiceWindowMs)
-      .flatMap((spoken) => spoken.notes);
+    return (voice?.said ?? []).filter((spoken) => now - spoken.at <= this.voiceWindowMs);
   }
 
   /**

@@ -188,7 +188,11 @@ test("Gladys' own orders never fire remote_pressed: no scene can loop on itself"
   t.after(() => shutter.travel.clear());
   const { gladys, config, scenes, heard, orders } = setup();
   const device = config.devmelDevices.find((entry) => entry.name === 'Living room shutter');
-  orders.remember('0xabc', device);
+  // What the client files for every transfer: the notes it carried.
+  orders.remember('0xabc', device, {
+    notes: [{ type: NOTE_TYPES.STATE, value: STATE_VALUES.UP }],
+    fresh: true,
+  });
 
   await applyEvents(
     gladys,
@@ -200,6 +204,29 @@ test("Gladys' own orders never fire remote_pressed: no scene can loop on itself"
   );
 
   assert.deepEqual(gladys.sceneEvents, []);
+});
+
+test('a remote copied onto the address of its device fires remote_pressed within the minute', async () => {
+  // It speaks with the voice Gladys just used: its OFF reaches the integration
+  // as an echo, and is a press all the same — Gladys never said it.
+  const { gladys, config, scenes, heard, orders } = setup();
+  const device = config.devmelDevices.find((entry) => entry.name === 'Kitchen plug');
+  orders.remember('0xabc', device, {
+    notes: [{ type: NOTE_TYPES.STATE, value: STATE_VALUES.ON }],
+    fresh: true,
+  });
+  const hear = (value) =>
+    applyEvents(gladys, config, [frame({ ...device.channel }, value)], heard, orders, scenes);
+
+  // The box hearing itself, then the remote's OFF.
+  await hear(STATE_VALUES.ON);
+  assert.deepEqual(gladys.sceneEvents, []);
+  await hear(STATE_VALUES.OFF);
+
+  assert.equal(gladys.sceneEvents.length, 1);
+  assert.equal(gladys.sceneEvents[0].key, SCENE_TRIGGERS.REMOTE_PRESSED);
+  assert.equal(gladys.sceneEvents[0].data.device, 'switch:200-2');
+  assert.equal(gladys.sceneEvents[0].data.order, 'off');
 });
 
 test('an order the box reports as failed fires order_failed', async () => {

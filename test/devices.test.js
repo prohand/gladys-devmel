@@ -1701,6 +1701,72 @@ test('a wall remote heard on the air cancels the repeat of the Gladys order it o
   );
 });
 
+test('a remote copied onto the address of a shutter cancels the repeat of the Gladys order too', async (t) => {
+  // The same scene, with the remote copied into the AirSend app instead: it
+  // speaks with the shutter's own voice, so its STOP reaches the integration
+  // as an echo of the UP. It is a press all the same — Gladys never said STOP —
+  // and the repeated UP used to go out after it.
+  const { gladys, config, statesOf } = setupTimed(t);
+  const orders = new SentOrders();
+  const client = new AirSendClient({ sleep: async () => {}, orders });
+  client.configure(
+    normalizeConfig({
+      service_url: 'http://192.168.1.50:33863',
+      spurl: 'sp://pass@[fe80::1]?rhost=192.168.1.50',
+      command_repeat: 1,
+    }),
+  );
+  const channels = [];
+  let release = null;
+  const realFetch = globalThis.fetch;
+  t.after(() => {
+    globalThis.fetch = realFetch;
+  });
+  globalThis.fetch = async (url, options) => {
+    const channel = JSON.parse(options.body).channel.id;
+    channels.push(channel);
+    if (channel === 800 && !release) {
+      await new Promise((resolve) => {
+        release = resolve;
+      });
+    }
+    return { status: 200, json: async () => ({ type: 3 }) };
+  };
+  const open = (name) => {
+    const found = findDeviceByExternalId(gladys, config, deviceExternalId(config, name));
+    return found.blueprint.onSetValue(gladys, {
+      device: found.device,
+      feature: featureOf(gladys, config, name, 'state'),
+      value: 1,
+      client,
+    });
+  };
+  const heard = (value) => ({
+    type: 3,
+    channel: { id: 700, source: 7 },
+    thingnotes: { notes: [{ type: NOTE_TYPES.STATE, value }] },
+  });
+
+  const first = open('Timed shutter');
+  const second = open('Sun sail');
+  await first;
+  await new Promise(setImmediate);
+  // The box hears its own UP, then the copied remote's STOP.
+  for (const frame of [heard(STATE_VALUES.UP), heard(STATE_VALUES.STOP)]) {
+    await applyEvents(gladys, config, [frame], new HeardChannels(), orders, undefined, client);
+  }
+  release();
+  await second;
+  await client.idle();
+
+  assert.deepEqual(
+    channels.filter((channel) => channel === 700),
+    [700],
+  );
+  assert.equal(statesOf('Timed shutter').at(-1), 0);
+  assert.equal(shutter.travel.isMoving(deviceNamed(config, 'Timed shutter')), false);
+});
+
 test('an order the box could not transmit is said out loud, not swallowed', async (t) => {
   // The shape of "I have to click Open three times": the order never made it to
   // the air, and until this line nothing said so above debug level.
@@ -2655,6 +2721,92 @@ test('a remote copied onto a plug is followed within the minute after an order o
   assert.deepEqual(
     gladys.statesOf(`${deviceExternalId(config, 'Kitchen plug')}:on-off`),
     [0, 1, 0],
+  );
+});
+
+test('a gate follows the remote copied onto its address within the minute after an order', async (t) => {
+  // The usual way to drive a fixed-code gate: its remote copied into the
+  // AirSend app, so both speak with the same voice. Its UP, 21 s after Gladys
+  // closed the gate, was taken for an echo: the gate opened, Gladys showed it
+  // closed, and no remote_pressed fired.
+  const { gladys, context, client, clock, send, positionsOf, statesOf } = setupShutters(t, {
+    Gate: { type: 4098, travel: 20, channel: { id: 300, source: 3 } },
+  });
+  const orders = new SentOrders({ now: clock.now });
+  const scenes = new SceneEvents({ now: clock.now });
+  const heard = (value) => ({
+    type: 3,
+    channel: { id: 300, source: 3 },
+    thingnotes: { notes: [{ type: NOTE_TYPES.STATE, value }] },
+  });
+  const hear = (value) =>
+    applyEvents(gladys, context.config, [heard(value)], new HeardChannels(), orders, scenes);
+
+  await send('Gate', 'state', -1);
+  rememberLast(orders, context.config, client);
+  await hear(STATE_VALUES.DOWN);
+  await clock.advance(21000);
+  assert.deepEqual(gladys.sceneEvents, []);
+
+  await hear(STATE_VALUES.UP);
+  await clock.advance(5000);
+  await hear(STATE_VALUES.STOP);
+
+  assert.equal(positionsOf('Gate').at(-1), 25);
+  assert.deepEqual(statesOf('Gate').slice(-2), [1, 0]);
+  assert.deepEqual(
+    gladys.sceneEvents.map((event) => event.data.order),
+    ['up', 'stop'],
+  );
+});
+
+test('a remote copied onto a plug is followed after Gladys sent ON then OFF', async () => {
+  // Matched against everything said in the minute, the remote's ON was taken
+  // for the echo of Gladys' ON, already heard: the plug turned on, Gladys
+  // showed it off. Only an emission the box has not been heard repeating yet,
+  // or the newest order, is still an echo.
+  const { gladys, config, client } = setup();
+  let now = 0;
+  const orders = new SentOrders({ now: () => now });
+  const scenes = new SceneEvents({ now: () => now });
+  const frame = (value, uid) => ({
+    type: uid ? 1 : 3,
+    channel: { id: 200, source: 2 },
+    thingnotes: { ...(uid ? { uid } : {}), notes: [{ type: NOTE_TYPES.STATE, value }] },
+  });
+  const hear = (event) => applyEvents(gladys, config, [event], new HeardChannels(), orders, scenes);
+  for (const value of [1, 0]) {
+    await findDeviceByExternalId(
+      gladys,
+      config,
+      deviceExternalId(config, 'Kitchen plug'),
+    ).blueprint.onSetValue(gladys, {
+      device: deviceNamed(config, 'Kitchen plug'),
+      feature: featureOf(gladys, config, 'Kitchen plug', 'on-off'),
+      value,
+      client,
+    });
+    const uid = rememberLast(orders, config, client);
+    const state = value ? STATE_VALUES.ON : STATE_VALUES.OFF;
+    // The answer to the transfer, then the box hearing itself.
+    await hear(frame(state, uid));
+    await hear(frame(state));
+    now += 3000;
+  }
+  // The newest order, pressed again on the remote: nothing changes.
+  await hear(frame(STATE_VALUES.OFF));
+  assert.deepEqual(gladys.sceneEvents, []);
+
+  now += 12000;
+  await hear(frame(STATE_VALUES.ON));
+
+  assert.deepEqual(
+    gladys.statesOf(`${deviceExternalId(config, 'Kitchen plug')}:on-off`),
+    [1, 0, 1],
+  );
+  assert.deepEqual(
+    gladys.sceneEvents.map((event) => event.data.order),
+    ['on'],
   );
 });
 

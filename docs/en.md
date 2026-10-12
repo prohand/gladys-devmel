@@ -360,10 +360,12 @@ whatever the delay. A box that takes ten seconds to repeat itself is no longer
 mistaken for a hand on a remote — which was enough to send a shutter stopped at
 40 % back to the top. That voice is Gladys' for a minute after its last order:
 a remote copied into the AirSend app (same address as the device, the usual
-way for a fixed-code gate) is followed again once that minute has passed.
-Within it, a switch or a light still follows the ON, OFF or level of such a
-remote: only a press repeating what Gladys has just said, which changes
-nothing, is taken for the echo.
+way for a fixed-code gate) speaks with it too. Within that minute such a remote
+is still followed — the Up, Down or Stop of a shutter or a gate, the ON, OFF or
+level of a switch or a light — drops the repeat of a Gladys order still waiting
+for the radio, and fires **A radio remote is pressed**, like any remote. Only a
+press repeating what Gladys has just said, which changes nothing, or what the
+box has not yet been heard repeating, is taken for the echo.
 
 The same goes for a percentage or an ON/OFF Gladys sent: its echo is not taken
 for the device reporting where it is. Read that way, a timed 4099 sent to 30 %

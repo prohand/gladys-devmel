@@ -116,6 +116,24 @@ test('a voice is ours for a minute, then a remote sharing it is followed again',
   assert.ok(orders.match({ type: 3, channel: SHUTTER.channel }));
 });
 
+test('the box heard repeating an emission is not expected to repeat it again', () => {
+  // UP, then DOWN: the box was heard repeating both. A later UP on that voice
+  // is no echo — but the DOWN, newest, still is (a press repeating it changes
+  // nothing), and so is anything the answer to a transfer may carry.
+  const { orders } = registry();
+  const UP = { type: 0, value: 35 };
+  const DOWN = { type: 0, value: 34 };
+  orders.remember('0xabc', SHUTTER, { notes: [UP], fresh: true });
+  orders.remember('0xabc', SHUTTER, { notes: [DOWN], fresh: true });
+  // Neither heard yet: the UP may still come back, however late.
+  assert.deepEqual(orders.said(SHUTTER.channel), [UP, DOWN]);
+  orders.echoed(SHUTTER.channel, [UP]);
+  orders.echoed(SHUTTER.channel, [DOWN]);
+
+  assert.deepEqual(orders.said(SHUTTER.channel), [DOWN]);
+  assert.deepEqual(orders.said(SHUTTER.channel, { all: true }), [UP, DOWN]);
+});
+
 test('verdicts still owed to the order before are its own, not the next one', () => {
   // ON, then OFF 0.8 s later, under the same uid: the box answers the ON's
   // emissions first, and refusing them says nothing about the OFF.

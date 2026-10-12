@@ -380,11 +380,14 @@ cette voix, quel que soit le délai. Un boîtier qui met dix secondes à se rép
 n'est donc plus pris pour une main sur une télécommande — c'était de quoi
 renvoyer en haut un volet arrêté à 40 %. Cette voix reste celle de Gladys une
 minute après son dernier ordre : une télécommande recopiée dans l'appli AirSend
-(même adresse que l'appareil, l'usage pour un portail à code fixe) est de
-nouveau suivie une fois cette minute passée. Pendant cette minute, une prise
-ou une lumière suit tout de même le ON, le OFF ou le niveau d'une telle
-télécommande : seul un appui qui répète ce que Gladys vient de dire, et qui ne
-change rien, est pris pour l'écho.
+(même adresse que l'appareil, l'usage pour un portail à code fixe) parle aussi
+avec elle. Pendant cette minute, une telle télécommande est tout de même suivie
+— la montée, la descente ou le stop d'un volet ou d'un portail, le ON, le OFF
+ou le niveau d'une prise ou d'une lumière —, annule la répétition d'un ordre de
+Gladys qui attendait encore la radio, et déclenche **Une télécommande radio est
+actionnée**, comme toute télécommande. Seul un appui qui répète ce que Gladys
+vient de dire, et qui ne change rien, ou ce que le boîtier n'a pas encore été
+entendu répéter, est pris pour l'écho.
 
 Il en va de même d'un pourcentage ou d'un ON/OFF envoyé par Gladys : son écho
 n'est pas pris pour l'appareil qui dirait où il en est. Lu ainsi, un 4099
