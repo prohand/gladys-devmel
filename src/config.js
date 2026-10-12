@@ -12,6 +12,7 @@
 // -----------------------------------------------------------------------------
 
 import { isIPv6 } from 'node:net';
+import { DEVICE_POLL_FREQUENCIES } from '@gladysassistant/integration-sdk';
 import { createLogger } from './logging.js';
 import { SERVICE_URL as EMBEDDED_SERVICE_URL } from './devmel/service.js';
 
@@ -47,13 +48,15 @@ export const GENERIC_433_CHANNEL = 1;
  */
 export const MAX_COMMAND_REPEAT = 5;
 
-/** AirSend device types, as numbered by airsend.cloud. */
 // Gladys stores a device `poll_frequency` as an ENUM of MILLISECONDS
 // (DEVICE_POLL_FREQUENCIES of the core) and rejects the WHOLE discovery batch
 // with "invalid poll frequency" for any other value. The slowest tick is one
 // minute: a longer `refresh` is honoured by the blueprint, which skips the
-// ticks that come too early.
-export const GLADYS_POLL_FREQUENCIES_MS = [1000, 2000, 10000, 15000, 30000, 60000];
+// ticks that come too early. The values come from the SDK, which mirrors the
+// core enum, sorted fastest first for gladysPollFrequency.
+export const GLADYS_POLL_FREQUENCIES_MS = Object.values(DEVICE_POLL_FREQUENCIES).sort(
+  (a, b) => a - b,
+);
 
 /**
  * The Gladys tick a device is registered on: the slowest accepted value that is
@@ -68,6 +71,7 @@ export function gladysPollFrequency(seconds) {
   return fitting.length > 0 ? fitting[fitting.length - 1] : GLADYS_POLL_FREQUENCIES_MS[0];
 }
 
+/** AirSend device types, as numbered by airsend.cloud. */
 export const DEVICE_TYPES = {
   BOX: 0,
   SENSOR: 1,
