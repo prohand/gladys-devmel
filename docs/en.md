@@ -392,7 +392,10 @@ Visible consequences:
   end — sent to a still Somfy shutter, that Stop is the "my" button.
   Only the order that failed: a refused "Identify" PING does not switch back a
   plug whose ON went out, and when a short positioning's Open is refused after
-  its Stop was sent, it is that Open which is taken back, not the Stop.
+  its Stop was sent, it is that Open which is taken back, not the Stop. Each
+  answer is counted against the order it is about, however late it comes back:
+  ON, OFF, ON clicked faster than the box answers, all refused, leave the plug
+  shown as it was before the three.
 
 ### When the box says no
 
@@ -498,7 +501,8 @@ Two more things worth knowing:
   is published, and never waits for Gladys. A STOP the box could not send,
   whether it says so at once or a moment later (BUSY, NETWORK…), fires the **A
   radio order failed** trigger, and the position follows the shutter to its end
-  stop, since nothing stopped it. A STOP still waiting for the radio when a wall
+  stop, since nothing stopped it — a Stop given from Gladys while the shutter
+  moves too. A STOP still waiting for the radio when a wall
   remote sets the shutter off again is dropped.
 
 ### The favourite position

@@ -310,6 +310,43 @@ test('a STOP refused after the shutter was given another order changes nothing',
   assert.equal(travel.positionOf(SHUTTER), 40);
 });
 
+test('a Stop of ours the box refuses after it froze the shutter leaves it running', async () => {
+  const { clock, travel, positions, publish } = setup();
+  travel.set(SHUTTER, 0);
+  travel.move(SHUTTER, { direction: DIRECTIONS.UP, publish });
+  await clock.advance(3000);
+  // Gladys sends STOP 3 s into the opening: frozen at 15 %.
+  assert.equal(travel.stop(SHUTTER, { sent: true }), 15);
+  await clock.advance(400);
+
+  // BUSY on the callback: nothing stopped the motor, it never paused.
+  assert.equal(travel.resume(SHUTTER, 3000), DIRECTIONS.UP);
+  assert.equal(travel.positionOf(SHUTTER), 17);
+  await clock.advance(20000);
+  assert.equal(positions.at(-1), '100!');
+  assert.equal(travel.positionOf(SHUTTER), 100);
+
+  // A STOP heard on the air is a remote's: there is no refusal of it to come.
+  travel.move(SHUTTER, { direction: DIRECTIONS.DOWN, publish });
+  await clock.advance(2000);
+  travel.stop(SHUTTER);
+  assert.equal(travel.resume(SHUTTER, clock.now()), null);
+  assert.equal(travel.positionOf(SHUTTER), 80);
+});
+
+test('an Open refused once the Stop that froze it went out is taken back', async () => {
+  const { clock, travel, publish } = setup();
+  travel.set(SHUTTER, 0);
+  travel.move(SHUTTER, { direction: DIRECTIONS.UP, publish });
+  await clock.advance(3000);
+  travel.stop(SHUTTER, { sent: true });
+
+  // The UP sent at 0 never went out, the STOP did (at 3 s): never left 0 %.
+  assert.equal(travel.revert(SHUTTER, 0, 3000), true);
+  assert.equal(travel.positionOf(SHUTTER), 0);
+  assert.equal(travel.isMoving(SHUTTER), false);
+});
+
 test('an arrival waiting for a slow publication does not land over a newer movement', async () => {
   const { clock, travel, positions, publish } = setup();
   travel.set(SHUTTER, 0);

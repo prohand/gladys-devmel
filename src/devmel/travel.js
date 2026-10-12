@@ -179,16 +179,23 @@ export class ShutterTravel {
   /**
    * Freeze the shutter where it is (a STOP order, ours or heard on the radio).
    *
+   * @param {object} [options]
+   * @param {boolean} [options.sent] a STOP Gladys sent, whose refusal may come
+   *   back later: the movement it ended is remembered (see `resume`)
    * @returns {number|null} the position it stopped at, `null` when unknown
    */
-  stop(device) {
+  stop(device, { sent = false } = {}) {
     const state = this.states.get(device.platformId);
     if (!state) {
       return null;
     }
     const position = this.positionOf(device);
+    const move = state.move;
     this.cancel(state);
     state.position = position;
+    if (sent && move) {
+      state.stopped = { move, at: this.now() };
+    }
     return position;
   }
 
@@ -206,13 +213,15 @@ export class ShutterTravel {
    *
    * A travel that already arrived too: a short positioning (2 % of a 20 s
    * shutter) lands before the box refuses the UP that started it, and the
-   * motor that never left 0 % was shown, and timed from, 2 %.
+   * motor that never left 0 % was shown, and timed from, 2 %. And one a STOP
+   * of ours froze since: Gladys Open, then Stop, the Open refused once the
+   * Stop was handed over — the shutter never left, and was shown at 15 %.
    *
    * @returns {boolean} whether a movement was taken back
    */
   revert(device, since, until = Infinity) {
     const state = this.states.get(device.platformId);
-    const move = state?.move ?? state?.landed?.move;
+    const move = state?.move ?? state?.landed?.move ?? state?.stopped?.move;
     if (!move || move.turned || move.startedAt < since || move.startedAt >= until) {
       return false;
     }
@@ -235,11 +244,34 @@ export class ShutterTravel {
    * between the arrival and the moment its STOP was handed over. A PING sent
    * afterwards and refused is not that STOP.
    *
+   * The same goes for a STOP Gladys sent to a moving shutter (see `stop`):
+   * refused, it stopped nothing, and the movement it froze runs on to its end
+   * stop as if never interrupted. Left frozen, Gladys showed 17 % while the
+   * shutter ran to the top, and the next positioning was timed from there.
+   *
    * @returns {'up'|'down'|null} the direction it carries on in, null when
    *   the refused order was not that STOP
    */
   resume(device, since) {
     const state = this.states.get(device.platformId);
+    const stopped = state?.stopped;
+    if (stopped && since >= stopped.move.startedAt && since <= stopped.at) {
+      const { move } = stopped;
+      const end = move.direction === DIRECTIONS.UP ? 100 : 0;
+      const distance = move.from === null ? 100 : Math.abs(end - move.from);
+      this.cancel(state);
+      state.move = {
+        ...move,
+        target: end,
+        endAt: move.startedAt + (distance / 100) * travelMsFor(device, move.direction),
+        // Its own STOP, if it had one, was never sent: nothing stops it.
+        arrive: null,
+        publishing: null,
+        published: null,
+      };
+      this.schedule(device, state);
+      return move.direction;
+    }
     const landed = state?.landed;
     if (!landed || since < landed.move.endAt) {
       return null;
@@ -270,9 +302,13 @@ export class ShutterTravel {
     }
     state.position = state.position === null ? null : 100 - state.position;
     // An arrival whose STOP is still on its way publishes its target, and
-    // carries on from it if that STOP fails: both in the new terms.
+    // carries on from it if that STOP fails: both in the new terms. So does
+    // the movement a STOP of ours ended, run on if that STOP was refused.
     if (state.landed) {
       mirrorMove(state.landed.move);
+    }
+    if (state.stopped) {
+      mirrorMove(state.stopped.move);
     }
   }
 
@@ -328,7 +364,15 @@ export class ShutterTravel {
   stateOf(device) {
     let state = this.states.get(device.platformId);
     if (!state) {
-      state = { position: null, move: null, handle: null, device, landed: null, arriving: null };
+      state = {
+        position: null,
+        move: null,
+        handle: null,
+        device,
+        landed: null,
+        stopped: null,
+        arriving: null,
+      };
       this.states.set(device.platformId, state);
     }
     state.device = device;
@@ -385,9 +429,11 @@ export class ShutterTravel {
       state.handle = null;
     }
     state.move = null;
-    // Whatever replaced the last arrival, a STOP refused later no longer says
-    // where the shutter is (see `resume`).
+    // Whatever replaced the last arrival, or the last movement a STOP of ours
+    // ended, a STOP refused later no longer says where the shutter is (see
+    // `resume`).
     state.landed = null;
+    state.stopped = null;
   }
 
   /**

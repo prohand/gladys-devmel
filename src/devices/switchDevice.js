@@ -51,11 +51,13 @@ export const switchDevice = {
     const on = isOn(value);
     logger.info(`"${device.name}" -> ${on ? 'ON' : 'OFF'}`);
     shown.begin(device.platformId);
-    await sendNotes(client, device, [stateNote(on ? STATE_VALUES.ON : STATE_VALUES.OFF)], {
-      uid: feature.external_id,
-      callbackUrl,
-    });
-    shown.sent(device.platformId, { onOff: on ? 1 : 0 }, feature.external_id);
+    const sent = await sendNotes(
+      client,
+      device,
+      [stateNote(on ? STATE_VALUES.ON : STATE_VALUES.OFF)],
+      { uid: feature.external_id, callbackUrl },
+    );
+    shown.sent(device.platformId, { onOff: on ? 1 : 0 }, feature.external_id, sent?.seq);
     await publishState(gladys, feature.external_id, on ? 1 : 0);
   },
 
@@ -84,12 +86,8 @@ export const switchDevice = {
    *
    * @returns {Promise<boolean>} whether anything was taken back
    */
-  async notCarried(gladys, { device, uid = null, superseded = false }) {
-    if (superseded) {
-      shown.supersededNotCarried(device.platformId, uid);
-      return false;
-    }
-    const before = shown.undo(device.platformId, uid);
+  async notCarried(gladys, { device, uid = null, seq = null, superseded = false }) {
+    const before = shown.notCarried(device.platformId, { uid, seq, superseded });
     if (!before) {
       return false;
     }

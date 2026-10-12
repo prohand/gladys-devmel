@@ -535,11 +535,22 @@ export async function applyEvents(
  * @returns {Promise<number>} how many devices acted on the leftovers
  */
 async function applyOwnEcho(gladys, config, event, echo, { orders, scenes, client } = {}) {
-  const verdict = orders?.settle?.(echo, event?.type) ?? {
+  // Only the answer to one of our transfers is a verdict on an emission: it
+  // carries the uid we gave it. The box hearing itself carries none, and says
+  // nothing about which emission it heard (see `SentOrders.settle`).
+  const answer = echo.uid !== undefined && String(event?.thingnotes?.uid ?? '') === echo.uid;
+  const verdict = (answer ? orders?.settle?.(echo, event?.type) : null) ?? {
     failed: isErrorEvent(event?.type),
     uncarried: false,
     latest: false,
   };
+  // Orders whose failure was only known once nothing more of them could come.
+  for (const earlier of verdict.earlier ?? []) {
+    await orderNotCarried(gladys, config, { ...event, type: earlier.type }, echo, earlier, {
+      scenes,
+      client,
+    });
+  }
   if (isErrorEvent(event?.type)) {
     if (!verdict.failed) {
       // One emission refused while another went out, or may still: a repeat
@@ -561,7 +572,6 @@ async function applyOwnEcho(gladys, config, event, echo, { orders, scenes, clien
   // A frame on our voice that says something we did not, and is not the answer
   // to one of our transfers, is a remote sharing the address being pressed: a
   // press, not an echo, for the devices that follow that channel.
-  const answer = echo.uid !== undefined && String(event?.thingnotes?.uid ?? '') === echo.uid;
   const overheard = !answer && unsaid.length > 0;
   if (overheard) {
     orders?.overheard?.(channel);
@@ -652,7 +662,7 @@ async function orderNotCarried(gladys, config, event, echo, verdict, { scenes, c
   if (!verdict.uncarried || !verdict.latest) {
     return;
   }
-  // An order the same feature was given another one after (see `owe` in
+  // An order the same feature was given another one after (see `replace` in
   // orders.js) leaves the badge to that newer one, which may have gone out.
   if (!verdict.superseded) {
     client?.rememberTransport(device, DEVICE_TRANSPORTS.UNREACHABLE);
@@ -664,6 +674,7 @@ async function orderNotCarried(gladys, config, event, echo, verdict, { scenes, c
       await blueprint.notCarried(gladys, {
         device,
         since: verdict.since,
+        seq: verdict.seq ?? null,
         uid: echo.uid,
         superseded: Boolean(verdict.superseded),
         until: verdict.until ?? null,

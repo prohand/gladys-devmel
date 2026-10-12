@@ -120,10 +120,13 @@ test('verdicts still owed to the order before are its own, not the next one', ()
   // ON, then OFF 0.8 s later, under the same uid: the box answers the ON's
   // emissions first, and refusing them says nothing about the OFF.
   const { orders, advance } = registry();
+  // Each emission handed to the service is remembered: the order, its repeat.
   const on = orders.remember('0xabc', SHUTTER, { fresh: true, emissions: 2 });
+  orders.remember('0xabc', SHUTTER);
   const onSince = on.since;
   advance(800);
   orders.remember('0xabc', SHUTTER, { fresh: true, emissions: 2 });
+  orders.remember('0xabc', SHUTTER);
   const order = orders.match(echo('0xabc'));
 
   assert.equal(orders.settle(order, 0x101).failed, false);
@@ -139,6 +142,73 @@ test('verdicts still owed to the order before are its own, not the next one', ()
   assert.equal(second.failed, true);
   assert.equal(second.superseded, false);
   assert.equal(second.since, order.since);
+});
+
+test('an order keeps every verdict of its own, carried or refused', () => {
+  // A 2 % positioning: UP and its repeat, the STOP 400 ms later, all under
+  // the uid of the position feature.
+  const { orders, advance } = registry();
+  const up = orders.remember('0xabc', SHUTTER, { fresh: true, emissions: 2 });
+  const upSince = up.since;
+  orders.remember('0xabc', SHUTTER);
+  const order = orders.match(echo('0xabc'));
+  assert.equal(orders.settle(order, 1).failed, false);
+  advance(400);
+  orders.remember('0xabc', SHUTTER, { fresh: true, emissions: 1 });
+
+  // The repeat refused after the STOP went out is the UP's: the UP went out.
+  const repeat = orders.settle(order, 0x104);
+  assert.equal(repeat.failed, false);
+  assert.equal(repeat.since, upSince);
+  // The STOP carried is the STOP's, and nothing failed.
+  assert.equal(orders.settle(order, 1).failed, false);
+
+  // And the other way round: both UPs carried, answered after the STOP went
+  // out, then the STOP refused — that refusal is the STOP's, and it failed.
+  advance(5000);
+  orders.remember('0xabc', SHUTTER, { fresh: true, emissions: 2 });
+  orders.remember('0xabc', SHUTTER);
+  advance(400);
+  const next = orders.remember('0xabc', SHUTTER, { fresh: true, emissions: 1 });
+  assert.equal(orders.settle(order, 1).failed, false);
+  assert.equal(orders.settle(order, 1).failed, false);
+  const refused = orders.settle(order, 0x104);
+  assert.equal(refused.failed, true);
+  assert.equal(refused.superseded, false);
+  assert.equal(refused.since, next.since);
+});
+
+test('a PENDING is no verdict yet: the one on that emission is still to come', () => {
+  const { orders } = registry();
+  orders.remember('0xabc', SHUTTER, { fresh: true, emissions: 1 });
+  const order = orders.match(echo('0xabc'));
+  // PENDING: taken, not sent yet. The verdict on that emission is still owed.
+  assert.equal(orders.settle(order, 0).failed, false);
+  const verdict = orders.settle(order, 0x104);
+  assert.equal(verdict.failed, true);
+  assert.equal(verdict.since, order.since);
+});
+
+test('an order the box judged before it was known nothing more of it would go out', () => {
+  // ON refused, then OFF given before the ON's repeat got its turn: the repeat
+  // is dropped, so the ON failed — said with the next verdict on its uid.
+  const { orders, advance } = registry();
+  const on = orders.remember('0xabc', SHUTTER, { fresh: true, emissions: 2 });
+  const onSince = on.since;
+  const order = orders.match(echo('0xabc'));
+  assert.equal(orders.settle(order, 0x101).failed, false);
+  advance(300);
+  orders.remember('0xabc', SHUTTER, { fresh: true, emissions: 2 });
+  orders.remember('0xabc', SHUTTER);
+
+  const verdict = orders.settle(order, 1);
+  assert.equal(verdict.failed, false);
+  assert.equal(verdict.earlier.length, 1);
+  assert.equal(verdict.earlier[0].failed, true);
+  assert.equal(verdict.earlier[0].superseded, true);
+  assert.equal(verdict.earlier[0].since, onSince);
+  assert.equal(verdict.earlier[0].type, 0x101);
+  assert.deepEqual(orders.settle(order, 1).earlier, []);
 });
 
 test('an order answered, or replaced long after it went out, is owed nothing', () => {

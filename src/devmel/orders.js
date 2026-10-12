@@ -49,17 +49,30 @@
 // under the same uid. One emission refused while another went out is an order
 // that went out: only an order whose every emission was refused failed.
 //
-// And a uid names a feature, not an order: the STOP that ends a timed
-// positioning carries the uid of the UP that started it, the OFF the uid of
-// the ON before it. Verdicts come back in the order the emissions went out
-// (one radio), so those still owed to the order before are its own, not the
-// new one's: counted against the new one, the box refusing an ON undid the
-// OFF given after it, and refusing the UP of a short positioning read as a
-// refused STOP that ran a still shutter to its end stop.
+// Which order a verdict is about is the whole difficulty, and the model is
+// the radio's own:
+//
+//   - one radio per box, so the service answers the emissions in the order
+//     it was handed them;
+//   - a uid names a feature, not an order: the STOP that ends a timed
+//     positioning carries the uid of the UP that started it, the OFF the uid
+//     of the ON before it;
+//   - an emission the service never received (its request was refused, a
+//     repeat dropped behind a newer order) is never answered;
+//   - the box hearing itself (a GOT with no uid) answers no emission at all.
+//
+// So each uid keeps a queue of the emissions handed to the service, each
+// tagged with its order, and a verdict is charged to the oldest one waiting.
+// An order is judged once every emission it handed over is answered and no
+// other can follow — the newest order of its feature replaced it, or all its
+// repeats went out. Charged to the newest order instead, the box refusing an
+// ON undid the OFF given after it, a refused repeat of the UP of a short
+// positioning read as a refused STOP that ran a stopped shutter to its end
+// stop, and a carried one hid the STOP the box did refuse.
 // -----------------------------------------------------------------------------
 
 import { isSameChannel } from './notes.js';
-import { describeFailure, isErrorEvent } from './events.js';
+import { describeFailure, EVENT_TYPES, isErrorEvent } from './events.js';
 
 /** How long the answer to a transfer may take to come back, in ms. */
 export const DEFAULT_TTL_MS = 30000;
@@ -84,9 +97,6 @@ export const DEFAULT_LIMIT = 64;
 
 /** How many recent orders are kept per voice, to recognize them in an echo. */
 const SAID_LIMIT = 8;
-
-/** How many replaced orders of one uid may still be owed their verdicts. */
-const OWED_LIMIT = 4;
 
 export class SentOrders {
   /**
@@ -150,7 +160,7 @@ export class SentOrders {
    * @param {boolean} [order.fresh] a new order rather than a repeat or a retry
    *   of the one before: the verdicts start over
    * @param {number} [order.emissions] how many times it is to go out, repeats
-   *   included: the verdicts it takes to call it failed
+   *   included: the verdicts it waits for before it is judged
    * @param {boolean} [order.wait] answered by the transfer itself: no verdict
    *   of it comes back on the callback
    */
@@ -166,38 +176,54 @@ export class SentOrders {
       platformId: device.platformId,
       channel: device.channel,
       emissions: 0,
+      queue: [],
+      due: [],
     };
     // A uid names a feature, not an order: the CLOSE after an OPEN carries the
-    // same one. Its verdicts are the new order's, not added to the old one's —
-    // once the old one has had its own (see `owe`).
+    // same one. A new order starts its own verdicts; the one it replaces keeps
+    // whatever of its emissions the service still has to answer.
     if (!known || fresh) {
-      const owed = known ? this.owe(entry) : [];
-      Object.assign(entry, {
-        since: this.now(),
-        expected: null,
+      const since = this.now();
+      const previous = entry.order;
+      entry.order = {
+        uid: key,
+        seq: ++this.sequence,
+        since,
+        at: since,
+        // Emissions it is to make, repeats included; null when nobody said.
+        planned: null,
+        handed: 0,
         carried: 0,
         failed: 0,
         uncarried: 0,
-        sent: 0,
-        answered: false,
-        seq: ++this.sequence,
-        owed,
-      });
+        type: null,
+        closed: false,
+        judged: false,
+        silent: false,
+        until: null,
+      };
+      entry.since = since;
+      entry.seq = entry.order.seq;
+      this.replace(entry, previous);
       this.latest.set(entry.platformId, key);
       this.actedOn.set(entry.platformId, entry.seq);
     }
+    const order = entry.order;
     if (Number.isFinite(emissions)) {
-      entry.expected = emissions;
+      order.planned = emissions;
     }
-    if (wait) {
-      entry.answered = true;
+    // Answered by the transfer itself (`wait: true`): nothing of it comes back
+    // on the callback, so nothing waits there for it.
+    if (!wait) {
+      order.handed += 1;
+      entry.queue.push({ order, at: this.now() });
     }
     // A repeat of the same order refreshes it rather than adding another one:
     // the echoes of both emissions must be recognized, and they are the same
     // order twice.
     entry.emissions += 1;
-    entry.sent += 1;
     entry.at = this.now();
+    order.at = entry.at;
 
     this.entries.delete(key);
     this.entries.set(key, entry);
@@ -237,38 +263,100 @@ export class SentOrders {
   }
 
   /**
-   * A new order replaces the one this entry holds: what is still owed
-   * verdicts — that order, if the box has not judged it yet, and those it
-   * replaced — to be judged before the new one (see `settle`).
+   * A new order replaces the one this entry holds. Everything that order will
+   * ever hand the service is handed by now: a repeat queued behind the new
+   * order is dropped at its turn (see `isOverridden` in client.js). So it is
+   * judged on the emissions it made, and on nothing more.
    *
-   * Not an order answered by its own transfer (`wait: true`): nothing more of
-   * it comes back. Nor one replaced later than the channel window after it
-   * went out: the box answers within the second, so its verdicts came — or
-   * were lost, and waiting for them would hand it the new order's: an 8 s
+   * Except emissions still unanswered a channel window after their order last
+   * went out: the box answers within the second, so those verdicts were lost,
+   * and waiting for them would hand that order the new one's — an 8 s
    * positioning whose UP was never answered took the refusal of its STOP for
-   * the UP's, and took the travel back instead of running it on.
+   * the UP's, and took the travel back instead of running it on. An order
+   * missing a verdict is not judged at all: one refusal is not every one.
    */
-  owe(entry) {
-    const now = this.now();
-    const owed = (entry.owed ?? []).filter((order) => now - order.since <= this.ttlMs);
-    const expected = entry.expected ?? entry.sent;
-    if (
-      Number.isFinite(entry.failed) &&
-      !entry.answered &&
-      now - entry.at <= this.channelWindowMs &&
-      entry.carried === 0 &&
-      entry.failed < expected
-    ) {
-      owed.push({
-        since: entry.since,
-        expected,
-        carried: 0,
-        failed: entry.failed,
-        uncarried: entry.uncarried,
-        seq: entry.seq,
-      });
+  replace(entry, previous) {
+    if (!previous) {
+      return;
     }
-    return owed.slice(-OWED_LIMIT);
+    const since = entry.order.since;
+    previous.until = since;
+    entry.queue = entry.queue.filter((emission) => {
+      if (since - emission.order.at <= this.channelWindowMs) {
+        return true;
+      }
+      emission.order.judged = true;
+      return false;
+    });
+    this.close(previous);
+  }
+
+  /**
+   * No more emission of this order will reach the service: the first one
+   * failed for good (`silent`: its caller was told, and showed nothing), a
+   * repeat failed or was dropped, a newer order replaced it. Judged now if its
+   * verdicts are all in — and reported with the next verdict on its uid, the
+   * one thing that still reaches the scenes (see `settle`).
+   *
+   * @param {object} order what `remember` filed as `entry.order`
+   * @param {object} [options]
+   * @param {boolean} [options.silent] never reported as a failed order
+   */
+  close(order, { silent = false } = {}) {
+    if (!order) {
+      return;
+    }
+    order.closed = true;
+    order.silent = order.silent || silent;
+    const entry = this.entries.get(order.uid);
+    const verdict = entry ? this.judge(entry, order) : null;
+    if (verdict?.failed) {
+      entry.due.push(verdict);
+    }
+  }
+
+  /**
+   * The request of an emission never reached the service (connection
+   * refused): no verdict will ever answer it. Its retry, if any, is filed
+   * again by `remember`.
+   */
+  unsent(order) {
+    const entry = order && this.entries.get(order.uid);
+    if (entry?.queue.at(-1)?.order !== order) {
+      return;
+    }
+    entry.queue.pop();
+    order.handed -= 1;
+    const verdict = order.closed ? this.judge(entry, order) : null;
+    if (verdict?.failed) {
+      entry.due.push(verdict);
+    }
+  }
+
+  /**
+   * The verdict on a whole order, once there is one: every emission it handed
+   * over answered, and none still to come. Given once.
+   *
+   * @returns {object|null} see `settle`; null while verdicts are missing
+   */
+  judge(entry, order) {
+    const answered = order.carried + order.failed;
+    const due = order.closed ? order.handed : Math.max(order.planned ?? 0, order.handed);
+    if (order.judged || answered < due) {
+      return null;
+    }
+    order.judged = true;
+    const failed = !order.silent && order.carried === 0 && order.failed > 0;
+    return {
+      failed,
+      uncarried: failed && order.uncarried >= order.failed,
+      latest: this.latest.get(entry.platformId) === entry.uid,
+      since: order.since,
+      superseded: order !== entry.order,
+      until: order.until,
+      seq: order.seq,
+      type: order.type,
+    };
   }
 
   /**
@@ -363,70 +451,74 @@ export class SentOrders {
   }
 
   /**
-   * Record the box's verdict on one emission of an order, and say what it
-   * means for the order as a whole.
+   * Record the box's verdict on one emission, and say what it means for the
+   * order that emission belongs to — the oldest one still waiting on that
+   * uid (see the top of this file).
+   *
+   * Only the answers to our transfers are verdicts: the event carries the
+   * entry's uid. A PENDING says nothing yet, and the box hearing itself (no
+   * uid) answers no emission — counted as one, a late GOT of the UP marked
+   * the STOP sent after it as carried, and the refusal of that STOP went
+   * unreported while the motor ran on.
    *
    * @param {object} order what `match` returned for the event
    * @param {number} type the event type: below 0x100 it went out
    * @returns {{failed: boolean, uncarried: boolean, latest: boolean, since: ?number,
-   *   superseded: boolean, until: ?number}}
-   *   `failed` once every emission it was to make was refused and none went
+   *   superseded: boolean, until: ?number, seq: ?number, type: ?number, earlier: Array<object>}}
+   *   `failed` once every emission of that order was refused and none went
    *   out; `uncarried` when, on top of that, the box said each time that
    *   nothing reached the air; `latest` when no order went to another feature
-   *   of the device since; `since` when it was first sent; `superseded` when
-   *   it is an order the same uid carried before the newest one, given at
-   *   `until` (see `owe`)
+   *   of the device since; `since` when it was first sent and `seq` its
+   *   number; `superseded` when the same uid carried a newer order since,
+   *   given at `until`; `type` the last refusal; `earlier` the failed orders
+   *   whose last verdict came before it was known none would follow (see
+   *   `close`), to report first
    */
   settle(order, type) {
     // A voice, not an order: older than any verdict should be. Taken at its
     // word, as a failure of its own, and nothing more.
-    if (!order || !Number.isFinite(order.failed)) {
-      return {
-        failed: isErrorEvent(type),
-        uncarried: false,
-        latest: false,
-        since: null,
-        superseded: false,
-        until: null,
-      };
+    if (!order || !Array.isArray(order.queue)) {
+      return atItsWord(type);
     }
-    // The verdicts still owed to the orders this one replaced come first:
-    // the radio sent those emissions first.
+    if (Number(type) === EVENT_TYPES.PENDING) {
+      // Taken, not sent yet: the verdict on that emission is still to come.
+      return atItsWord(type);
+    }
     const now = this.now();
-    order.owed = (order.owed ?? []).filter((owed) => now - owed.since <= this.ttlMs);
-    const judged = order.owed[0] ?? order;
-    const superseded = judged !== order;
-    const until = superseded ? (order.owed[1]?.since ?? order.since) : null;
-    if (!isErrorEvent(type)) {
-      judged.carried += 1;
-      if (superseded) {
-        order.owed.shift();
+    order.queue = order.queue.filter((emission) => {
+      if (now - emission.at <= this.ttlMs) {
+        return true;
       }
-      return {
-        failed: false,
-        uncarried: false,
-        latest: false,
-        since: judged.since,
-        superseded,
-        until,
-      };
+      emission.order.judged = true;
+      return false;
+    });
+    const earlier = order.due.splice(0);
+    const emission = order.queue.shift();
+    if (!emission) {
+      // Nothing of ours waits for it: said, never charged to an order.
+      return { ...atItsWord(type), earlier };
     }
-    judged.failed += 1;
-    if (describeFailure(type).carried === false) {
-      judged.uncarried += 1;
+    const judged = emission.order;
+    if (isErrorEvent(type)) {
+      judged.failed += 1;
+      judged.type = type;
+      if (describeFailure(type).carried === false) {
+        judged.uncarried += 1;
+      }
+    } else {
+      judged.carried += 1;
     }
-    const failed = judged.carried === 0 && judged.failed >= (judged.expected ?? judged.emissions);
-    if (superseded && failed) {
-      order.owed.shift();
-    }
-    return {
-      failed,
-      uncarried: failed && judged.uncarried >= judged.failed,
-      latest: this.latest.get(order.platformId) === order.uid,
+    const verdict = this.judge(order, judged) ?? {
+      failed: false,
+      uncarried: false,
+      latest: false,
       since: judged.since,
-      superseded,
-      until,
+      superseded: judged !== order.order,
+      until: judged.until,
+      seq: judged.seq,
+      type: judged.type,
     };
+    return { ...verdict, earlier };
   }
 
   /**
@@ -481,6 +573,21 @@ export class SentOrders {
     this.latest.clear();
     this.actedOn.clear();
   }
+}
+
+/** A verdict nobody waits for: a failure if it says so, charged to no order. */
+function atItsWord(type) {
+  return {
+    failed: isErrorEvent(type),
+    uncarried: false,
+    latest: false,
+    since: null,
+    superseded: false,
+    until: null,
+    seq: null,
+    type,
+    earlier: [],
+  };
 }
 
 /** A note as a key: what it says, whatever the frame wrapped it in. */

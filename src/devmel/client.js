@@ -292,6 +292,9 @@ export class AirSendClient {
           ? `Local transfer failed for "${device.name}": ${err.message}`
           : `The box did not carry the order sent to "${device.name}". ${explainFailure(err.eventType)}`,
       );
+      // Its caller is told, and shows nothing of it: whatever verdict comes
+      // back for an attempt the service did take is not reported again.
+      this.orders?.close?.(order.verdicts, { silent: true });
       // The badge is the newest order's to set: one sent behind this one may
       // well have gone through by now.
       if (!this.isSuperseded(device, order)) {
@@ -304,7 +307,13 @@ export class AirSendClient {
     this.notifyTransmit();
     this.reportPace(device, notes, pace);
     this.repeat(device, notes, options, repeats, order);
-    return { transport: DEVICE_TRANSPORTS.LOCAL, degraded: false, notes: answer?.notes ?? [] };
+    return {
+      transport: DEVICE_TRANSPORTS.LOCAL,
+      degraded: false,
+      notes: answer?.notes ?? [],
+      // Which order the box's verdicts will name (see `SentOrders.settle`).
+      seq: order.verdicts?.seq ?? null,
+    };
   }
 
   /**
@@ -335,6 +344,9 @@ export class AirSendClient {
               ? `Dropped the repeats of an older order to "${device.name}"`
               : `Could not repeat the order sent to "${device.name}": ${err.message}`,
           );
+          // The order is judged on what did go out: waiting for the verdicts
+          // of repeats that never will, a refused order was never reported.
+          this.orders?.close?.(order?.verdicts);
           return;
         }
         this.rememberTransport(device, DEVICE_TRANSPORTS.LOCAL);
@@ -423,7 +435,11 @@ export class AirSendClient {
             }
             // The first emission starts a new order for the box's verdicts;
             // a retry or a repeat is that order again (see orders.js).
-            return this.transferLocal(device, notes, { ...options, fresh: !checked });
+            return this.transferLocal(device, notes, {
+              ...options,
+              fresh: !checked,
+              ticket: order,
+            });
           },
           pace,
         );
@@ -640,7 +656,7 @@ export class AirSendClient {
   async transferLocal(
     device,
     notes,
-    { uid, wait = false, callbackUrl, fresh = true, emissions = null } = {},
+    { uid, wait = false, callbackUrl, fresh = true, emissions = null, ticket = null } = {},
   ) {
     const thingUid = toThingUid(uid ?? device.platformId);
     // Remembered BEFORE the request: the answer to a fire-and-forget transfer
@@ -654,8 +670,12 @@ export class AirSendClient {
     // voice of ours, and a generic 433 MHz frame heard with no address would
     // then be taken for an order of Gladys coming back: a remote that stops
     // working the day the box gets warmed or polled.
-    if (device.rtype !== DEVICE_TYPES.BOX) {
-      this.orders?.remember(thingUid, device, { notes, fresh, emissions, wait });
+    const verdicts =
+      device.rtype === DEVICE_TYPES.BOX
+        ? null
+        : this.orders?.remember(thingUid, device, { notes, fresh, emissions, wait })?.order;
+    if (ticket && verdicts) {
+      ticket.verdicts = verdicts;
     }
     const body = {
       wait,
@@ -669,10 +689,24 @@ export class AirSendClient {
       body.callback = callbackUrl || 'http://127.0.0.1/';
     }
 
-    const response = await this.localRequest('airsend/transfer', body, device);
+    let response;
+    try {
+      response = await this.localRequest('airsend/transfer', body, device);
+    } catch (err) {
+      // Never received: the box will not answer it either, and a verdict
+      // waited for in its place would be charged the next emission's.
+      if (neverReachedTheAir(err)) {
+        this.orders?.unsent?.(verdicts);
+      }
+      throw err;
+    }
     const payload = await readJson(response);
 
     if (response.status !== 200) {
+      // Refused by the service itself: nothing was handed to the box.
+      if (response.status < 500) {
+        this.orders?.unsent?.(verdicts);
+      }
       throw new AirSendError(localErrorMessage(response.status, this.spurlOf(device)), {
         status: response.status,
         transport: DEVICE_TRANSPORTS.LOCAL,

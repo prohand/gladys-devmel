@@ -191,7 +191,7 @@ export const shutter = {
     await sendNotes(client, device, [note], { uid: feature.external_id, callbackUrl });
 
     if (state === SHUTTER_STATE.STOP) {
-      await freeze(gladys, device, ids);
+      await freeze(gladys, device, ids, { sent: true });
       return;
     }
     await goTo(gladys, device, ids, state === SHUTTER_STATE.OPEN ? 100 : 0, {
@@ -268,12 +268,13 @@ export const shutter = {
   async notCarried(gladys, { device, since, superseded = false, until = null }) {
     reframe(device);
     const ids = idsFor(gladys, KEY, device);
-    // The STOP of a timed positioning, refused after the travel arrived: the
-    // motor was never stopped, and the travel follows it to its end stop.
-    // Gladys was told the target and "stopped" at the arrival: it is told
-    // again which way the shutter is going. Never an order the same feature
-    // was given another one after (`superseded`): the UP of a short
-    // positioning, refused once its STOP was handed over, is not that STOP.
+    // The STOP of a timed positioning, refused after the travel arrived, or a
+    // STOP from Gladys refused after it froze the travel: the motor was never
+    // stopped, and the travel follows it to its end stop. Gladys was told
+    // "stopped": it is told again which way the shutter is going. Never an
+    // order the same feature was given another one after (`superseded`): the
+    // UP of a short positioning, refused once its STOP was handed over, is
+    // not that STOP.
     const direction = superseded ? null : shutter.travel.resume(device, since);
     if (direction !== null) {
       logger.info(`"${device.name}" was not stopped: it runs on to its end stop`);
@@ -445,7 +446,7 @@ async function drive(gladys, device, ids, target, { client, callbackUrl, uid }) 
     } else {
       logger.info(`"${device.name}" -> ${destination} % (passing it: stopped there)`);
       await sendNotes(client, device, [stateNote(STATE_VALUES.STOP)], { uid, callbackUrl });
-      await freeze(gladys, device, ids);
+      await freeze(gladys, device, ids, { sent: true });
       return;
     }
   }
@@ -478,7 +479,7 @@ async function drive(gladys, device, ids, target, { client, callbackUrl, uid }) 
   ) {
     logger.info(`"${device.name}" reached ${destination} % before the order went out: stopped`);
     await sendNotes(client, device, [stateNote(STATE_VALUES.STOP)], { uid, callbackUrl });
-    await freeze(gladys, device, ids);
+    await freeze(gladys, device, ids, { sent: true });
     return;
   }
   // At an end stop the motor stops on its own; anywhere else it has to be told,
@@ -537,8 +538,10 @@ function travelDirection(current, destination) {
  * A STOP order: the shutter stays wherever the travel had taken it. Only a
  * shutter that was actually moving has a new position to report — stopping a
  * still one says nothing Gladys does not already show.
+ *
+ * `sent`: a STOP Gladys sent, which the box may still refuse (see `notCarried`).
  */
-async function freeze(gladys, device, ids) {
+async function freeze(gladys, device, ids, { sent = false } = {}) {
   const wasMoving = shutter.travel.isMoving(device);
   // The Somfy "my" button and the STOP order are one and the same frame: it
   // stops a shutter that moves, and sends a still one to the position
@@ -550,7 +553,7 @@ async function freeze(gladys, device, ids) {
     await goToFavorite(gladys, device, ids);
     return;
   }
-  const position = shutter.travel.stop(device);
+  const position = shutter.travel.stop(device, { sent });
   await publishState(gladys, ids.feature(FEATURE.STATE), SHUTTER_STATE.STOP);
   if (wasMoving && position !== null) {
     await publishPosition(gladys, device, ids, position);

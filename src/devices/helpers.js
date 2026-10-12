@@ -83,10 +83,15 @@ export async function publishState(gladys, featureExternalId, value, createdAt) 
 }
 
 /**
- * What Gladys was last shown for each device, and for its last order what it
- * showed before and after: the box can say, after Gladys was answered and
- * shown the new state (`wait: false`), that the order never reached the air —
- * and a plug shown ON that never heard the order is a plug shown wrong.
+ * What Gladys was last shown for each device, and for each of its recent
+ * orders what it showed before and after: the box can say, after Gladys was
+ * answered and shown the new state (`wait: false`), that an order never
+ * reached the air — and a plug shown ON that never heard the order is a plug
+ * shown wrong.
+ *
+ * Several orders, not one: the box judges them in the order they went out,
+ * possibly once two more were given (ON, OFF, ON clicked faster than it
+ * answers), and each failure must be applied to the order it is about.
  *
  * A state is a plain object of feature values (`{ onOff: 1 }`).
  */
@@ -94,10 +99,10 @@ export class ShownStates {
   constructor() {
     /** @type {Map<string, object>} keyed by platform id */
     this.shown = new Map();
-    /** @type {Map<string, object>} the last order of each device */
+    /** @type {Map<string, Array<object>>} the recent orders of each device, oldest first */
     this.orders = new Map();
-    /** @type {Map<string, object>} and the one it replaced */
-    this.replaced = new Map();
+    /** @type {Set<string>} devices with an order on its way to the radio */
+    this.pending = new Set();
   }
 
   get(platformId) {
@@ -110,47 +115,72 @@ export class ShownStates {
   }
 
   /**
-   * A new order is on its way to the radio. The one before is forgotten first:
-   * waiting in the queue, or answered by the box before the service answered
-   * Gladys, the new order is not recorded yet — and a verdict meant for it
+   * A new order is on its way to the radio. Until the service takes it, the
+   * newest order recorded is not the device's last one: answered by the box
+   * before the service answered Gladys, a verdict meant for the new order
    * must find nothing to undo rather than undo the order before.
    */
   begin(platformId) {
-    const order = this.orders.get(platformId);
-    if (order) {
-      this.replaced.set(platformId, order);
-    } else {
-      this.replaced.delete(platformId);
-    }
-    this.orders.delete(platformId);
+    this.pending.add(platformId);
   }
 
   /**
    * The service took the order, and Gladys is about to be shown `after`.
-   * `uid` is the one the order was sent under: a verdict names its order by
-   * it, and one on another order of the device (a PING) must undo nothing.
+   * `uid` is the one the order was sent under and `seq` its number (see
+   * `SentOrders.settle`): a verdict names its order by them, and one on
+   * another order of the device (a PING) must undo nothing.
    */
-  sent(platformId, after, uid = null) {
-    this.orders.set(platformId, {
+  sent(platformId, after, uid = null, seq = null) {
+    const orders = this.orders.get(platformId) ?? [];
+    orders.push({
       before: this.shown.get(platformId),
       after,
       uid: uid === null || uid === undefined ? null : toThingUid(uid),
+      seq: Number.isFinite(seq) ? seq : null,
     });
+    this.orders.set(platformId, orders.slice(-ORDERS_KEPT));
+    this.pending.delete(platformId);
     this.shown.set(platformId, after);
   }
 
   /**
-   * The box said the last order never went out. Returns the state to show
-   * again, or null when there is none: the state before it was never known,
-   * a remote changed the state since — that one is right —, or the verdict
-   * is another order's (see `sent`).
+   * The box said an order never went out. Returns the state to show again,
+   * or null when there is none: the state before it was never known, a
+   * remote changed the state since — that one is right —, the verdict is
+   * another order's (see `sent`), or the order was not the last one.
+   *
+   * An order given before the last one only changes what undoing the next
+   * one goes back to: that one replaced a state the device was never in. ON
+   * then OFF, both refused, ended shown ON; ON, OFF, ON all refused ended
+   * shown ON too, the first failure applied to the second order.
+   *
+   * @param {object} verdict
+   * @param {?string} [verdict.uid] the uid the failed order was sent under
+   * @param {?number} [verdict.seq] its number
+   * @param {boolean} [verdict.superseded] the same uid carried a newer order
    */
-  undo(platformId, uid = null) {
-    const order = this.orders.get(platformId);
-    if (!order || (uid !== null && order.uid !== null && order.uid !== uid)) {
+  notCarried(platformId, { uid = null, seq = null, superseded = false } = {}) {
+    const orders = this.orders.get(platformId) ?? [];
+    const index = this.find(platformId, orders, { uid, seq, superseded });
+    if (index < 0) {
       return null;
     }
-    this.orders.delete(platformId);
+    const [order] = orders.splice(index, 1);
+    const next = orders[index];
+    if (next) {
+      if (sameState(next.before, order.after)) {
+        next.before = order.before;
+      }
+      return null;
+    }
+    if (superseded) {
+      // The newer order is still on its way to the radio: it is about to be
+      // shown, and recorded as replacing what the device really shows.
+      if (order.before !== undefined && sameState(this.shown.get(platformId), order.after)) {
+        this.shown.set(platformId, order.before);
+      }
+      return null;
+    }
     if (
       order.before === undefined ||
       sameState(order.before, order.after) ||
@@ -163,27 +193,33 @@ export class ShownStates {
   }
 
   /**
-   * The order before the last one, on the same feature, never went out: the
-   * last one replaced a state the device was never in. Nothing to show — the
-   * last order is what Gladys shows — but undone in turn, it must go back to
-   * what was there before both: ON then OFF, both refused, ended shown ON.
+   * Which recorded order a verdict is about: the one with its number. Orders
+   * recorded without one (a driver that does not number them) are found by
+   * position, as the last one or the one before it.
    */
-  supersededNotCarried(platformId, uid) {
-    const order = this.orders.get(platformId);
-    const replaced = this.replaced.get(platformId);
-    this.replaced.delete(platformId);
-    if (
-      !order ||
-      !replaced ||
-      order.uid !== uid ||
-      replaced.uid !== uid ||
-      !sameState(order.before, replaced.after)
-    ) {
-      return;
+  find(platformId, orders, { uid, seq, superseded }) {
+    if (Number.isFinite(seq)) {
+      const index = orders.findIndex((order) => order.seq === seq);
+      if (index >= 0) {
+        return index;
+      }
     }
-    order.before = replaced.before;
+    const index = orders.length - (superseded ? 2 : 1) + (this.pending.has(platformId) ? 1 : 0);
+    const order = orders[index];
+    if (!order || order.seq !== null || (uid !== null && order.uid !== null && order.uid !== uid)) {
+      return -1;
+    }
+    // A failed order before the last one changes the last one only when it
+    // was sent under the same uid: both orders are about the same feature.
+    if (superseded && orders[index + 1]?.uid !== order.uid) {
+      return -1;
+    }
+    return index;
   }
 }
+
+/** Recent orders kept per device, for verdicts that come back late. */
+const ORDERS_KEPT = 8;
 
 function sameState(a, b) {
   if (!a || !b) {

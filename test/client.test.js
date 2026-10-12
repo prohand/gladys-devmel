@@ -628,14 +628,85 @@ test('an order repeated is one order to the box, refused only when every emissio
   await client.transfer(DEVICE, [stateNote(STATE_VALUES.OFF)], { uid: 'feature-1' });
   await client.idle();
   assert.equal(client.orders.settle(order, 0x104).failed, false);
-  assert.deepEqual(client.orders.settle(order, 0x104), {
-    failed: true,
-    uncarried: true,
-    latest: true,
-    since: order.since,
-    superseded: false,
-    until: null,
+  const { failed, uncarried, latest, since, superseded, until } = client.orders.settle(
+    order,
+    0x104,
+  );
+  assert.deepEqual(
+    { failed, uncarried, latest, since, superseded, until },
+    {
+      failed: true,
+      uncarried: true,
+      latest: true,
+      since: order.since,
+      superseded: false,
+      until: null,
+    },
+  );
+});
+
+test('an order the service never received is owed no verdict', async () => {
+  // The bundled service restarting refuses the connection: the ON never
+  // reached it. The ON given again goes out, and both its emissions are
+  // refused — that order failed, it does not pay for the one before.
+  const refused = Object.assign(new TypeError('fetch failed'), {
+    cause: { code: 'ECONNREFUSED' },
   });
+  let down = true;
+  stubFetch(() => {
+    if (down) {
+      throw refused;
+    }
+    return jsonResponse(200, { type: 0 });
+  });
+  const client = clientWith({ command_repeat: 1 });
+  const uid = toThingUid('feature-1');
+  await captureLogs(() =>
+    assert.rejects(() =>
+      client.transfer(DEVICE, [stateNote(STATE_VALUES.ON)], { uid: 'feature-1' }),
+    ),
+  ).result;
+  down = false;
+  const sent = await client.transfer(DEVICE, [stateNote(STATE_VALUES.ON)], { uid: 'feature-1' });
+  await client.idle();
+
+  const order = client.orders.match({ thingnotes: { uid } });
+  assert.equal(client.orders.settle(order, 0x101).failed, false);
+  const verdict = client.orders.settle(order, 0x101);
+  assert.equal(verdict.failed, true);
+  assert.equal(verdict.superseded, false);
+  assert.equal(verdict.seq, sent.seq);
+  assert.deepEqual(verdict.earlier, []);
+});
+
+test('a repeat dropped behind a newer order is owed no verdict', async () => {
+  // ON then OFF clicked together over a slow link: the ON's repeat comes
+  // after the OFF and is dropped. Three emissions, three verdicts.
+  stubFetch(async () => {
+    await new Promise(setImmediate);
+    return jsonResponse(200, { type: 0 });
+  });
+  const client = clientWith({ command_repeat: 1 });
+  const uid = toThingUid('feature-1');
+  const on = client.transfer(DEVICE, [stateNote(STATE_VALUES.ON)], { uid: 'feature-1' });
+  const off = client.transfer(DEVICE, [stateNote(STATE_VALUES.OFF)], { uid: 'feature-1' });
+  const [onSent, offSent] = await Promise.all([on, off]);
+  await client.idle();
+  assert.deepEqual(
+    calls.map((call) => JSON.parse(call.options.body).thingnotes.notes[0].value),
+    [STATE_VALUES.ON, STATE_VALUES.OFF, STATE_VALUES.OFF],
+  );
+
+  const order = client.orders.match({ thingnotes: { uid } });
+  const first = client.orders.settle(order, 0x101);
+  assert.equal(first.failed, true);
+  assert.equal(first.seq, onSent.seq);
+  assert.equal(first.superseded, true);
+  assert.equal(client.orders.settle(order, 0x101).failed, false);
+  const last = client.orders.settle(order, 0x101);
+  assert.equal(last.failed, true);
+  assert.equal(last.seq, offSent.seq);
+  assert.equal(last.superseded, false);
 });
 
 test('an order that took its time says where the time went', async () => {

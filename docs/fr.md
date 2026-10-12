@@ -415,7 +415,10 @@ Conséquences visibles :
   Seul l'ordre qui a échoué : un PING « Identifier » refusé ne rééteint pas une
   prise dont l'allumage est parti, et quand l'Ouvrir d'un court
   positionnement est refusé après l'envoi de son Stop, c'est cet Ouvrir qui
-  est annulé, pas le Stop.
+  est annulé, pas le Stop. Chaque réponse est comptée à l'ordre qu'elle
+  concerne, aussi tard qu'elle revienne : allumer, éteindre, allumer cliqués
+  plus vite que le boîtier ne répond, tous refusés, laissent la prise affichée
+  comme avant les trois.
 
 ### Quand le boîtier dit non
 
@@ -530,7 +533,8 @@ Deux détails qui comptent :
   soit publiée, et n'attend jamais Gladys. Un STOP que le boîtier n'a pas pu
   envoyer, qu'il le dise tout de suite ou un instant plus tard (BUSY, NETWORK…),
   active le déclencheur **Un ordre radio a échoué**, et la position suit le
-  volet jusqu'à sa butée, puisque rien ne l'a arrêté. Un STOP qui attend encore
+  volet jusqu'à sa butée, puisque rien ne l'a arrêté — un Stop donné depuis
+  Gladys pendant que le volet bouge aussi. Un STOP qui attend encore
   la radio quand une télécommande murale relance le volet est abandonné.
 
 ### La position favorite

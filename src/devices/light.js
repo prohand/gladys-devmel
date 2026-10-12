@@ -93,8 +93,9 @@ export const light = {
         lastBrightness.set(device.platformId, level);
         pendingBrightness.set(device.platformId, pending);
       }
+      let sent;
       try {
-        await sendNotes(client, device, [levelNote(level)], {
+        sent = await sendNotes(client, device, [levelNote(level)], {
           uid: feature.external_id,
           callbackUrl,
         });
@@ -120,6 +121,7 @@ export const light = {
         device.platformId,
         { onOff: level > 0 ? 1 : 0, brightness: level },
         feature.external_id,
+        sent?.seq,
       );
       replacedBrightness.set(device.platformId, previous);
       await publishState(gladys, feature.external_id, level);
@@ -137,10 +139,15 @@ export const light = {
     const carrying = on && pending?.level === level ? pending : null;
     logger.info(`"${device.name}" -> ${on ? `ON (${level} %)` : 'OFF'}`);
     shown.begin(device.platformId);
-    await sendNotes(client, device, [on ? levelNote(level) : stateNote(STATE_VALUES.OFF)], {
-      uid: feature.external_id,
-      callbackUrl,
-    });
+    const sent = await sendNotes(
+      client,
+      device,
+      [on ? levelNote(level) : stateNote(STATE_VALUES.OFF)],
+      {
+        uid: feature.external_id,
+        callbackUrl,
+      },
+    );
     if (carrying) {
       carrying.carried = true;
       // That order already failed and took its level back: this On put the
@@ -153,6 +160,7 @@ export const light = {
       device.platformId,
       { onOff: on ? 1 : 0, brightness: on ? level : 0 },
       feature.external_id,
+      sent?.seq,
     );
     replacedBrightness.delete(device.platformId);
     await publishState(gladys, feature.external_id, on ? 1 : 0);
@@ -203,20 +211,21 @@ export const light = {
    *
    * @returns {Promise<boolean>} whether anything was taken back
    */
-  async notCarried(gladys, { device, uid = null, superseded = false }) {
-    // An order given before the last one, on the same feature: see switchDevice.
-    if (superseded) {
-      shown.supersededNotCarried(device.platformId, uid);
-      return false;
-    }
-    const before = shown.undo(device.platformId, uid);
+  async notCarried(gladys, { device, uid = null, seq = null, superseded = false }) {
+    // An order given before the last one only changes what undoing the next
+    // one goes back to: see `ShownStates`.
+    const before = shown.notCarried(device.platformId, { uid, seq, superseded });
     if (!before) {
       return false;
     }
-    if (replacedBrightness.has(device.platformId)) {
+    if (before.onOff && before.brightness > 0) {
+      // The level the lamp is at: the one before the last order may be an
+      // order that failed too (30, 50, 70 dragged, none carried).
+      lastBrightness.set(device.platformId, before.brightness);
+    } else if (replacedBrightness.has(device.platformId)) {
       restoreBrightness(device.platformId, replacedBrightness.get(device.platformId));
-      replacedBrightness.delete(device.platformId);
     }
+    replacedBrightness.delete(device.platformId);
     logger.info(
       `"${device.name}" did not change: shown ${before.onOff ? `ON (${before.brightness} %)` : 'OFF'} again`,
     );
