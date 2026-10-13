@@ -73,7 +73,7 @@ export function findProtocol({ table, config, plan = null, search = '' }) {
         "Le service AirSend n'a pas répondu la liste de ses protocoles. Lancez d'abord " +
         '« Tester la connexion » : rien ne peut être cherché tant que le service est injoignable.',
       de:
-        'Der AirSend-Dienst hat seine Protokollliste nicht geliefert. Führen Sie zuerst ' +
+        'Der AirSend-Dienst hat seine Protokollliste nicht geliefert. Führe zuerst ' +
         '„Verbindung testen“ aus: Solange der Dienst nicht erreichbar ist, kann nichts gesucht ' +
         'werden.',
       es:
@@ -95,7 +95,7 @@ export function findProtocol({ table, config, plan = null, search = '' }) {
         'AirSend.',
       de:
         `Keines der ${channels.length} Protokolle, die der Dienst kennt, passt zu „${typed}“. ` +
-        'Suchen Sie nach Marke (somfy, nice, faac, bubendorff) oder nach der pid, die die ' +
+        'Suche nach Marke (somfy, nice, faac, bubendorff) oder nach der pid, die die ' +
         'AirSend-App anzeigt.',
       es:
         `Ninguno de los ${channels.length} protocolos que conoce el servicio coincide con ` +
@@ -115,7 +115,7 @@ export function findProtocol({ table, config, plan = null, search = '' }) {
             pick(language, {
               en: `(+${more} more — narrow the search down.)`,
               fr: `(+${more} autres — affinez la recherche.)`,
-              de: `(+${more} weitere — grenzen Sie die Suche ein.)`,
+              de: `(+${more} weitere — grenze die Suche ein.)`,
               es: `(+${more} más — afine la búsqueda.)`,
             }),
           ]
@@ -135,7 +135,7 @@ function heading(found, known, typed, language) {
         `${known} protocoles connus du service AirSend. Tapez une marque ou un pid pour ` +
         'chercher ; en voici les premiers :',
       de:
-        `Der AirSend-Dienst kennt ${known} Protokolle. Geben Sie eine Marke oder eine pid ` +
+        `Der AirSend-Dienst kennt ${known} Protokolle. Gib eine Marke oder eine pid ` +
         'ein, um zu suchen; hier die ersten:',
       es:
         `${known} protocolos conocidos por el servicio AirSend. Escriba una marca o un pid ` +
@@ -264,9 +264,9 @@ function footer(language) {
       "n'en écoute qu'un à la fois. Videz le champ pour revenir à la déduction à partir de vos " +
       'appareils.',
     de:
-      'Tragen Sie die gewünschte pid in das Feld Empfangskanal ein, um dieses Protokoll zu ' +
-      'empfangen — die Box empfängt nur eines auf einmal. Leeren Sie das Feld, um wieder aus ' +
-      'Ihren Geräten abzuleiten.',
+      'Trage die gewünschte pid in das Feld Empfangskanal ein, um dieses Protokoll zu ' +
+      'empfangen — die Box empfängt nur eines auf einmal. Leere das Feld, um wieder aus ' +
+      'deinen Geräten abzuleiten.',
     es:
       'Ponga el pid que desee en el campo Canal de escucha para escuchar ese protocolo — la ' +
       'pasarela solo escucha uno a la vez. Vacíe el campo para volver a deducirlo de sus ' +

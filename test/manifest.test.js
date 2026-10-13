@@ -111,7 +111,7 @@ test('advice to put a pid in the listening channel names "generic" for pid 1', a
   const docs = {
     en: [/put that `pid`/g, /generic/],
     fr: [/mettez ce `pid`|renseignez ce\s+`pid`/g, /générique/],
-    de: [/[Tt]ragen Sie diese\s+`pid`/g, /generisch/],
+    de: [/[Tt]rage diese\s+`pid`/g, /generisch/],
     es: [/ponga ese\s+`pid`/g, /genérico/],
   };
   for (const [language, [advice, generic]] of Object.entries(docs)) {

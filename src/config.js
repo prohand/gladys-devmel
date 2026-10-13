@@ -570,7 +570,7 @@ export function checkSpurl(spurl) {
     problems.push({
       en: 'it must start with sp:// — paste the string exported by airsend.cloud whole.',
       fr: 'elle doit commencer par sp:// — collez telle quelle la chaîne exportée par airsend.cloud.',
-      de: 'sie muss mit sp:// beginnen — fügen Sie die von airsend.cloud exportierte Zeichenfolge vollständig ein.',
+      de: 'sie muss mit sp:// beginnen — füge die von airsend.cloud exportierte Zeichenfolge vollständig ein.',
       es: 'debe empezar por sp:// — pegue entera la cadena exportada por airsend.cloud.',
     });
     return problems;
@@ -591,7 +591,7 @@ export function checkSpurl(spurl) {
         'Recopiez la chaîne depuis airsend.cloud, dans un champ vidé au préalable.',
       de:
         `sie enthält ein Zeichen, das darin nicht vorkommen kann (U+${codePoint(stray)}). ` +
-        'Kopieren Sie die Zeichenfolge erneut von airsend.cloud in ein zuvor geleertes Feld.',
+        'Kopiere die Zeichenfolge erneut von airsend.cloud in ein zuvor geleertes Feld.',
       es:
         `contiene un carácter que no puede estar en ella (U+${codePoint(stray)}). Vuelva a ` +
         'copiar la cadena desde airsend.cloud, en un campo vaciado antes.',
@@ -666,7 +666,7 @@ export function checkSpurl(spurl) {
         'plutôt que de la retaper — une adresse lien-local s’écrit fe80::… , avec DEUX ' +
         'deux-points après fe80.',
       de:
-        `„${literal}“ ist keine gültige IPv6-Adresse. Kopieren Sie sie von airsend.cloud, ` +
+        `„${literal}“ ist keine gültige IPv6-Adresse. Kopiere sie von airsend.cloud, ` +
         'statt sie neu einzutippen — eine Link-Local-Adresse schreibt sich fe80::… , mit ZWEI ' +
         'Doppelpunkten nach fe80.',
       es:

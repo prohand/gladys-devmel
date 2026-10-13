@@ -761,7 +761,7 @@ test('test_connection answers in German and Spanish too, line for line', async (
     assert.equal(report[language].split('\n').length, lines, language);
   }
   assert.match(report.de, /^Verbindungszeichenfolge: sp:\/\//m);
-  assert.match(report.de, /Empfang: Kanal 25455 "Somfy RTS" \(aus Ihren Geräten abgeleitet\)/);
+  assert.match(report.de, /Empfang: Kanal 25455 "Somfy RTS" \(aus deinen Geräten abgeleitet\)/);
   assert.match(report.de, /Gehört: kein Funktelegramm seit dem Start der Integration/);
   assert.match(report.de, /Geräte: 1 gelesen: Baie vitree\./);
   assert.match(report.es, /Escucha: canal 25455 "Somfy RTS" \(deducido de sus dispositivos\)/);

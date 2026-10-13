@@ -184,7 +184,7 @@ function setupNotice(config) {
     return {
       en: 'No AirSend service: turn the built-in one on.',
       fr: 'Aucun service AirSend : activez le service intégré.',
-      de: 'Kein AirSend-Dienst: Schalten Sie den integrierten ein.',
+      de: 'Kein AirSend-Dienst: Schalte den integrierten ein.',
       es: 'Ningún servicio AirSend: active el integrado.',
     };
   }
@@ -192,7 +192,7 @@ function setupNotice(config) {
     return {
       en: 'Paste the sp:// connection string in the configuration.',
       fr: 'Collez la chaîne de connexion sp:// dans la configuration.',
-      de: 'Fügen Sie die sp://-Verbindungszeichenfolge in der Konfiguration ein.',
+      de: 'Füge die sp://-Verbindungszeichenfolge in der Konfiguration ein.',
       es: 'Pegue la cadena de conexión sp:// en la configuración.',
     };
   }
@@ -200,7 +200,7 @@ function setupNotice(config) {
     return {
       en: 'The sp:// connection string looks wrong: run "Test the connection".',
       fr: 'La chaîne sp:// semble incorrecte : lancez « Tester la connexion ».',
-      de: 'Die sp://-Verbindungszeichenfolge scheint falsch: Führen Sie „Verbindung testen“ aus.',
+      de: 'Die sp://-Verbindungszeichenfolge scheint falsch: Führe „Verbindung testen“ aus.',
       es: 'La cadena de conexión sp:// parece incorrecta: ejecute «Probar la conexión».',
     };
   }

@@ -88,7 +88,7 @@ export function noBoxFix(config) {
   return {
     en: 'paste the sp:// connection string first',
     fr: "collez d'abord la chaîne de connexion sp://",
-    de: 'fügen Sie zuerst die sp://-Verbindungszeichenfolge ein',
+    de: 'füge zuerst die sp://-Verbindungszeichenfolge ein',
     es: 'pegue primero la cadena de conexión sp://',
   };
 }
@@ -120,13 +120,13 @@ export async function describeConnection(client, config, service = null) {
         ? {
             en: 'Not configured yet: paste the sp:// connection string exported by airsend.cloud.',
             fr: 'Pas encore configuré : collez la chaîne de connexion sp:// exportée depuis airsend.cloud.',
-            de: 'Noch nicht konfiguriert: Fügen Sie die von airsend.cloud exportierte sp://-Verbindungszeichenfolge ein.',
+            de: 'Noch nicht konfiguriert: Füge die von airsend.cloud exportierte sp://-Verbindungszeichenfolge ein.',
             es: 'Aún sin configurar: pegue la cadena de conexión sp:// exportada desde airsend.cloud.',
           }
         : {
             en: 'Not configured yet: fill in the AirSend Web Service URL and its connection string.',
             fr: "Pas encore configuré : renseignez l'URL du service AirSend et sa chaîne de connexion.",
-            de: 'Noch nicht konfiguriert: Tragen Sie die URL des AirSend Web Service und seine Verbindungszeichenfolge ein.',
+            de: 'Noch nicht konfiguriert: Trage die URL des AirSend Web Service und seine Verbindungszeichenfolge ein.',
             es: 'Aún sin configurar: indique la URL del AirSend Web Service y su cadena de conexión.',
           },
     };
@@ -392,9 +392,9 @@ function describeListening(config, listen, language) {
       'faites tourner ailleurs ne peut pas joindre cette intégration directement : ' +
       'liez Gladys Plus pour recevoir les trames.',
     de:
-      `${channel}: kein Weg für die Telegramme. Ein AirSend-Dienst, den Sie ` +
-      'anderswo betreiben, kann diese Integration nicht direkt erreichen: Verknüpfen ' +
-      'Sie Gladys Plus, um sie zu empfangen.',
+      `${channel}: kein Weg für die Telegramme. Ein AirSend-Dienst, den du ` +
+      'anderswo betreibst, kann diese Integration nicht direkt erreichen: Verknüpfe ' +
+      'Gladys Plus, um sie zu empfangen.',
     es:
       `${channel}: ninguna ruta para las tramas. Un servicio AirSend que ejecuta ` +
       'en otro lugar no puede llegar directamente a esta integración: vincule Gladys ' +
@@ -412,7 +412,7 @@ function describeChannel(plan, language) {
     ? pick(language, {
         en: ' (deduced from your devices)',
         fr: ' (déduit de vos appareils)',
-        de: ' (aus Ihren Geräten abgeleitet)',
+        de: ' (aus deinen Geräten abgeleitet)',
         es: ' (deducido de sus dispositivos)',
       })
     : '';
@@ -449,8 +449,8 @@ function describeCoverage(plan, language) {
         "ce protocole, ou renseignez son pid dans le canal d'écoute.",
       de:
         ' Kein Funkgerät angegeben: Das ist der standardmäßige generische 433-MHz-Empfang, ' +
-        'taub für 868-MHz-Protokolle (Profalux, Somfy io). Geben Sie ein Gerät mit diesem ' +
-        'Protokoll an oder tragen Sie seine pid als Empfangskanal ein.',
+        'taub für 868-MHz-Protokolle (Profalux, Somfy io). Gib ein Gerät mit diesem ' +
+        'Protokoll an oder trage seine pid als Empfangskanal ein.',
       es:
         ' Ningún dispositivo de radio declarado: es la escucha genérica de 433 MHz por ' +
         'defecto, sorda a los protocolos de 868 MHz (Profalux, Somfy io). Declare un ' +
@@ -478,7 +478,7 @@ function describeCoverage(plan, language) {
         "seront pas entendus. Videz le canal d'écoute pour le déduire de vos appareils.",
       de:
         ` Kein angegebenes Gerät sendet mit diesem Protokoll: ${deaf} werden nicht ` +
-        'gehört. Leeren Sie den Empfangskanal, um ihn aus Ihren Geräten abzuleiten.',
+        'gehört. Leere den Empfangskanal, um ihn aus deinen Geräten abzuleiten.',
       es:
         ` Ningún dispositivo declarado emite con este protocolo: ${deaf} no se ` +
         'oirán. Vacíe el canal de escucha para deducirlo de sus dispositivos.',
@@ -528,8 +528,8 @@ function describeEchoOnly(plan, language) {
     de:
       ' Keines davon sendet von selbst: Rollläden, Schalter und Lampen empfangen Befehle, sie ' +
       'sprechen nicht. Auf diesem Kanal hört die Box nur das Echo der Befehle von Gladys. Ein ' +
-      'Wandsender hat sein eigenes Protokoll und seine eigene Adresse: Drücken Sie ihn und ' +
-      'führen Sie diese Aktion erneut aus — erscheint unter „Gehört“ nichts, empfängt die Box ' +
+      'Wandsender hat sein eigenes Protokoll und seine eigene Adresse: Drücke ihn und ' +
+      'führe diese Aktion erneut aus — erscheint unter „Gehört“ nichts, empfängt die Box ' +
       'nicht SEIN Protokoll.',
     es:
       ' Ninguno emite por sí mismo: persianas, interruptores y lámparas reciben órdenes, no ' +
@@ -568,7 +568,7 @@ function describeUnheardRemotes(plan, language) {
       `Renseignez ${typed} dans le canal d'écoute pour écouter le leur à la place.`,
     de:
       ` Fernbedienungen mit einem anderen Protokoll, daher nie gehört: ${listed}${more}. ` +
-      `Tragen Sie ${typed} als Empfangskanal ein, um stattdessen ihres zu empfangen.`,
+      `Trage ${typed} als Empfangskanal ein, um stattdessen ihres zu empfangen.`,
     es:
       ` Mandos declarados con otro protocolo, por lo que nunca se oyen: ${listed}${more}. ` +
       `Indique ${typed} como canal de escucha para escuchar el suyo en su lugar.`,
@@ -664,7 +664,7 @@ function echoes(tally, language) {
       ` Plus ${own} écho${plural ? 's' : ''} de vos propres ordres : la route des trames ` +
       'fonctionne.',
     de:
-      ` Dazu ${own} Echo${plural ? 's' : ''} Ihrer eigenen Befehle: Der Weg der Telegramme ` +
+      ` Dazu ${own} Echo${plural ? 's' : ''} deiner eigenen Befehle: Der Weg der Telegramme ` +
       'funktioniert.',
     es:
       ` Además, ${own} eco${plural ? 's' : ''} de sus propias órdenes: la ruta de las tramas ` +
@@ -728,10 +728,10 @@ function describeSilence(tally, language) {
         "d'autre sur le protocole écouté. Vérifiez la ligne Écoute ci-dessus : c'est le " +
         'protocole de votre télécommande qu’il doit écouter.',
       de:
-        `kein Telegramm eines anderen Senders, aber ${own} Echo${plural ? 's' : ''} Ihrer ` +
+        `kein Telegramm eines anderen Senders, aber ${own} Echo${plural ? 's' : ''} deiner ` +
         'eigenen Befehle kam zurück: Der Weg funktioniert, und die Box hört auf dem ' +
-        'empfangenen Protokoll nichts anderes. Prüfen Sie die Zeile Empfang oben: Es muss das ' +
-        'Protokoll Ihrer Fernbedienung sein.',
+        'empfangenen Protokoll nichts anderes. Prüfe die Zeile Empfang oben: Es muss das ' +
+        'Protokoll deiner Fernbedienung sein.',
       es:
         `ninguna trama de otro emisor, pero ${own} eco${plural ? 's' : ''} de sus propias ` +
         `órdenes sí ha${plural ? 'n' : ''} vuelto: la ruta funciona, y la pasarela no oye nada ` +
@@ -759,8 +759,8 @@ function describeSilence(tally, language) {
       "l'écho de cet ordre doit, lui, revenir — s'il ne revient pas non plus, c'est la route " +
       'des trames qui est en cause, pas la télécommande (voir la ligne Écoute ci-dessus).',
     de:
-      'kein Funktelegramm seit dem Start der Integration. Drücken Sie die Fernbedienung und ' +
-      'führen Sie diese Aktion erneut aus. Erscheint nichts, steuern Sie ein Gerät aus Gladys: ' +
+      'kein Funktelegramm seit dem Start der Integration. Drücke die Fernbedienung und ' +
+      'führe diese Aktion erneut aus. Erscheint nichts, steuere ein Gerät aus Gladys: ' +
       'Das Echo dieses Befehls sollte zurückkommen — kommt auch das nicht, liegt das Problem ' +
       'beim Weg der Telegramme, nicht bei der Fernbedienung (siehe die Zeile Empfang oben).',
     es:
@@ -819,7 +819,7 @@ export function describeFate(config, entry, language) {
         `le boîtier n'a pas décodé ce protocole (aucune adresse)${why} : ` +
         `renseignez ${typed} comme canal d'écoute pour qu'il l'écoute sur son propre décodeur`,
       de:
-        `die Box hat dieses Protokoll nicht dekodiert (keine Adresse)${why}: Tragen Sie ` +
+        `die Box hat dieses Protokoll nicht dekodiert (keine Adresse)${why}: Trage ` +
         `${typed} als Empfangskanal ein, damit sie es mit seinem eigenen Decoder empfängt`,
       es:
         `la pasarela no decodificó este protocolo (sin dirección)${why}: indique ${typed} ` +
@@ -842,7 +842,7 @@ export function describeFate(config, entry, language) {
         `déclaré sur ${claimed}, pas entendu depuis le changement de configuration : ` +
         "appuyez dessus pour voir s'il est suivi",
       de:
-        `angegeben bei ${claimed}, seit der Konfigurationsänderung nicht gehört: Drücken Sie ` +
+        `angegeben bei ${claimed}, seit der Konfigurationsänderung nicht gehört: Drücke ` +
         'ihn, um zu sehen, ob er befolgt wird',
       es:
         `declarado en ${claimed}, no oído desde el cambio de configuración: púlselo para ver ` +
@@ -872,7 +872,7 @@ export function describeFate(config, entry, language) {
     return pick(language, {
       en: 'no device declares it: "Attach a remote" writes the line for you',
       fr: 'aucun appareil ne le déclare : « Rattacher une télécommande » écrit la ligne',
-      de: 'kein Gerät gibt ihn an: „Fernbedienung zuordnen“ schreibt die Zeile für Sie',
+      de: 'kein Gerät gibt ihn an: „Fernbedienung zuordnen“ schreibt die Zeile für dich',
       es: 'ningún dispositivo lo declara: «Asociar un mando» le escribe la línea',
     });
   }
@@ -898,7 +898,7 @@ export function describeFate(config, entry, language) {
         `déclaré sur ${claimed}, qui ne déclare pas ce qu'il a décodé : ajoutez ${features} ` +
         'à ses « features »',
       de:
-        `angegeben bei ${claimed}, das nicht angibt, was dekodiert wurde: Fügen Sie ${features} ` +
+        `angegeben bei ${claimed}, das nicht angibt, was dekodiert wurde: Füge ${features} ` +
         'zu seinen „features“ hinzu',
       es:
         `declarado en ${claimed}, que no declara lo que se decodificó: añada ${features} a ` +
@@ -919,7 +919,7 @@ export function describeFate(config, entry, language) {
         'déclaré sur airsend.cloud (une télécommande qui envoie TOGGLE commande un Bouton, ' +
         'type 4096), ou que la bonne télécommande est rattachée',
       de:
-        `angegeben bei ${claimed}, das mit dem dekodierten Befehl nichts anfängt: Prüfen Sie ` +
+        `angegeben bei ${claimed}, das mit dem dekodierten Befehl nichts anfängt: Prüfe ` +
         'den auf airsend.cloud angegebenen Typ (eine Fernbedienung, die TOGGLE sendet, steuert ' +
         'einen Taster, Typ 4096) oder ob die richtige Fernbedienung zugeordnet ist',
       es:
@@ -977,8 +977,8 @@ function describeOneNote(entry, claimants, language) {
       'Fermer, et relancez cette action. Si la note ne change pas, le service AirSend ne ' +
       'décode pas les boutons de cette télécommande — la position ne pourra pas suivre',
     de:
-      `, aber jedes seiner Telegramme trägt denselben Befehl (${note}): Drücken Sie Öffnen, ` +
-      'dann Schließen, und führen Sie diese Aktion erneut aus. Ändert sich die Note nicht, ' +
+      `, aber jedes seiner Telegramme trägt denselben Befehl (${note}): Drücke Öffnen, ` +
+      'dann Schließen, und führe diese Aktion erneut aus. Ändert sich die Note nicht, ' +
       'dekodiert der AirSend-Dienst die Tasten dieser Fernbedienung nicht — die Position kann ' +
       'nicht folgen',
     es:
@@ -1010,7 +1010,7 @@ function summarize(config, language) {
     return pick(language, {
       en: 'no device parsed (check the pasted list).',
       fr: 'aucun appareil lu (vérifiez la liste collée).',
-      de: 'kein Gerät gelesen (prüfen Sie die eingefügte Liste).',
+      de: 'kein Gerät gelesen (prüfe die eingefügte Liste).',
       es: 'ningún dispositivo leído (compruebe la lista pegada).',
     });
   }

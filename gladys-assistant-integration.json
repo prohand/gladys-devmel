@@ -5,7 +5,7 @@
   "description": {
     "en": "Control the shutters, switches, lights and sensors of a Devmel AirSend radio gateway.",
     "fr": "Pilotez volets, interrupteurs, lampes et capteurs d'une passerelle radio Devmel AirSend.",
-    "de": "Steuern Sie Rollläden, Schalter, Lampen und Sensoren eines Devmel AirSend-Funkgateways.",
+    "de": "Steuere Rollläden, Schalter, Lampen und Sensoren eines Devmel AirSend-Funkgateways.",
     "es": "Controle persianas, interruptores, luces y sensores de una pasarela de radio Devmel AirSend."
   },
   "version": "3.0.1",
@@ -39,7 +39,7 @@
       "description": {
         "en": "The AirSend Web Service is included: it runs inside this integration, on http://127.0.0.1:33863, and there is nothing to install on your network. All it needs is the sp:// connection string of your box. Devices are configured in the AirSend app, then exported from airsend.cloud (Import/Export, JSON): paste that export below, the integration reads it as is.",
         "fr": "Le service AirSend est inclus : il tourne dans cette intégration, sur http://127.0.0.1:33863, et il n'y a rien à installer sur votre réseau. Il lui faut seulement la chaîne de connexion sp:// de votre boîtier. Les appareils se configurent dans l'application AirSend, puis s'exportent depuis airsend.cloud (Import/Export, JSON) : collez cet export ci-dessous, l'intégration le lit tel quel.",
-        "de": "Der AirSend Web Service ist enthalten: Er läuft in dieser Integration unter http://127.0.0.1:33863, in Ihrem Netzwerk muss nichts installiert werden. Er braucht nur die sp://-Verbindungszeichenfolge Ihrer Box. Die Geräte werden in der AirSend-App eingerichtet und dann von airsend.cloud exportiert (Import/Export, JSON): Fügen Sie diesen Export unten ein, die Integration liest ihn so, wie er ist.",
+        "de": "Der AirSend Web Service ist enthalten: Er läuft in dieser Integration unter http://127.0.0.1:33863, in deinem Netzwerk muss nichts installiert werden. Er braucht nur die sp://-Verbindungszeichenfolge deiner Box. Die Geräte werden in der AirSend-App eingerichtet und dann von airsend.cloud exportiert (Import/Export, JSON): Füge diesen Export unten ein, die Integration liest ihn so, wie er ist.",
         "es": "El AirSend Web Service está incluido: se ejecuta dentro de esta integración, en http://127.0.0.1:33863, y no hay nada que instalar en su red. Solo necesita la cadena de conexión sp:// de su pasarela. Los dispositivos se configuran en la app AirSend y luego se exportan desde airsend.cloud (Import/Export, JSON): pegue esa exportación abajo, la integración la lee tal cual."
       },
       "links": [
@@ -75,7 +75,7 @@
       "description": {
         "en": "Run the AirSend Web Service inside the integration, on http://127.0.0.1:33863. Leave it on unless you already run that service elsewhere on your network.",
         "fr": "Fait tourner le service AirSend dans l'intégration, sur http://127.0.0.1:33863. Laissez activé, sauf si vous faites déjà tourner ce service ailleurs sur votre réseau.",
-        "de": "Führt den AirSend Web Service in der Integration aus, unter http://127.0.0.1:33863. Lassen Sie dies eingeschaltet, es sei denn, Sie betreiben diesen Dienst bereits anderswo in Ihrem Netzwerk.",
+        "de": "Führt den AirSend Web Service in der Integration aus, unter http://127.0.0.1:33863. Lass dies eingeschaltet, es sei denn, du betreibst diesen Dienst bereits anderswo in deinem Netzwerk.",
         "es": "Ejecuta el AirSend Web Service dentro de la integración, en http://127.0.0.1:33863. Déjelo activado salvo que ya ejecute ese servicio en otro lugar de su red."
       },
       "required": false,
@@ -93,7 +93,7 @@
       "description": {
         "en": "Only if you run the AirSend Web Service yourself (Home Assistant add-on, Jeedom daemon, your own container): its address on your network, e.g. http://192.168.1.50:33863/. Leave empty to use the built-in one.",
         "fr": "Uniquement si vous faites tourner le service AirSend vous-même (add-on Home Assistant, démon Jeedom, votre propre conteneur) : son adresse sur votre réseau, par exemple http://192.168.1.50:33863/. Laissez vide pour utiliser celui intégré.",
-        "de": "Nur wenn Sie den AirSend Web Service selbst betreiben (Home-Assistant-Add-on, Jeedom-Daemon, eigener Container): seine Adresse in Ihrem Netzwerk, z. B. http://192.168.1.50:33863/. Leer lassen, um den integrierten zu verwenden.",
+        "de": "Nur wenn du den AirSend Web Service selbst betreibst (Home-Assistant-Add-on, Jeedom-Daemon, eigener Container): seine Adresse in deinem Netzwerk, z. B. http://192.168.1.50:33863/. Leer lassen, um den integrierten zu verwenden.",
         "es": "Solo si ejecuta usted mismo el AirSend Web Service (complemento de Home Assistant, demonio de Jeedom, su propio contenedor): su dirección en su red, p. ej. http://192.168.1.50:33863/. Déjelo vacío para usar el integrado."
       },
       "required": false,
@@ -116,7 +116,7 @@
       "description": {
         "en": "The sp:// URL exported by airsend.cloud, pasted exactly as it is given to you — add nothing, remove nothing. It reads sp://password@fe80::...?gw=0&rhost=192.168.1.50",
         "fr": "L'URL sp:// exportée par airsend.cloud, collée exactement telle qu'elle vous est donnée — n'ajoutez rien, n'enlevez rien. Elle s'écrit sp://motdepasse@fe80::...?gw=0&rhost=192.168.1.50",
-        "de": "Die von airsend.cloud exportierte sp://-URL, genau so eingefügt, wie Sie sie erhalten — nichts hinzufügen, nichts entfernen. Sie lautet sp://passwort@fe80::...?gw=0&rhost=192.168.1.50",
+        "de": "Die von airsend.cloud exportierte sp://-URL, genau so eingefügt, wie du sie erhältst — nichts hinzufügen, nichts entfernen. Sie lautet sp://passwort@fe80::...?gw=0&rhost=192.168.1.50",
         "es": "La URL sp:// exportada por airsend.cloud, pegada exactamente como se la dan — no añada nada, no quite nada. Se escribe sp://contraseña@fe80::...?gw=0&rhost=192.168.1.50"
       },
       "required": false,
@@ -139,7 +139,7 @@
       "description": {
         "en": "Your airsend.cloud JSON export, pasted as is: one entry per device, with its type and its radio channel (written as pid/addr). See the documentation.",
         "fr": "Votre export JSON airsend.cloud, collé tel quel : une entrée par appareil, avec son type et son canal radio (écrit pid/addr). Voir la documentation.",
-        "de": "Ihr JSON-Export von airsend.cloud, so eingefügt, wie er ist: ein Eintrag pro Gerät, mit seinem Typ und seinem Funkkanal (als pid/addr geschrieben). Siehe die Dokumentation.",
+        "de": "Dein JSON-Export von airsend.cloud, so eingefügt, wie er ist: ein Eintrag pro Gerät, mit seinem Typ und seinem Funkkanal (als pid/addr geschrieben). Siehe die Dokumentation.",
         "es": "Su exportación JSON de airsend.cloud, pegada tal cual: una entrada por dispositivo, con su tipo y su canal de radio (escrito como pid/addr). Consulte la documentación."
       },
       "required": false,
@@ -162,13 +162,13 @@
       "description": {
         "en": "Which radio protocol the box listens to, by its pid. Leave it empty — or 1, which means the same thing — and it is deduced from the devices you declared: that is what pushes to Gladys what the box hears (wall remotes, sensors). \"Test the connection\" says on its Listening line which protocol was chosen and what it covers, and \"Find a radio protocol\" searches the pids by brand. Fill in a pid to listen to another protocol, the word generic for generic 433 MHz listening (its pid, 1, is taken), 0 to turn listening off.",
         "fr": "Le protocole radio écouté par le boîtier, par son pid. Laissez le champ vide — ou 1, qui veut dire la même chose — et il est déduit des appareils que vous avez déclarés : c'est ce qui remonte vers Gladys ce que le boîtier entend (télécommandes murales, capteurs). « Tester la connexion » indique sur sa ligne Écoute le protocole retenu et ce qu'il couvre, et « Chercher un protocole radio » cherche les pid par marque. Renseignez un pid pour écouter un autre protocole, le mot générique pour l'écoute générique 433 MHz (son pid, 1, est déjà pris), 0 pour désactiver l'écoute.",
-        "de": "Das Funkprotokoll, das die Box empfängt, angegeben durch seine pid. Leer lassen — oder 1, was dasselbe bedeutet — und es wird aus den angegebenen Geräten abgeleitet: So gelangt zu Gladys, was die Box hört (Wandsender, Sensoren). „Verbindung testen“ zeigt in der Zeile Empfang, welches Protokoll gewählt wurde und was es abdeckt, und „Funkprotokoll suchen“ sucht die pids nach Marke. Tragen Sie eine pid ein, um ein anderes Protokoll zu empfangen, das Wort generisch für den generischen 433-MHz-Empfang (seine pid, 1, ist schon belegt), 0, um den Empfang auszuschalten.",
+        "de": "Das Funkprotokoll, das die Box empfängt, angegeben durch seine pid. Leer lassen — oder 1, was dasselbe bedeutet — und es wird aus den angegebenen Geräten abgeleitet: So gelangt zu Gladys, was die Box hört (Wandsender, Sensoren). „Verbindung testen“ zeigt in der Zeile Empfang, welches Protokoll gewählt wurde und was es abdeckt, und „Funkprotokoll suchen“ sucht die pids nach Marke. Trage eine pid ein, um ein anderes Protokoll zu empfangen, das Wort generisch für den generischen 433-MHz-Empfang (seine pid, 1, ist schon belegt), 0, um den Empfang auszuschalten.",
         "es": "El protocolo de radio que escucha la pasarela, indicado por su pid. Déjelo vacío — o 1, que significa lo mismo — y se deduce de los dispositivos declarados: es lo que envía a Gladys lo que oye la pasarela (mandos de pared, sensores). «Probar la conexión» indica en su línea Escucha qué protocolo se ha elegido y qué cubre, y «Buscar un protocolo de radio» busca los pid por marca. Indique un pid para escuchar otro protocolo, la palabra genérico para la escucha genérica de 433 MHz (su pid, 1, ya está ocupado), 0 para desactivar la escucha."
       },
       "placeholder": {
         "en": "empty = deduced from your devices",
         "fr": "vide = déduit de vos appareils",
-        "de": "leer = aus Ihren Geräten abgeleitet",
+        "de": "leer = aus deinen Geräten abgeleitet",
         "es": "vacío = deducido de sus dispositivos"
       },
       "required": false
@@ -185,7 +185,7 @@
       "description": {
         "en": "How many extra times an order is sent on the air, the way a real remote repeats it while the button is held. Nothing acknowledges a radio order, so a frame lost in the noise is a click that did nothing: raise this to 2 or 3 if a device sometimes ignores Gladys. 0 sends each order once. A device can override it with its own repeat value. It answers a frame lost in the noise, which nothing reports: an order the box itself says it did not carry is a different problem, and the logs name it.",
         "fr": "Nombre d'émissions supplémentaires d'un ordre radio, comme une vraie télécommande le répète tant qu'on appuie. Rien n'accuse réception d'un ordre radio : une trame perdue dans le bruit, c'est un clic sans effet. Montez à 2 ou 3 si un appareil ignore parfois Gladys. 0 n'envoie chaque ordre qu'une fois. Un appareil peut la surcharger avec sa propre valeur repeat. Cela répond à une trame perdue dans le bruit, que rien ne signale : un ordre que le boîtier dit lui-même ne pas avoir porté est un autre problème, et les journaux le nomment.",
-        "de": "Wie oft ein Befehl zusätzlich gesendet wird, so wie eine echte Fernbedienung ihn wiederholt, solange die Taste gedrückt ist. Nichts bestätigt einen Funkbefehl, ein im Rauschen verlorenes Telegramm ist also ein Klick ohne Wirkung: Erhöhen Sie auf 2 oder 3, wenn ein Gerät Gladys manchmal ignoriert. 0 sendet jeden Befehl einmal. Ein Gerät kann dies mit seinem eigenen repeat-Wert überschreiben. Das hilft gegen ein im Rauschen verlorenes Telegramm, das nichts meldet: Ein Befehl, den die Box nach eigener Aussage nicht gesendet hat, ist ein anderes Problem, und die Protokolle nennen es.",
+        "de": "Wie oft ein Befehl zusätzlich gesendet wird, so wie eine echte Fernbedienung ihn wiederholt, solange die Taste gedrückt ist. Nichts bestätigt einen Funkbefehl, ein im Rauschen verlorenes Telegramm ist also ein Klick ohne Wirkung: Erhöhe auf 2 oder 3, wenn ein Gerät Gladys manchmal ignoriert. 0 sendet jeden Befehl einmal. Ein Gerät kann dies mit seinem eigenen repeat-Wert überschreiben. Das hilft gegen ein im Rauschen verlorenes Telegramm, das nichts meldet: Ein Befehl, den die Box nach eigener Aussage nicht gesendet hat, ist ein anderes Problem, und die Protokolle nennen es.",
         "es": "Cuántas veces más se emite una orden, como un mando real la repite mientras se mantiene pulsado el botón. Nada confirma una orden de radio, así que una trama perdida en el ruido es un clic sin efecto: súbalo a 2 o 3 si un dispositivo a veces ignora a Gladys. 0 envía cada orden una sola vez. Un dispositivo puede sustituirlo con su propio valor repeat. Responde a una trama perdida en el ruido, que nada señala: una orden que la propia pasarela dice no haber emitido es otro problema, y los registros lo indican."
       },
       "required": false,
@@ -225,7 +225,7 @@
       "description": {
         "en": "The box grades every frame it decodes, and the badly graded ones are normally ignored — as the official Jeedom plugin does. Turn this on when a remote is heard but never followed: its frames are then used anyway, at the risk of the occasional false trigger. It changes nothing for a protocol the box picks up without decoding it (no address in the logs): that one needs the listening channel set to its pid, or to the word generic for pid 1.",
         "fr": "Le boîtier note chaque trame qu'il décode, et celles qu'il note mal sont ignorées — comme le fait le plugin Jeedom officiel. Activez ceci si une télécommande est entendue sans jamais être suivie : ses trames seront alors utilisées quand même, au risque d'une fausse détection de temps en temps. Sans effet sur un protocole que le boîtier capte sans le décoder (aucune adresse dans les journaux) : celui-là demande son pid dans le canal d'écoute, ou le mot générique pour le pid 1.",
-        "de": "Die Box bewertet jedes Telegramm, das sie dekodiert, und schlecht bewertete werden normalerweise ignoriert — wie es das offizielle Jeedom-Plugin tut. Schalten Sie dies ein, wenn eine Fernbedienung gehört, aber nie befolgt wird: Ihre Telegramme werden dann trotzdem verwendet, mit dem Risiko gelegentlicher Fehlauslösungen. Ohne Wirkung bei einem Protokoll, das die Box empfängt, ohne es zu dekodieren (keine Adresse in den Protokollen): Dafür muss der Empfangskanal auf seine pid gesetzt werden, oder auf das Wort generisch für pid 1.",
+        "de": "Die Box bewertet jedes Telegramm, das sie dekodiert, und schlecht bewertete werden normalerweise ignoriert — wie es das offizielle Jeedom-Plugin tut. Schalte dies ein, wenn eine Fernbedienung gehört, aber nie befolgt wird: ihre Telegramme werden dann trotzdem verwendet, mit dem Risiko gelegentlicher Fehlauslösungen. Ohne Wirkung bei einem Protokoll, das die Box empfängt, ohne es zu dekodieren (keine Adresse in den Protokollen): Dafür muss der Empfangskanal auf seine pid gesetzt werden, oder auf das Wort generisch für pid 1.",
         "es": "La pasarela califica cada trama que decodifica, y las mal calificadas se ignoran normalmente — como hace el plugin oficial de Jeedom. Actívelo cuando un mando se oye pero nunca se sigue: sus tramas se usarán igualmente, con el riesgo de alguna falsa detección de vez en cuando. No cambia nada para un protocolo que la pasarela capta sin decodificarlo (sin dirección en los registros): ese necesita el canal de escucha en su pid, o en la palabra genérico para el pid 1."
       },
       "required": false,
@@ -243,7 +243,7 @@
       "description": {
         "en": "Log every radio frame the box hears, including the ones dropped as unreliable or left undecoded. Turn it on to find out why a remote does not show up, and off again once you know: it is verbose. The password of your connection string is never logged; the rest of it is, at this level, so you can see what Gladys is really holding.",
         "fr": "Journalise chaque trame radio entendue par le boîtier, y compris celles écartées comme peu fiables ou non décodées. Activez-le pour comprendre pourquoi une télécommande ne remonte pas, puis désactivez-le : c'est verbeux. Le mot de passe de votre chaîne de connexion n'est jamais journalisé ; le reste de la chaîne l'est à ce niveau, pour que vous voyiez ce que Gladys tient vraiment.",
-        "de": "Protokolliert jedes Funktelegramm, das die Box hört, auch die als unzuverlässig verworfenen oder nicht dekodierten. Schalten Sie es ein, um herauszufinden, warum eine Fernbedienung nicht erscheint, und wieder aus, sobald Sie es wissen: Es ist ausführlich. Das Passwort Ihrer Verbindungszeichenfolge wird nie protokolliert; der Rest auf dieser Stufe schon, damit Sie sehen, was Gladys wirklich verwendet.",
+        "de": "Protokolliert jedes Funktelegramm, das die Box hört, auch die als unzuverlässig verworfenen oder nicht dekodierten. Schalte es ein, um herauszufinden, warum eine Fernbedienung nicht erscheint, und wieder aus, sobald du es weißt: Es ist ausführlich. Das Passwort deiner Verbindungszeichenfolge wird nie protokolliert; der Rest auf dieser Stufe schon, damit du siehst, was Gladys wirklich verwendet.",
         "es": "Registra cada trama de radio que oye la pasarela, incluidas las descartadas por poco fiables o no decodificadas. Actívelo para averiguar por qué no aparece un mando, y desactívelo cuando lo sepa: es muy prolijo. La contraseña de su cadena de conexión nunca se registra; el resto sí, en este nivel, para que vea lo que Gladys tiene realmente."
       },
       "required": false,
@@ -307,7 +307,7 @@
           "description": {
             "en": "Press the wall remote, then pick the device it drives: the answer is your device list with that remote attached, ready to paste back into the Devices field.",
             "fr": "Appuyez sur la télécommande murale, puis choisissez l'appareil qu'elle pilote : la réponse est votre liste d'appareils, télécommande rattachée, prête à recoller dans le champ Appareils.",
-            "de": "Drücken Sie den Wandsender und wählen Sie dann das Gerät, das er steuert: Die Antwort ist Ihre Geräteliste mit zugeordneter Fernbedienung, bereit zum erneuten Einfügen in das Feld Geräte.",
+            "de": "Drücke den Wandsender und wähle dann das Gerät, das er steuert: Die Antwort ist deine Geräteliste mit zugeordneter Fernbedienung, bereit zum erneuten Einfügen in das Feld Geräte.",
             "es": "Pulse el mando de pared y elija el dispositivo que controla: la respuesta es su lista de dispositivos con ese mando asociado, lista para volver a pegarla en el campo Dispositivos."
           }
         },
@@ -347,7 +347,7 @@
           "description": {
             "en": "A box listens to a protocol, not to a band: hearing an 868 MHz remote means naming its protocol by its pid. Search the protocols the AirSend service knows by brand or by pid, and put the one you want in the Listening channel field.",
             "fr": "Un boîtier écoute un protocole, pas une bande : entendre une télécommande 868 MHz, c'est nommer son protocole par son pid. Cherchez par marque ou par pid parmi les protocoles connus du service AirSend, et mettez celui qui convient dans le champ Canal d'écoute.",
-            "de": "Eine Box empfängt ein Protokoll, kein Frequenzband: Eine 868-MHz-Fernbedienung zu hören heißt, ihr Protokoll mit seiner pid zu benennen. Durchsuchen Sie die Protokolle, die der AirSend-Dienst kennt, nach Marke oder pid, und tragen Sie das passende in das Feld Empfangskanal ein.",
+            "de": "Eine Box empfängt ein Protokoll, kein Frequenzband: Eine 868-MHz-Fernbedienung zu hören heißt, ihr Protokoll mit seiner pid zu benennen. Durchsuche die Protokolle, die der AirSend-Dienst kennt, nach Marke oder pid, und trage das passende in das Feld Empfangskanal ein.",
             "es": "Una pasarela escucha un protocolo, no una banda: oír un mando de 868 MHz significa nombrar su protocolo por su pid. Busque por marca o por pid entre los protocolos que conoce el servicio AirSend y ponga el que le convenga en el campo Canal de escucha."
           }
         },
