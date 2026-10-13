@@ -16,9 +16,10 @@
 
 import { DEVICE_TYPES } from '../config.js';
 import { boxDevices, describeFate } from '../devmel/connection.js';
-import { describeAge, describeEmitter } from '../devmel/heard.js';
+import { describeAgo, describeEmitter } from '../devmel/heard.js';
 import { hearsChannel } from '../devices/index.js';
 import { idsFor } from '../devices/helpers.js';
+import { localize, pick } from '../i18n.js';
 
 /** Key of the manifest widget. Never renamed: dashboards store it. */
 export const RADIO_WIDGET = 'radio';
@@ -72,12 +73,22 @@ export function buildRadioWidget({
       listeningItem(config, listen, table),
       lastFrameItem(entries, now),
       {
-        label: { en: 'Echoes of Gladys orders', fr: 'Échos des ordres Gladys' },
+        label: {
+          en: 'Echoes of Gladys orders',
+          fr: 'Échos des ordres Gladys',
+          de: 'Echos der Gladys-Befehle',
+          es: 'Ecos de órdenes de Gladys',
+        },
         value: Number(heard?.own) || 0,
         color: 'info',
       },
       {
-        label: { en: 'Frames dropped', fr: 'Trames écartées' },
+        label: {
+          en: 'Frames dropped',
+          fr: 'Trames écartées',
+          de: 'Verworfene Telegramme',
+          es: 'Tramas descartadas',
+        },
         value: Number(heard?.dropped) || 0,
         color: Number(heard?.dropped) > 0 ? 'warning' : 'neutral',
       },
@@ -95,13 +106,23 @@ export function buildRadioWidget({
       {
         type: 'value',
         device_feature: ids.feature('temperature'),
-        label: { en: 'Box temperature', fr: 'Température boîtier' },
+        label: {
+          en: 'Box temperature',
+          fr: 'Température boîtier',
+          de: 'Temperatur der Box',
+          es: 'Temperatura pasarela',
+        },
         icon: 'thermometer',
       },
       {
         type: 'value',
         device_feature: ids.feature('illuminance'),
-        label: { en: 'Box light', fr: 'Luminosité boîtier' },
+        label: {
+          en: 'Box light',
+          fr: 'Luminosité boîtier',
+          de: 'Helligkeit der Box',
+          es: 'Luminosidad pasarela',
+        },
         icon: 'sun',
       },
     );
@@ -109,7 +130,12 @@ export function buildRadioWidget({
   components.push({
     type: 'value',
     value: entries.length,
-    label: { en: 'Emitters heard', fr: 'Émetteurs entendus' },
+    label: {
+      en: 'Emitters heard',
+      fr: 'Émetteurs entendus',
+      de: 'Gehörte Sender',
+      es: 'Emisores oídos',
+    },
     icon: 'radio',
   });
 
@@ -125,14 +151,24 @@ export function buildRadioWidget({
   components.push(
     {
       type: 'button',
-      label: { en: 'Re-arm listening', fr: "Réarmer l'écoute" },
+      label: {
+        en: 'Re-arm listening',
+        fr: "Réarmer l'écoute",
+        de: 'Empfang neu aktivieren',
+        es: 'Rearmar la escucha',
+      },
       icon: 'refresh-cw',
       style: 'primary',
       action: { key: WIDGET_ACTIONS.REARM },
     },
     {
       type: 'button',
-      label: { en: 'Documentation', fr: 'Documentation' },
+      label: {
+        en: 'Documentation',
+        fr: 'Documentation',
+        de: 'Dokumentation',
+        es: 'Documentación',
+      },
       icon: 'book-open',
       style: 'secondary',
       link: { url: DOCS_URL },
@@ -148,51 +184,96 @@ function setupNotice(config) {
     return {
       en: 'No AirSend service: turn the built-in one on.',
       fr: 'Aucun service AirSend : activez le service intégré.',
+      de: 'Kein AirSend-Dienst: Schalte den integrierten ein.',
+      es: 'Ningún servicio AirSend: active el integrado.',
     };
   }
   if (!config.spurl) {
     return {
       en: 'Paste the sp:// connection string in the configuration.',
       fr: 'Collez la chaîne de connexion sp:// dans la configuration.',
+      de: 'Füge die sp://-Verbindungszeichenfolge in der Konfiguration ein.',
+      es: 'Pegue la cadena de conexión sp:// en la configuración.',
     };
   }
   if ((config.spurlProblems ?? []).length > 0) {
     return {
       en: 'The sp:// connection string looks wrong: run "Test the connection".',
       fr: 'La chaîne sp:// semble incorrecte : lancez « Tester la connexion ».',
+      de: 'Die sp://-Verbindungszeichenfolge scheint falsch: Führe „Verbindung testen“ aus.',
+      es: 'La cadena de conexión sp:// parece incorrecta: ejecute «Probar la conexión».',
     };
   }
   return null;
 }
 
 function serviceItem(config, service) {
-  const label = { en: 'AirSend service', fr: 'Service AirSend' };
+  const label = {
+    en: 'AirSend service',
+    fr: 'Service AirSend',
+    de: 'AirSend-Dienst',
+    es: 'Servicio AirSend',
+  };
   if (!config.effectiveServiceUrl) {
-    return { label, value: { en: 'none', fr: 'aucun' }, color: 'warning' };
+    return {
+      label,
+      value: { en: 'none', fr: 'aucun', de: 'keiner', es: 'ninguno' },
+      color: 'warning',
+    };
   }
   if (!config.embeddedService) {
-    return { label, value: { en: 'external', fr: 'externe' }, color: 'info' };
+    return {
+      label,
+      value: { en: 'external', fr: 'externe', de: 'extern', es: 'externo' },
+      color: 'info',
+    };
   }
   const status = service?.status?.();
   if (status?.running) {
-    return { label, value: { en: 'running', fr: 'en marche' }, color: 'success' };
+    return {
+      label,
+      value: { en: 'running', fr: 'en marche', de: 'läuft', es: 'en marcha' },
+      color: 'success',
+    };
   }
-  return { label, value: { en: 'stopped', fr: 'arrêté' }, color: 'danger' };
+  return {
+    label,
+    value: { en: 'stopped', fr: 'arrêté', de: 'gestoppt', es: 'detenido' },
+    color: 'danger',
+  };
 }
 
 function listeningItem(config, listen, table) {
-  const label = { en: 'Listening', fr: 'Écoute' };
+  const label = { en: 'Listening', fr: 'Écoute', de: 'Empfang', es: 'Escucha' };
   const plan = listen?.plan;
   if (config.listen_channel === 0 || plan?.enabled === false) {
-    return { label, value: { en: 'off', fr: 'désactivée' }, color: 'warning' };
+    return {
+      label,
+      value: { en: 'off', fr: 'désactivée', de: 'aus', es: 'desactivada' },
+      color: 'warning',
+    };
   }
   if (!plan) {
-    return { label, value: { en: 'not armed yet', fr: 'pas encore armée' }, color: 'neutral' };
+    return {
+      label,
+      value: {
+        en: 'not armed yet',
+        fr: 'pas encore armée',
+        de: 'noch nicht aktiv',
+        es: 'aún sin armar',
+      },
+      color: 'neutral',
+    };
   }
   if (listen?.error) {
     return {
       label,
-      value: { en: 'refused by the box', fr: 'refusée par le boîtier' },
+      value: {
+        en: 'refused by the box',
+        fr: 'refusée par le boîtier',
+        de: 'von der Box abgelehnt',
+        es: 'rechazada por la pasarela',
+      },
       color: 'danger',
     };
   }
@@ -201,10 +282,22 @@ function listeningItem(config, listen, table) {
     // or a missing service when the string is there (see `noBoxFix`).
     if (boxDevices(config).length === 0) {
       return config.effectiveServiceUrl
-        ? { label, value: { en: 'no box', fr: 'aucun boîtier' }, color: 'warning' }
-        : { label, value: { en: 'no service', fr: 'aucun service' }, color: 'warning' };
+        ? {
+            label,
+            value: { en: 'no box', fr: 'aucun boîtier', de: 'keine Box', es: 'sin pasarela' },
+            color: 'warning',
+          }
+        : {
+            label,
+            value: { en: 'no service', fr: 'aucun service', de: 'kein Dienst', es: 'sin servicio' },
+            color: 'warning',
+          };
     }
-    return { label, value: { en: 'no route', fr: 'aucune route' }, color: 'warning' };
+    return {
+      label,
+      value: { en: 'no route', fr: 'aucune route', de: 'kein Weg', es: 'sin ruta' },
+      color: 'warning',
+    };
   }
   const name = plan.name ?? table?.get?.(Number(plan.channel))?.name;
   return {
@@ -215,17 +308,23 @@ function listeningItem(config, listen, table) {
 }
 
 function lastFrameItem(entries, now) {
-  const label = { en: 'Last frame heard', fr: 'Dernière trame' };
+  const label = {
+    en: 'Last frame heard',
+    fr: 'Dernière trame',
+    de: 'Letztes Telegramm',
+    es: 'Última trama',
+  };
   const last = entries[0];
   if (!last) {
-    return { label, value: { en: 'none yet', fr: 'aucune' }, color: 'neutral' };
+    return {
+      label,
+      value: { en: 'none yet', fr: 'aucune', de: 'noch keines', es: 'ninguna aún' },
+      color: 'neutral',
+    };
   }
   return {
     label,
-    value: {
-      en: describeAge(now - last.lastSeen, 'en').replace(/^last one /, ''),
-      fr: describeAge(now - last.lastSeen, 'fr').replace(/^dernière /, ''),
-    },
+    value: localize((language) => describeAgo(now - last.lastSeen, language)),
     color: 'success',
   };
 }
@@ -237,26 +336,33 @@ function emitterItem(config, entry, now, table) {
     entry.source === null || entry.source === undefined ? null : `addr ${entry.source}`;
   return {
     title: clip(name ? `pid ${entry.id} ${name}` : `pid ${entry.id}`, 60),
-    subtitle: {
-      en: [address ?? 'no address', `${entry.frames} frame${entry.frames > 1 ? 's' : ''}`].join(
-        ' · ',
-      ),
-      fr: [address ?? 'sans adresse', `${entry.frames} trame${entry.frames > 1 ? 's' : ''}`].join(
-        ' · ',
-      ),
-    },
+    subtitle: localize((language) => {
+      const many = entry.frames > 1;
+      return [
+        address ??
+          pick(language, {
+            en: 'no address',
+            fr: 'sans adresse',
+            de: 'ohne Adresse',
+            es: 'sin dirección',
+          }),
+        pick(language, {
+          en: `${entry.frames} frame${many ? 's' : ''}`,
+          fr: `${entry.frames} trame${many ? 's' : ''}`,
+          de: `${entry.frames} Telegramm${many ? 'e' : ''}`,
+          es: `${entry.frames} trama${many ? 's' : ''}`,
+        }),
+      ].join(' · ');
+    }),
     date: toIso(entry.lastSeen),
     badge: badgeOf(config, entry),
-    description: {
-      en: clip(
-        `${describeEmitter(entry, now, 'en', table)} — ${describeFate(config, entry, 'en')}.`,
+    description: localize((language) =>
+      clip(
+        `${describeEmitter(entry, now, language, table)} — ` +
+          `${describeFate(config, entry, language)}.`,
         2000,
       ),
-      fr: clip(
-        `${describeEmitter(entry, now, 'fr', table)} — ${describeFate(config, entry, 'fr')}.`,
-        2000,
-      ),
-    },
+    ),
   };
 }
 
@@ -266,20 +372,42 @@ function badgeOf(config, entry) {
   // line under it: a protocol-only remote claims the address-less frames.
   const claimed = config.devmelDevices.some((device) => hearsChannel(device, entry));
   if ((entry.source === null || entry.source === undefined) && !claimed) {
-    return { text: { en: 'not decoded', fr: 'non décodé' }, color: 'neutral' };
+    return {
+      text: {
+        en: 'not decoded',
+        fr: 'non décodé',
+        de: 'nicht dekodiert',
+        es: 'no decodificado',
+      },
+      color: 'neutral',
+    };
   }
   if (entry.stale && claimed) {
-    return { text: { en: 'press again', fr: 'à réessayer' }, color: 'neutral' };
+    return {
+      text: {
+        en: 'press again',
+        fr: 'à réessayer',
+        de: 'erneut drücken',
+        es: 'pulse de nuevo',
+      },
+      color: 'neutral',
+    };
   }
   if (entry.dropped) {
-    return { text: { en: 'dropped', fr: 'écarté' }, color: 'danger' };
+    return {
+      text: { en: 'dropped', fr: 'écarté', de: 'verworfen', es: 'descartado' },
+      color: 'danger',
+    };
   }
   if (!claimed) {
-    return { text: { en: 'unknown', fr: 'inconnu' }, color: 'warning' };
+    return {
+      text: { en: 'unknown', fr: 'inconnu', de: 'unbekannt', es: 'desconocido' },
+      color: 'warning',
+    };
   }
   return entry.understood
-    ? { text: { en: 'followed', fr: 'suivi' }, color: 'success' }
-    : { text: { en: 'mute', fr: 'muet' }, color: 'neutral' };
+    ? { text: { en: 'followed', fr: 'suivi', de: 'befolgt', es: 'seguido' }, color: 'success' }
+    : { text: { en: 'mute', fr: 'muet', de: 'stumm', es: 'mudo' }, color: 'neutral' };
 }
 
 function emittersShown(settings) {

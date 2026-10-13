@@ -10,7 +10,8 @@ Built on the official
 and the SDK
 [`@gladysassistant/integration-sdk`](https://github.com/GladysAssistant/integration-sdk-js).
 
-User documentation: [English](./docs/en.md) · [Français](./docs/fr.md).
+User documentation: [English](./docs/en.md) · [Français](./docs/fr.md) · [Deutsch](./docs/de.md) ·
+[Español](./docs/es.md).
 
 ## What it does
 
@@ -110,6 +111,7 @@ them.
 ├─ src/
 │  ├─ config.js                      # config defaults + the airsend.cloud device list parser
 │  ├─ logging.js                     # the log level, switchable from the Configuration screen
+│  ├─ i18n.js                        # the languages of user-facing text (en, fr, de, es)
 │  ├─ capabilities/                  # Gladys 5.1: scenes and dashboard
 │  │  ├─ scenes.js                   #   scene triggers (remote pressed, order failed)
 │  │  └─ widget.js                   #   the "AirSend radio" dashboard widget

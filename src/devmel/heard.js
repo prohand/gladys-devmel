@@ -19,6 +19,7 @@
 
 import { describeReadings } from './notes.js';
 import { PRESS_WINDOW_MS } from '../capabilities/scenes.js';
+import { pick } from '../i18n.js';
 
 /** How many distinct emitters are remembered, oldest evicted first. */
 export const DEFAULT_LIMIT = 32;
@@ -298,7 +299,7 @@ export class HeardChannels {
  *
  * @param {object} entry an entry of {@link HeardChannels.list}
  * @param {number} [now] clock, so a report can be dated in a test
- * @param {string} [language] 'fr', or English
+ * @param {string} [language] a key of LANGUAGES (src/i18n.js); English otherwise
  * @param {Map<number, object>} [table] the protocol table of the service
  */
 export function describeEmitter(entry, now = Date.now(), language = 'en', table = null) {
@@ -307,19 +308,28 @@ export function describeEmitter(entry, now = Date.now(), language = 'en', table 
   // remote change nothing?", and it cannot be read off one frame.
   const notes =
     entry.notes?.size > 0 ? [...entry.notes].join(language === 'fr' ? ' ; ' : '; ') : '';
-  const frames =
-    language === 'fr'
-      ? `${entry.frames} trame${entry.frames > 1 ? 's' : ''}`
-      : `${entry.frames} frame${entry.frames > 1 ? 's' : ''}`;
+  const many = entry.frames > 1;
+  const frames = pick(language, {
+    en: `${entry.frames} frame${many ? 's' : ''}`,
+    fr: `${entry.frames} trame${many ? 's' : ''}`,
+    de: `${entry.frames} Telegramm${many ? 'e' : ''}`,
+    es: `${entry.frames} trama${many ? 's' : ''}`,
+  });
   const age = describeAge(now - entry.lastSeen, language);
   const plural = entry.notes?.size > 1;
   const said = notes
-    ? language === 'fr'
-      ? `, note${plural ? 's' : ''} : ${notes}`
-      : `, note${plural ? 's' : ''}: ${notes}`
-    : language === 'fr'
-      ? ', aucune note décodée'
-      : ', no decoded note';
+    ? pick(language, {
+        en: `, note${plural ? 's' : ''}: ${notes}`,
+        fr: `, note${plural ? 's' : ''} : ${notes}`,
+        de: `, Note${plural ? 'n' : ''}: ${notes}`,
+        es: `, nota${plural ? 's' : ''}: ${notes}`,
+      })
+    : pick(language, {
+        en: ', no decoded note',
+        fr: ', aucune note décodée',
+        de: ', keine dekodierte Note',
+        es: ', ninguna nota decodificada',
+      });
   const name = table?.get?.(Number(entry.id))?.name;
   const protocol = name ? `pid ${entry.id} "${name}"` : `pid ${entry.id}`;
   return `${protocol}, ${describeAddress(entry, language)} (${frames}, ${age}${said})`;
@@ -332,7 +342,12 @@ export function describeEmitter(entry, now = Date.now(), language = 'en', table 
  */
 export function describeAddress(entry, language = 'en') {
   if (entry.source === null || entry.source === undefined) {
-    return language === 'fr' ? 'adresse non décodée' : 'address not decoded';
+    return pick(language, {
+      en: 'address not decoded',
+      fr: 'adresse non décodée',
+      de: 'Adresse nicht dekodiert',
+      es: 'dirección no decodificada',
+    });
   }
   return `addr ${entry.source}`;
 }
@@ -342,9 +357,25 @@ export function describeAddress(entry, language = 'en') {
  * ago" answer two different questions about the same emitter.
  */
 export function describeAge(milliseconds, language) {
+  const ago = describeAgo(milliseconds, language);
+  return pick(language, {
+    en: `last one ${ago}`,
+    fr: `dernière ${ago}`,
+    de: `letztes ${ago}`,
+    es: `la última ${ago}`,
+  });
+}
+
+/** The same duration on its own, "3 s ago", for a place that names the frame. */
+export function describeAgo(milliseconds, language) {
   const seconds = Math.max(0, Math.round(Number(milliseconds) / 1000));
   const value = seconds < 120 ? `${seconds} s` : `${Math.round(seconds / 60)} min`;
-  return language === 'fr' ? `dernière il y a ${value}` : `last one ${value} ago`;
+  return pick(language, {
+    en: `${value} ago`,
+    fr: `il y a ${value}`,
+    de: `vor ${value}`,
+    es: `hace ${value}`,
+  });
 }
 
 /**

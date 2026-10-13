@@ -10,6 +10,7 @@ import { readFile } from 'node:fs/promises';
 import { DEFAULT_CONFIG, normalizeConfig } from '../src/config.js';
 import { REMOTE_ORDERS, SCENE_ACTIONS, SCENE_TRIGGERS } from '../src/capabilities/scenes.js';
 import { RADIO_WIDGET } from '../src/capabilities/widget.js';
+import { LANGUAGES } from '../src/i18n.js';
 
 const manifest = JSON.parse(
   await readFile(new URL('../gladys-assistant-integration.json', import.meta.url), 'utf8'),
@@ -105,9 +106,13 @@ test('advice to put a pid in the listening channel names "generic" for pid 1', a
   const field = manifest.config_schema.find((entry) => entry.key === 'accept_unreliable');
   assert.match(field.description.en, /its pid, or to the word generic for pid 1/);
   assert.match(field.description.fr, /son pid .*, ou le mot générique pour le pid 1/);
+  assert.match(field.description.de, /seine pid .*das Wort generisch für pid 1/);
+  assert.match(field.description.es, /su pid, .*la palabra genérico para el pid 1/);
   const docs = {
     en: [/put that `pid`/g, /generic/],
     fr: [/mettez ce `pid`|renseignez ce\s+`pid`/g, /générique/],
+    de: [/[Tt]rage diese\s+`pid`/g, /generisch/],
+    es: [/ponga ese\s+`pid`/g, /genérico/],
   };
   for (const [language, [advice, generic]] of Object.entries(docs)) {
     const text = await readFile(new URL(`../docs/${language}.md`, import.meta.url), 'utf8');
@@ -261,9 +266,64 @@ test('the scene triggers the code fires are the ones the manifest declares', () 
   assert.deepEqual(orders.sort(), Object.values(REMOTE_ORDERS).sort());
 });
 
-test('the manifest declares the local transport and a label in both languages', () => {
+test('the manifest declares the local transport and a label in every language', () => {
   assert.deepEqual(manifest.transports, ['local']);
   for (const field of [...manifest.config_schema, ...(manifest.actions ?? [])]) {
-    assert.ok(field.label?.en && field.label?.fr, `field "${field.key}" needs en/fr labels`);
+    for (const language of LANGUAGES) {
+      assert.ok(field.label?.[language], `field "${field.key}" needs a ${language} label`);
+    }
+  }
+});
+
+/** Every multi-language object of the manifest, with where it sits. */
+function multiLanguageTexts(node, path = 'manifest') {
+  if (Array.isArray(node)) {
+    return node.flatMap((child, index) => multiLanguageTexts(child, `${path}[${index}]`));
+  }
+  if (node === null || typeof node !== 'object') {
+    return [];
+  }
+  const keys = Object.keys(node);
+  if (keys.includes('en') && keys.every((key) => /^[a-z]{2}$/.test(key))) {
+    return [{ path, text: node }];
+  }
+  return keys.flatMap((key) => multiLanguageTexts(node[key], `${path}.${key}`));
+}
+
+test('every multi-language text of the manifest carries en, fr, de and es', () => {
+  // Gladys shows the reader's language and falls back to English: a text
+  // missing one of them shows up in English in the middle of a translated
+  // screen. The store accepts any two-letter key, so nothing else catches it.
+  const texts = multiLanguageTexts(manifest);
+  assert.ok(texts.length > 50, `only ${texts.length} texts found`);
+  for (const { path, text } of texts) {
+    assert.deepEqual(Object.keys(text).sort(), [...LANGUAGES].sort(), `${path}: languages`);
+    for (const language of LANGUAGES) {
+      assert.equal(typeof text[language], 'string', `${path}.${language}`);
+      assert.ok(text[language].trim().length > 0, `${path}.${language} is empty`);
+    }
+  }
+});
+
+test('the per-language length limits of the store hold in every language', () => {
+  const within = (text, min, max, where) => {
+    for (const language of LANGUAGES) {
+      const { length } = text[language];
+      assert.ok(length >= min && length <= max, `${where}.${language}: ${length} characters`);
+    }
+  };
+  within(manifest.description, 10, 100, 'description');
+  for (const widget of manifest.widgets ?? []) {
+    within(widget.label, 3, 30, `widget ${widget.key} label`);
+    within(widget.description, 1, 100, `widget ${widget.key} description`);
+  }
+  const sections = [
+    ...manifest.config_schema,
+    ...(manifest.actions ?? []).flatMap((action) => action.fields ?? []),
+  ].filter((field) => field.type === 'section');
+  for (const section of sections) {
+    if (section.description) {
+      within(section.description, 1, 1000, `section ${section.key} description`);
+    }
   }
 });

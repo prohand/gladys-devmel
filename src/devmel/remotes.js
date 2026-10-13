@@ -18,6 +18,7 @@ import { isSameChannel } from './notes.js';
 import { describeEmitter } from './heard.js';
 import { channelName, channelToType, decoderOf, planListening } from './listening.js';
 import { hearsChannel } from '../devices/index.js';
+import { localize, pick } from '../i18n.js';
 
 /**
  * Add an emitter to the `remotes` of one device, inside the very list the user
@@ -124,7 +125,8 @@ export function unclaimedEmitters(config, heard) {
  *
  * @param {Map<number, object>} [table] the protocol table, so the emitter is
  *   named by its protocol and not by a bare number
- * @returns {{en: string, fr: string}} what the Configuration screen shows
+ * @returns {{en: string, fr: string, de: string, es: string}} what the Configuration
+ *   screen shows
  */
 export function attachHeardRemote({ config, device, heard, now = Date.now(), table = null }) {
   const candidates = unclaimedEmitters(config, heard);
@@ -133,6 +135,8 @@ export function attachHeardRemote({ config, device, heard, now = Date.now(), tab
     return {
       en: 'Pick the device this remote drives: the shutter it opens, the light it switches.',
       fr: 'Choisissez l’appareil que pilote cette télécommande : le volet qu’elle ouvre, la lampe qu’elle allume.',
+      de: 'Wähle das Gerät, das diese Fernbedienung steuert: den Rollladen, den sie öffnet, die Lampe, die sie schaltet.',
+      es: 'Elija el dispositivo que controla este mando: la persiana que abre, la lámpara que enciende.',
     };
   }
   // The box is in the device select (a box with `sensors: true` is a Gladys
@@ -148,6 +152,13 @@ export function attachHeardRemote({ config, device, heard, now = Date.now(), tab
         `« ${device.name} » est le boîtier AirSend lui-même, qu’aucune télécommande ne pilote. ` +
         'Choisissez l’appareil que pilote cette télécommande : le volet qu’elle ouvre, la lampe ' +
         'qu’elle allume.',
+      de:
+        `„${device.name}“ ist die AirSend-Box selbst, die keine Fernbedienung steuert. Wähle ` +
+        'das Gerät, das diese Fernbedienung steuert: den Rollladen, den sie öffnet, die ' +
+        'Lampe, die sie schaltet.',
+      es:
+        `«${device.name}» es la propia pasarela AirSend, que ningún mando controla. Elija el ` +
+        'dispositivo que controla este mando: la persiana que abre, la lámpara que enciende.',
     };
   }
 
@@ -169,47 +180,71 @@ export function attachHeardRemote({ config, device, heard, now = Date.now(), tab
         `Télécommande entendue : ${describeEmitter(remote, now, 'fr', table)}, mais « ${device.name} » ` +
         "ne figure pas dans la liste d'appareils telle qu'elle est collée. Enregistrez la liste, " +
         'puis relancez cette action.',
+      de:
+        `Gehört: ${describeEmitter(remote, now, 'de', table)}, aber „${device.name}“ steht ` +
+        'nicht in der Geräteliste, so wie sie gerade eingefügt ist. Speichere die Liste ' +
+        'erneut und führe dann diese Aktion aus.',
+      es:
+        `Oído: ${describeEmitter(remote, now, 'es', table)}, pero «${device.name}» no está en ` +
+        'la lista de dispositivos tal como está pegada ahora. Vuelva a guardar la lista y ' +
+        'ejecute después esta acción.',
     };
   }
 
-  const en = [
-    `Heard ${describeEmitter(remote, now, 'en', table)}.`,
-    `Attached to "${device.name}". Paste this line into the Devices field, then save:`,
-    line,
-  ];
-  const fr = [
-    `Télécommande entendue : ${describeEmitter(remote, now, 'fr', table)}.`,
-    `Rattachée à « ${device.name} ». Collez cette ligne dans le champ Appareils, puis enregistrez :`,
-    line,
+  // One multi-language object per line, joined per language at the end.
+  const lines = [
+    {
+      en: `Heard ${describeEmitter(remote, now, 'en', table)}.`,
+      fr: `Télécommande entendue : ${describeEmitter(remote, now, 'fr', table)}.`,
+      de: `Gehört: ${describeEmitter(remote, now, 'de', table)}.`,
+      es: `Oído: ${describeEmitter(remote, now, 'es', table)}.`,
+    },
+    {
+      en: `Attached to "${device.name}". Paste this line into the Devices field, then save:`,
+      fr: `Rattachée à « ${device.name} ». Collez cette ligne dans le champ Appareils, puis enregistrez :`,
+      de: `„${device.name}“ zugeordnet. Füge diese Zeile in das Feld Geräte ein und speichere:`,
+      es: `Asociado a «${device.name}». Pegue esta línea en el campo Dispositivos y guarde:`,
+    },
+    { en: line },
   ];
 
   // The box has one radio: a remote on another protocol than the one listened
   // to is heard INSTEAD of it, never as well. What matters is not the protocol
   // of the device it drives — a shutter never speaks — but what the box will
   // listen to once the line is pasted, so that is what is worked out and said.
-  const listening = describeListeningAfter(config, line, remote, table);
-  en.push(listening.en);
-  fr.push(listening.fr);
+  lines.push(describeListeningAfter(config, line, remote, table));
 
   // The box heard the protocol and nothing else. The line above is still worth
   // pasting — it is the only way those frames reach a device — but what it
   // attaches is a protocol, not one remote, and that has to be said before it
   // surprises anyone.
   if (!hasAddress(remote)) {
-    en.push(
-      `The box decoded no address for it, only protocol ${remote.id}: that line makes ` +
+    lines.push({
+      en:
+        `The box decoded no address for it, only protocol ${remote.id}: that line makes ` +
         `"${device.name}" follow EVERY frame of that protocol the box cannot attribute, a ` +
         "neighbour's remote included. It is the last resort — first set the listening channel " +
         `to ${channelToType(remote.id, 'en')}, which is how the box is told to decode that ` +
         'protocol properly.',
-    );
-    fr.push(
-      `Le boîtier n'en a décodé aucune adresse, seulement le protocole ${remote.id} : cette ligne ` +
+      fr:
+        `Le boîtier n'en a décodé aucune adresse, seulement le protocole ${remote.id} : cette ligne ` +
         `fait suivre à « ${device.name} » TOUTES les trames de ce protocole que le boîtier ` +
         "n'attribue à personne, celles d'un voisin comprises. C'est le dernier recours : " +
         `renseignez d'abord ${channelToType(remote.id, 'fr')} comme canal d'écoute, c'est ainsi ` +
         "qu'on demande au boîtier de décoder ce protocole correctement.",
-    );
+      de:
+        `Die Box hat dafür keine Adresse dekodiert, nur das Protokoll ${remote.id}: Diese Zeile ` +
+        `lässt „${device.name}“ JEDEM Telegramm dieses Protokolls folgen, das die Box niemandem ` +
+        'zuordnen kann, die Fernbedienung eines Nachbarn eingeschlossen. Das ist der letzte ' +
+        `Ausweg — trage zuerst ${channelToType(remote.id, 'de')} als Empfangskanal ein, so ` +
+        'wird die Box angewiesen, dieses Protokoll richtig zu dekodieren.',
+      es:
+        `La pasarela no decodificó ninguna dirección, solo el protocolo ${remote.id}: esa línea ` +
+        `hace que «${device.name}» siga TODAS las tramas de ese protocolo que la pasarela no ` +
+        'puede atribuir, incluidas las del mando de un vecino. Es el último recurso — indique ' +
+        `primero ${channelToType(remote.id, 'es')} como canal de escucha, así se le pide a la ` +
+        'pasarela que decodifique ese protocolo correctamente.',
+    });
   }
 
   // What its frames carry. A dropped frame was thrown away before any device
@@ -231,34 +266,60 @@ export function attachHeardRemote({ config, device, heard, now = Date.now(), tab
       ? Array.isArray(remote.droppedReadings) && remote.droppedReadings.length === 0
       : remote.claimed === false && remote.understood === false && remote.readings?.length === 0);
   if (remote.dropped && !carriesNothing) {
-    en.push(
-      `Its frames were dropped before any device (${remote.dropped}), so what they carry is ` +
+    const addressed = hasAddress(remote);
+    lines.push({
+      en:
+        `Its frames were dropped before any device (${remote.dropped}), so what they carry is ` +
         'not known here: the "Ignored a radio frame" log line says it. ' +
-        (hasAddress(remote)
+        (addressed
           ? 'Once this line is saved, a frame of this remote is no longer dropped for its grade.'
           : 'A line without an address does not waive the grade: "Accept unreliable frames" ' +
             'lets them through.'),
-    );
-    fr.push(
-      `Ses trames ont été écartées avant tout appareil (${remote.dropped}), ce qu'elles portent ` +
+      fr:
+        `Ses trames ont été écartées avant tout appareil (${remote.dropped}), ce qu'elles portent ` +
         "n'est donc pas connu ici : la ligne de journal « Ignored a radio frame » le dit. " +
-        (hasAddress(remote)
+        (addressed
           ? "Une fois cette ligne enregistrée, une trame de cette télécommande n'est plus " +
             'écartée pour sa note.'
           : 'Une ligne sans adresse ne lève pas cette exigence : « Accepter les trames peu ' +
             'fiables » les laisse passer.'),
-    );
+      de:
+        `Seine Telegramme wurden vor jedem Gerät verworfen (${remote.dropped}), was sie tragen, ` +
+        'ist hier also nicht bekannt: Die Protokollzeile „Ignored a radio frame“ sagt es. ' +
+        (addressed
+          ? 'Sobald diese Zeile gespeichert ist, wird ein Telegramm dieser Fernbedienung nicht ' +
+            'mehr wegen seiner Bewertung verworfen.'
+          : 'Eine Zeile ohne Adresse hebt die Bewertung nicht auf: „Unzuverlässige Telegramme ' +
+            'akzeptieren“ lässt sie durch.'),
+      es:
+        `Sus tramas se descartaron antes de llegar a ningún dispositivo (${remote.dropped}), así ` +
+        'que aquí no se sabe lo que llevan: lo dice la línea de registro «Ignored a radio ' +
+        'frame». ' +
+        (addressed
+          ? 'Una vez guardada esta línea, las tramas de este mando ya no se descartan por su ' +
+            'calificación.'
+          : 'Una línea sin dirección no exime de la calificación: «Aceptar tramas poco fiables» ' +
+            'las deja pasar.'),
+    });
   } else if (carriesNothing) {
-    en.push(
-      'Its frames carry no note the service could decode: attaching it makes the emitter known, ' +
+    lines.push({
+      en:
+        'Its frames carry no note the service could decode: attaching it makes the emitter known, ' +
         'but a partially decoded protocol carries no order to replay, so the device state will ' +
         'not follow.',
-    );
-    fr.push(
-      'Ses trames ne portent aucune note décodable par le service : le rattachement fait ' +
+      fr:
+        'Ses trames ne portent aucune note décodable par le service : le rattachement fait ' +
         "connaître l'émetteur, mais un protocole partiellement décodé ne porte aucun ordre à " +
         "rejouer, l'état de l'appareil ne suivra donc pas.",
-    );
+      de:
+        'Seine Telegramme tragen keine Note, die der Dienst dekodieren konnte: Die Zuordnung ' +
+        'macht den Sender bekannt, aber ein teilweise dekodiertes Protokoll trägt keinen ' +
+        'wiederholbaren Befehl, der Gerätezustand wird also nicht folgen.',
+      es:
+        'Sus tramas no llevan ninguna nota que el servicio pueda decodificar: asociarlo da a ' +
+        'conocer el emisor, pero un protocolo decodificado en parte no lleva ninguna orden ' +
+        'reproducible, así que el estado del dispositivo no seguirá.',
+    });
   }
 
   // The rest of the neighbourhood, briefly: a few lines of the most recent
@@ -267,19 +328,32 @@ export function attachHeardRemote({ config, device, heard, now = Date.now(), tab
   if (others.length > 0) {
     const shown = others.slice(0, OTHERS_SHOWN);
     const more = others.length - shown.length;
-    en.push(
-      `Other emitters heard, left out: ${shown
-        .map((entry) => describeEmitter(entry, now, 'en', table))
-        .join('; ')}${more > 0 ? `; and ${more} more` : ''}.`,
-    );
-    fr.push(
-      `Autres émetteurs entendus, non rattachés : ${shown
-        .map((entry) => describeEmitter(entry, now, 'fr', table))
-        .join(' ; ')}${more > 0 ? ` ; et ${more} autre${more > 1 ? 's' : ''}` : ''}.`,
+    lines.push(
+      localize((language) => {
+        const separator = language === 'fr' ? ' ; ' : '; ';
+        const listed = shown
+          .map((entry) => describeEmitter(entry, now, language, table))
+          .join(separator);
+        const rest =
+          more > 0
+            ? pick(language, {
+                en: `; and ${more} more`,
+                fr: ` ; et ${more} autre${more > 1 ? 's' : ''}`,
+                de: `; und ${more} weitere`,
+                es: `; y ${more} más`,
+              })
+            : '';
+        return pick(language, {
+          en: `Other emitters heard, left out: ${listed}${rest}.`,
+          fr: `Autres émetteurs entendus, non rattachés : ${listed}${rest}.`,
+          de: `Weitere gehörte Sender, nicht zugeordnet: ${listed}${rest}.`,
+          es: `Otros emisores oídos, no asociados: ${listed}${rest}.`,
+        });
+      }),
     );
   }
 
-  return { en: en.join('\n'), fr: fr.join('\n') };
+  return localize((language) => lines.map((text) => pick(language, text)).join('\n'));
 }
 
 /**
@@ -333,6 +407,18 @@ function pressAgain(remote, now, table) {
       'de ce protocole pour vos autres télécommandes : une ligne sans adresse ferait suivre ' +
       "à l'appareil toutes celles-ci. Rien n'a été rattaché. Appuyez de nouveau sur la " +
       'télécommande — un appui normal, près du boîtier — puis relancez cette action.',
+    de:
+      `Gehört: ${describeEmitter(remote, now, 'de', table)}. Die Box hat das Protokoll dieses ` +
+      'Telegramms erfasst, aber nicht seine Adresse, obwohl sie auf diesem Protokoll die ' +
+      'Adressen deiner anderen Fernbedienungen dekodiert: Eine Zeile ohne Adresse ließe das ' +
+      'Gerät allen folgen. Nichts wurde zugeordnet. Drücke die Fernbedienung erneut — ' +
+      'ein normaler Druck, nahe der Box — und führe diese Aktion dann noch einmal aus.',
+    es:
+      `Oído: ${describeEmitter(remote, now, 'es', table)}. La pasarela captó el protocolo de ` +
+      'esa trama pero no su dirección, aunque sí decodifica las direcciones de este protocolo ' +
+      'para sus otros mandos: una línea sin dirección haría que el dispositivo los siguiera a ' +
+      'todos. No se ha asociado nada. Vuelva a pulsar el mando — una pulsación normal, cerca ' +
+      'de la pasarela — y ejecute de nuevo esta acción.',
   };
 }
 
@@ -356,6 +442,13 @@ function describeListeningAfter(config, line, remote, table) {
         "L'écoute est désactivée (Canal d'écoute à 0) : le boîtier n'entendra pas cette " +
         `télécommande. Mettez ${channelToType(wanted, 'fr')} dans ce champ, ou videz-le, pour ` +
         "l'entendre.",
+      de:
+        'Der Empfang ist ausgeschaltet (Empfangskanal auf 0): Die Box wird diese ' +
+        `Fernbedienung nicht hören. Trage ${channelToType(wanted, 'de')} in dieses Feld ` +
+        'ein oder leere es, um sie zu hören.',
+      es:
+        'La escucha está desactivada (Canal de escucha en 0): la pasarela no oirá este mando. ' +
+        `Ponga ${channelToType(wanted, 'es')} en ese campo, o vacíelo, para oírlo.`,
     };
   }
   const listened = named(after.channel, table);
@@ -363,11 +456,23 @@ function describeListeningAfter(config, line, remote, table) {
     return {
       en: `Once saved, the box listens to ${listened}: this remote will be heard.`,
       fr: `Une fois enregistré, le boîtier écoute le ${listened} : cette télécommande sera entendue.`,
+      de: `Nach dem Speichern empfängt die Box ${listened}: Diese Fernbedienung wird gehört.`,
+      es: `Una vez guardado, la pasarela escucha el ${listened}: este mando se oirá.`,
     };
   }
   const why = after.deduced
-    ? { en: 'deduced from your devices', fr: 'déduit de vos appareils' }
-    : { en: 'the Listening channel field', fr: "le champ Canal d'écoute" };
+    ? {
+        en: 'deduced from your devices',
+        fr: 'déduit de vos appareils',
+        de: 'aus deinen Geräten abgeleitet',
+        es: 'deducido de sus dispositivos',
+      }
+    : {
+        en: 'the Listening channel field',
+        fr: "le champ Canal d'écoute",
+        de: 'das Feld Empfangskanal',
+        es: 'el campo Canal de escucha',
+      };
   return {
     en:
       `Warning: once saved, the box listens to ${listened} (${why.en}), not to ` +
@@ -378,6 +483,15 @@ function describeListeningAfter(config, line, remote, table) {
       `${named(wanted, table)} de cette télécommande : elle ne sera pas entendue. Le boîtier ` +
       `n'écoute qu'un protocole à la fois — mettez ${channelToType(wanted, 'fr')} dans le champ ` +
       "Canal d'écoute.",
+    de:
+      `Achtung: Nach dem Speichern empfängt die Box ${listened} (${why.de}), nicht ` +
+      `${named(wanted, table)} dieser Fernbedienung: Sie wird nicht gehört. Die Box empfängt ` +
+      `nur ein Protokoll auf einmal — trage ${channelToType(wanted, 'de')} in das Feld ` +
+      'Empfangskanal ein.',
+    es:
+      `Atención: una vez guardado, la pasarela escucha el ${listened} (${why.es}), no el ` +
+      `${named(wanted, table)} de este mando: no se oirá. La pasarela solo escucha un ` +
+      `protocolo a la vez — ponga ${channelToType(wanted, 'es')} en el campo Canal de escucha.`,
   };
 }
 
@@ -397,6 +511,14 @@ function nothingHeard() {
       "Aucune trame radio entendue pour l'instant. Appuyez sur la télécommande à rattacher, puis " +
       "relancez cette action. Si rien n'est jamais entendu, le boîtier écoute un autre " +
       'protocole : « Tester la connexion » dit lequel.',
+    de:
+      'Noch kein Funktelegramm gehört. Drücke die Fernbedienung, die du zuordnen ' +
+      'möchtest, und führe diese Aktion erneut aus. Wird nie etwas gehört, empfängt die ' +
+      'Box ein anderes Protokoll: „Verbindung testen“ sagt, welches.',
+    es:
+      'Aún no se ha oído ninguna trama de radio. Pulse el mando que quiere asociar y vuelva a ' +
+      'ejecutar esta acción. Si nunca se oye nada, la pasarela escucha otro protocolo: «Probar ' +
+      'la conexión» dice cuál.',
   };
 }
 
@@ -409,5 +531,12 @@ function everythingClaimed(config) {
     fr:
       'Tous les émetteurs entendus sont déjà déclarés : il n’y a rien à rattacher. Appuyez sur ' +
       `la télécommande visée puis relancez cette action — ${declared} appareil(s) configuré(s).`,
+    de:
+      'Jeder gehörte Sender ist bereits angegeben: Es gibt nichts zuzuordnen. Drücke die ' +
+      `gesuchte Fernbedienung und führe diese Aktion erneut aus — ${declared} Gerät(e) ` +
+      'konfiguriert.',
+    es:
+      'Todos los emisores oídos ya están declarados: no queda nada que asociar. Pulse el mando ' +
+      `que busca y vuelva a ejecutar esta acción — ${declared} dispositivo(s) configurado(s).`,
   };
 }

@@ -136,7 +136,7 @@ typed there wins: the integration uses it and starts nothing of its own.
 3. Paste your **device list** (see below).
 4. Save, then click **Test the connection**: it reports the built-in service,
    the local channel, and how many devices it understood.
-5. The devices appear in the **Discovery** tab, ready to be added to Gladys.
+5. The devices appear in the **Discover** tab, ready to be added to Gladys.
 
 The **AirSend Web Service URL** is only needed in the case described above: a
 service of your own.
@@ -958,7 +958,7 @@ integration is the one running it (the default), it pushes them straight to the
 integration. A service running **on another machine** has no way to reach the
 integration, so the frames have to go through a public URL, which Gladys Plus
 provides: link your Gladys Plus account and paste your Open API key in the
-**Webhooks** block of the Configuration screen.
+**Gladys Plus webhooks** block of the Configuration screen.
 
 ## Actions
 
@@ -1041,7 +1041,7 @@ last emitters heard with what became of them (followed, unknown, dropped…). It
 | `Invalid input`                       | The `channel` of the device (`id`/`pid` and `source`/`addr`)                                                     |
 | `no radio channel` in the logs        | The entry carries no channel: it needs `channel.id`, or the `pid`/`addr` pair                                    |
 | `no radio confirmation`               | Normal on equipment without feedback: set `wait: false`                                                          |
-| No device in the Discovery tab        | **Test the connection**: the device list probably did not parse                                                  |
+| No device in the Discover tab         | **Test the connection**: the device list probably did not parse                                                  |
 | The box is unreachable                | The `?gw=0&rhost=<IPv4>` part of the connection string                                                           |
 | `Built-in service unavailable`        | The integration logs: the service logs its own startup there                                                     |
 | The box answers by hand, not here     | The `rhost=` IPv4 must be reachable **from the container**, not just from your desktop                           |

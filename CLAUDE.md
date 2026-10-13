@@ -97,5 +97,5 @@ No hardware, no network: `test/helpers/fakeAirSend.js` fakes the web service,
 ## Conventions
 
 Prettier formats, ESLint catches mistakes. Comments explain **why** (radio behaviours look
-arbitrary without them). User-facing messages are bilingual `{ en, fr }`; user docs in
-`docs/en.md` and `docs/fr.md`, kept in sync.
+arbitrary without them). User-facing text is `{ en, fr, de, es }` (built with `src/i18n.js`);
+user docs in `docs/en.md`, `docs/fr.md`, `docs/de.md` and `docs/es.md`, kept in sync.

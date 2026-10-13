@@ -1,0 +1,1123 @@
+# Devmel (AirSend)
+
+Esta integración conecta Gladys con una pasarela de radio **Devmel AirSend** o
+**AirSend Duo** y, a través de ella, con los equipos de 433 MHz / 868 MHz que
+controla: persianas, interruptores, luces regulables, portones y los sensores
+que responden (Somfy RTS, Chacon DiO, Nice, FAAC, Bubendorff…).
+
+## Antes de empezar
+
+Sus dispositivos se emparejan en la **app móvil AirSend** o en
+[airsend.cloud](https://airsend.cloud), no en Gladys: esta integración
+reproduce las órdenes de radio que ya conocen. Haga que funcionen allí
+primero.
+
+Después todo pasa por el canal local descrito abajo: la integración controla
+su pasarela en su propia red y nunca llama a airsend.cloud para enviar una
+orden.
+
+### Local
+
+El canal local habla con el **AirSend Web Service**, el pequeño servidor HTTP
+que Devmel proporciona para controlar la pasarela a través de su red local.
+
+**Está incluido.** La integración lo ejecuta dentro de su propio contenedor,
+en `http://127.0.0.1:33863`, y lo supervisa: nada que instalar junto a Gladys,
+ninguna URL que indicar. El interruptor **Usar el servicio AirSend
+integrado**, activado por defecto, es lo que lo controla.
+
+Así que lo único que el canal local necesita de usted es la **cadena de
+conexión** exportada por airsend.cloud, que tiene este aspecto:
+
+```
+sp://password@fe80::xxxx:xxxx:xxxx:xxxx?gw=0&rhost=192.168.1.50
+```
+
+Péguela **exactamente como se la da airsend.cloud**: no añada nada, no quite
+nada, no la vuelva a escribir.
+
+Conserve siempre la parte `?gw=0&rhost=<IPv4 de la pasarela>`: sin ella la
+pasarela solo es accesible por IPv6 de enlace local y el servicio responde
+con errores inesperados.
+
+#### Dónde se configura esa cadena en airsend.cloud
+
+No está pensada para escribirse a mano: la genera la pantalla
+**Communication** de [app.airsend.cloud](https://app.airsend.cloud). Cada
+campo de esa pantalla escribe un trozo de la cadena, y dos de ellos deciden si
+la integración hablará con su pasarela por su propia red o por internet.
+
+| Campo en airsend.cloud                   | Lo que escribe en la cadena | Lo que hay que poner para Gladys                                                 |
+| ---------------------------------------- | --------------------------- | -------------------------------------------------------------------------------- |
+| **Local IP**                             | la parte después de `@`     | Nada que indicar: la IPv6 de enlace local de la pasarela, la misma que `localip` |
+| **Password**                             | la parte antes de `@`       | La contraseña de la pasarela                                                     |
+| **Internet gateway**                     | `gw=1` o `gw=0`             | **Desactivado**, es decir `gw=0`: la orden se queda en su red                    |
+| **Secondary address**                    | `rhost=`                    | La **IPv4 de la pasarela** en su red, no la de su router                         |
+| **Connection mode** / **WebService Url** | nada                        | Solo afecta a la propia página de airsend.cloud (vea abajo)                      |
+| **Maximum delay (ms)**                   | nada                        | Déjelo vacío                                                                     |
+
+**Connection mode** y **WebService Url** indican cómo la _página de
+airsend.cloud_ llega a su pasarela desde su navegador — normalmente un
+servicio AirSend que se ejecuta en su propio PC, de ahí el
+`http://127.0.0.1:33863`. Gladys nunca los usa: ejecuta su propio servicio en
+su contenedor. Esos dos campos pueden quedarse como están.
+
+Los dos que importan son los otros:
+
+- **Internet gateway** activado escribe `gw=1`, y la pasarela pasa a ser
+  accesible a través de internet. Práctico desde un teléfono con datos
+  móviles, y un rodeo inútil para una integración que está en la misma red que
+  la pasarela: cada orden hace un viaje de ida y vuelta por la nube, lo que se
+  nota en los registros (un buen segundo entre una orden y su eco, en lugar de
+  dos o tres décimas). Desactívelo y mantenga `gw=0`.
+- **Secondary address** escribe `rhost=`. Es la dirección que el servicio
+  AirSend marca **desde el contenedor de Gladys**, así que debe ser la IPv4 de
+  la pasarela, enrutable desde el host de Gladys. Búsquela en las concesiones
+  DHCP de su router y resérvela para que no cambie; sin ella la pasarela solo
+  es accesible por IPv6 de enlace local y el servicio responde con errores
+  inesperados.
+
+Después de cualquier cambio, haga clic en **Save** y luego **vuelva a copiar
+la cadena de conexión** en Gladys: ha cambiado.
+
+#### No la vuelva a escribir nunca
+
+Copie y pegue la cadena entera, de `sp://` hasta el final, en un campo vacío.
+A una cadena dañada la pasarela responde exactamente lo mismo que a una
+contraseña incorrecta:
+
+```
+[WARN] [airsend] Local transfer failed for "Chambre parents": Invalid connection string (HTTP 401)
+[WARN] Could not listen through "AirSend box": Invalid connection string (HTTP 401)
+```
+
+Lo que se daña, tanto al reescribirla como al revisarla:
+
+- **los dos puntos dobles.** Una dirección de enlace local se escribe
+  `fe80::dcf6:e5ff:fe8f:89cd` — `fe80` y luego **dos** signos de dos puntos.
+  Reescrita, se convierte en `fe80:dcf6:e5ff:fe8f:89cd`: cinco grupos de una
+  dirección de ocho grupos. Sigue pareciendo una dirección, pero ya no lo es;
+- **lo que parece necesitar una corrección.** Una URL suele poner una dirección
+  IPv6 entre corchetes; airsend.cloud la exporta sin ellos, y las pasarelas
+  aceptan esa forma. Existen las dos grafías, no hay que añadir ninguna: lo que
+  le da airsend.cloud es lo que hay que pegar;
+- **lo que no se ve.** El campo es secreto y solo muestra puntos: los puntos de
+  la máscara copiados en lugar de la contraseña, un espacio fino recogido de
+  una página web, un apóstrofo convertido en tipográfico por una app de notas —
+  todo eso se pega sin que se note nada.
+
+La integración comprueba ahora lo que se puede comprobar sin pasarela — el
+`sp://`, la contraseña, la dirección, caracteres que no pintan nada ahí — y lo
+escribe en los registros al cargar la configuración, en la pantalla de
+Configuración y en la línea _Local_ de **Probar la conexión**.
+
+Sobre todo, esa acción muestra **la propia cadena, sin la contraseña**:
+
+```
+Connection string: sp://<16 characters>@fe80::dcf6:e5ff:fe8f:89cd?gw=0&rhost=192.168.1.50
+```
+
+Es la única forma de ver lo que Gladys tiene realmente. La mitad de los
+errores que detecta no los puede nombrar ninguna comprobación: la dirección de
+la otra pasarela, un `gw=1` que nadie pidió, un `rhost` que se quedó en la IP
+antigua. La contraseña en sí nunca se muestra ni se registra — solo su
+longitud, lo que basta para detectar una máscara pegada en su lugar.
+
+Una cadena escrita en un dispositivo de la lista (una segunda pasarela) se
+comprueba igual y se muestra en una línea propia:
+`Cadena de conexión de «Box garage»: sp://<…>`.
+
+#### Usar un servicio que ya ejecuta
+
+Si el AirSend Web Service ya se ejecuta en algún lugar de su red — el
+complemento de Home Assistant, el demonio de Jeedom, un contenedor propio —,
+basta con indicar el campo **URL del AirSend Web Service**
+(`http://192.168.1.50:33863/`). Una URL indicada ahí tiene prioridad: la
+integración la usa y no arranca nada propio.
+
+## Configuración
+
+1. Abra la pestaña **Configuración** de la integración.
+2. Pegue la **cadena de conexión** de su pasarela. Es suficiente: el servicio
+   AirSend ya se ejecuta dentro de la integración.
+3. Pegue su **lista de dispositivos** (vea abajo).
+4. Guarde y haga clic en **Probar la conexión**: informa del servicio
+   integrado, del canal local y de cuántos dispositivos ha entendido.
+5. Los dispositivos aparecen en la pestaña **Descubrir**, listos para
+   añadirse a Gladys.
+
+La **URL del AirSend Web Service** solo hace falta en el caso descrito arriba:
+un servicio propio.
+
+Cada dispositivo muestra como distintivo el canal que llevó su última orden —
+`local` cuando su pasarela respondió, `unreachable` cuando no se pudo
+alcanzar. En cuanto cambia el servicio o la cadena de conexión, el distintivo
+muestra lo que permite la nueva configuración hasta la siguiente orden del
+dispositivo.
+
+## La lista de dispositivos
+
+En airsend.cloud, abra **Import/Export** y exporte sus dispositivos en
+**JSON**. Esa exportación se lee tal como llega, incluso en una sola línea, que
+es lo que espera el campo **Dispositivos**.
+
+### La exportación JSON
+
+Tiene este aspecto — una lista, con el canal de radio escrito de forma plana:
+
+```json
+{
+  "devices": [
+    {
+      "name": "Living room shutter",
+      "localip": "fe80::dcf6:e5ff:fe8f:89cd",
+      "type": 4098,
+      "pid": 25455,
+      "addr": 8295
+    }
+  ]
+}
+```
+
+Péguela tal cual, incluso en una línea. `pid` y `addr` son el canal de radio
+del dispositivo: `pid` es el identificador del canal (el protocolo, compartido
+por todos los dispositivos controlados de la misma forma) y `addr` su origen
+(la dirección del emisor). `localip` es la dirección de la pasarela a la que
+pertenece el dispositivo; a la pasarela en sí se sigue llegando a través de la
+cadena de conexión `sp://` indicada arriba.
+
+Una entrada sin canal de radio se ignora: la pasarela no podría enviar nada
+para ella. La propia pasarela (`type: 0`) es la excepción — siempre responde
+en el canal 1.
+
+### Escribir la lista a mano
+
+La misma lista puede escribirse a mano, indexada por nombre, con el canal
+anidado en `channel` en lugar del par plano `pid` / `addr`. Sigue siendo JSON:
+
+```json
+{
+  "devices": {
+    "AirSend box": { "type": 0, "sensors": true, "refresh": 300 },
+    "Living room shutter": {
+      "type": 4098,
+      "invert": true,
+      "channel": { "id": 25455, "source": 94311 }
+    },
+    "Pergola light": { "type": 4100, "channel": { "id": 26848, "source": 1442421508 } },
+    "Outdoor sensor": {
+      "type": 1,
+      "features": ["temperature", "humidity"],
+      "channel": { "id": 1368, "source": 542 }
+    }
+  }
+}
+```
+
+### Tipos de dispositivo
+
+| `type` | Dispositivo             | Lo que obtiene en Gladys                                     |
+| ------ | ----------------------- | ------------------------------------------------------------ |
+| `0`    | Pasarela AirSend        | Sus sensores de temperatura y de luminosidad                 |
+| `1`    | Sensor / mando de radio | Las medidas que emite (vea `features` abajo)                 |
+| `4096` | Botón                   | Un pulsador que envía TOGGLE                                 |
+| `4097` | Interruptor             | Encendido/Apagado                                            |
+| `4098` | Persiana                | Abrir / Parar / Cerrar (**+** posición una vez cronometrada) |
+| `4099` | Persiana con posición   | Abrir / Parar / Cerrar **+** una posición de 0-100 %         |
+| `4100` | Luz regulable           | Encendido/Apagado **+** luminosidad                          |
+
+### Opciones de dispositivo
+
+| Opción              | Significado                                                                    |
+| ------------------- | ------------------------------------------------------------------------------ |
+| `type`              | Tipo de dispositivo (tabla de arriba), **obligatorio**                         |
+| `channel`           | Canal de radio (`id`, `source`, `mac`, `seed`), **obligatorio**                |
+| `pid`               | El `channel.id` de la exportación JSON (use una de las dos formas)             |
+| `addr`              | El `channel.source` de la exportación JSON                                     |
+| `remotes`           | Otros emisores que controlan el dispositivo (vea «El mando de pared»)          |
+| `spurl`             | Cadena de conexión de este dispositivo, si difiere de la global                |
+| `wait`              | Esperar la confirmación de radio antes de responder (`false` por defecto)      |
+| `repeat`            | Emisiones adicionales de las órdenes enviadas a este dispositivo (vea abajo)   |
+| `invert`            | Intercambiar abrir y cerrar, para persianas instaladas al revés                |
+| `travel_up`         | En una persiana: segundos para una apertura completa (vea abajo)               |
+| `travel_down`       | En una persiana: segundos para un cierre completo                              |
+| `travel`            | Ambos a la vez, para un motor que se comporta igual en los dos sentidos        |
+| `favorite_position` | En una persiana: la posición programada en el motor, en %                      |
+| `sensors`           | En una pasarela (`type: 0`): exponer sus sensores de temperatura y luminosidad |
+| `refresh`           | Intervalo de lectura de esos sensores, en segundos                             |
+| `features`          | En un sensor (`type: 1`): `temperature`, `humidity`, `illuminance`, `click`    |
+
+Una pasarela declarada sin `sensors: true` no crea ningún dispositivo en Gladys
+— solo está ahí para llevar la cadena de conexión. Cuando el campo global
+**Cadena de conexión local** está vacío, la declarada en la pasarela sirve para
+todos los dispositivos.
+
+Una pasarela declarada con una cadena de conexión **distinta** de la global es
+una segunda pasarela: la que está detrás de la cadena global se sigue
+escuchando y manteniendo activa, junto a ella.
+
+## Hacer pasar una orden
+
+Nada confirma una orden de radio. Una persiana de 433 MHz no tiene canal de
+vuelta: la pasarela emite y nadie dirá nunca si el motor la ha oído. Una trama
+perdida en el ruido — un microondas, el mando del vecino, una puerta de
+garaje — no es por tanto un error mostrado en ningún sitio, es un clic sin
+efecto. De eso exactamente está hecho «tengo que pulsar Abrir dos o tres
+veces».
+
+Tres cosas lo resuelven, sin nada que configurar:
+
+- **las órdenes salen de una en una.** Una pasarela tiene una sola radio:
+  mientras emite no oye nada, y una segunda orden lanzada justo después llega a
+  una pasarela todavía ocupada. Las órdenes se ponen por tanto en cola, con un
+  cuarto de segundo de separación, en el orden en que las dio — una cola por
+  pasarela, de modo que una pasarela que no responde nunca retiene las órdenes
+  enviadas a través de otra;
+- **una orden que la pasarela no pudo emitir se vuelve a enviar.** Un rechazo
+  no: una cadena de conexión rechazada y un canal desconocido responden
+  exactamente igual la segunda vez. Un TOGGLE de pulsador, o un Parar, solo se
+  reenvía cuando con seguridad nunca salió (servicio inaccesible, pasarela
+  ocupada): tras un tiempo de espera agotado puede que ya haya abierto el
+  portón, y un segundo lo cerraría. Tampoco se reenvía una orden una vez que ha
+  dado al dispositivo otra más reciente — desde Gladys o desde su mando de
+  pared: un Abrir reenviado después de su Parar volvería a poner en marcha la
+  persiana;
+- **una orden se repite por radio**, como un mando real la repite mientras se
+  mantiene pulsado el botón. Por defecto, cada orden sale dos veces.
+
+El campo **Repeticiones de órdenes** fija ese número de emisiones adicionales:
+súbalo a `2` o `3` si un dispositivo sigue ignorando a Gladys de vez en
+cuando; `0` envía cada orden una sola vez. Un dispositivo terco puede tener el
+suyo propio, sin cambiar nada para los demás:
+
+```json
+{ "devices": { "Patio door": { "type": 4098, "pid": 25455, "addr": 8295, "repeat": 3 } } }
+```
+
+Solo se repiten las órdenes que significan lo mismo dos veces — Abrir, Cerrar,
+una posición. Un TOGGLE de pulsador sale una vez: oído dos veces, vuelve al
+punto de partida. Igual que Parar: en Somfy RTS, STOP y el botón «my» son la
+misma trama, y una segunda que llega a una persiana que la primera acaba de
+detener la envía a su posición favorita. Una repetición que aún espera su
+turno se descarta cuando el dispositivo recibe una orden más reciente, desde
+Gladys o desde su mando de pared.
+
+Esas repeticiones **no** hacen esperar a la interfaz: Gladys recibe la
+respuesta en cuanto la orden se emite, y las repeticiones siguen detrás, en su
+lugar en la cola. Son una segunda oportunidad para una trama perdida en el
+ruido, no parte de la respuesta — y el rearme de la escucha, que también
+necesita la radio, espera ahora a que la cola se vacíe en lugar de colarse
+entre dos órdenes. Eso es lo que hacía que un «Cerrar» pulsado justo después de
+un «Abrir» tardara unos segundos en salir. También espera al Parar de una
+persiana llevada a una posición cuando ese Parar toca en los próximos
+segundos: retenido detrás del rearme, salía tarde y la persiana se detenía más
+allá de la posición pedida.
+
+### La primera orden tras una larga pausa
+
+Una orden que la mayor parte del tiempo sale en una fracción de segundo y
+tarda varios tras una tarde tranquila no es cosa de la radio: es el **enlace
+con la pasarela**, que se ha enfriado. Nadie le había hablado en horas, así que
+la sesión tenía que reconstruirse antes de poder enviar nada, y esa espera le
+caía a quien hacía clic.
+
+La integración lo evita: cuando la pasarela lleva cuatro minutos sin
+actividad, lee los propios sensores de la pasarela — una petición que llega a
+la pasarela y nunca sale por radio. Una instalación en uso se mantiene activa
+con su propio tráfico y no se envía nada extra. Cuesta una pequeña petición
+por pasarela inactiva, y es lo que el sondeo ya hacía para una pasarela
+declarada con `sensors: true`; una pasarela que solo lleva la cadena de
+conexión no tenía nada.
+
+Cuatro minutos es un punto de partida, no un hecho: cuánto tiempo tolera una
+pasarela quedarse sin actividad no está documentado en ningún sitio, y no es
+lo mismo por Wi-Fi que a través de la pasarela en la nube. Así que lo dice la
+pasarela. Cuando despertarla tarda más de un segundo, el enlace ya se había
+enfriado; la integración reduce la espera a la mitad — hasta un minuto, nunca
+menos — y escribe la línea:
+
+```
+Waking the link to "AirSend" took 2.6 s after 4 min of silence: it goes cold
+faster than it was being kept warm… Touching it every 2 min from now on.
+```
+
+Solo se acorta, nunca se alarga: un despertar rápido demuestra que el
+intervalo con el que se hizo funciona, nunca que uno más largo funcionaría. Y
+solo una pasarela que ha respondido enseña algo: el primer contacto tras el
+arranque construye la sesión y es lento sea cual sea el intervalo, y una
+pasarela apagada hace que cada despertar dure todo el tiempo de espera. Cada
+pasarela se mantiene activa tras su propio silencio.
+
+Cuando una orden aún tarda más de segundo y medio en salir, los registros lo
+dicen, y dicen **dónde se fue el tiempo**:
+
+```
+The order sent to "Kitchen shutter" took 4.2 s to reach the air: 0.1 s waiting
+for the radio, 4.1 s in the box. The time went into the box, not into the
+queue: …
+```
+
+- **in the box** (en la pasarela) — la propia pasarela tardó en responder. Dos
+  motivos habituales: la cadena de conexión lleva `gw=1`, así que cada orden
+  viaja a los servidores de Devmel y vuelve (desactive **Internet gateway** en
+  airsend.cloud y dé a la cadena la IPv4 de la pasarela con `rhost=`), o la
+  pasarela está donde su Wi-Fi es débil;
+- **waiting for the radio** (esperando la radio) — las órdenes anteriores a
+  esta aún estaban saliendo. Las repeticiones son el motivo habitual de que
+  hubiera varias: baje **Repeticiones de órdenes** si lo subió.
+
+### Gladys no se confunde con el mando
+
+Todo lo que la integración emite vuelve a ella: la pasarela responde a la
+orden y, como escucha de forma permanente, se oye a sí misma emitir. Ese eco
+lleva la orden recién enviada — y leerlo como una orden nueva deshace lo que
+la orden estaba haciendo. Una persiana temporizada enviada al 40 % es el
+ejemplo: el eco de su «Abrir» la redirigía al 100 % y anulaba el Parar previsto
+a mitad de camino, así que la persiana subía hasta arriba. La integración
+reconoce ahora sus propias órdenes y no las reproduce.
+
+Lo que identifica un eco es **la dirección de la que procede**. El canal en el
+que emite Gladys es el de la propia pasarela: nada más en la casa habla con esa
+voz, sea cual sea el retraso. Una pasarela que tarda diez segundos en
+repetirse ya no se confunde con una mano en un mando — lo que bastaba para
+devolver arriba una persiana detenida al 40 %. Esa voz es de Gladys durante un
+minuto después de su última orden: un mando copiado en la app AirSend (misma
+dirección que el dispositivo, lo habitual para un portón de código fijo) habla
+también con ella. Dentro de ese minuto, ese mando se sigue obedeciendo — el
+Subir, Bajar o Parar de una persiana o un portón, el ON, OFF o el nivel de un
+interruptor o una luz —, descarta la repetición de una orden de Gladys que aún
+espera la radio y activa **Se pulsa un mando de radio**, como cualquier mando.
+Solo una pulsación que repite lo que Gladys acaba de decir, que no cambia nada,
+o lo que aún no se ha oído repetir a la pasarela, se toma por el eco. Y solo
+una trama que la integración seguiría en cualquier otro momento: con la
+escucha desactivada, o con una calificación demasiado baja (vea **Aceptar
+tramas poco fiables**), también se descarta dentro de ese minuto. La respuesta
+de la pasarela a una orden de Gladys nunca es una pulsación, por tarde que
+vuelva.
+
+Lo mismo ocurre con un porcentaje o un ON/OFF enviado por Gladys: su eco no se
+toma por el dispositivo informando de dónde está. Leído así, un 4099
+temporizado enviado al 30 % mostraba 30 % un segundo después de arrancar, y un
+eco tardío de un ON volvía a encender un enchufe tras el OFF dado entretanto.
+
+Consecuencias visibles:
+
+- un mando de pared emite desde **otra dirección**: nunca se toma por ese eco y
+  sigue controlando la persiana en Gladys;
+- un dispositivo que incluye ese canal en sus `remotes` (un canal de grupo que
+  lo controla junto con otros) **sí** sigue la orden: nunca la ejecutó, y para
+  él la trama es una orden como cualquier otra. Una vez: los ecos siguientes de
+  esa orden, y cualquier eco que llegue después de una orden dada entretanto a
+  ese dispositivo, no se reproducen — «cerrar todo y luego el salón al 50 %»
+  deja el salón al 50 %. Un eco tardío del Cerrar del grupo, oído después de su
+  Parar, es ese Cerrar, no el Parar: «cerrar todo y luego parar todo» detiene
+  también el salón;
+- cuando la pasarela responde que **no emitió la orden** — ninguna de sus
+  emisiones, repeticiones incluidas: una repetición rechazada después de que la
+  orden saliera no cambia nada —, la integración lo escribe en sus registros,
+  indicando el dispositivo y lo que dijo la pasarela. Es el único rastro de una
+  orden que no llegó a ninguna parte, y merece un vistazo si hace clic dos veces
+  a menudo. Cuando la pasarela dice que no salió nada por radio (`NETWORK`,
+  `BUSY`…), el distintivo del dispositivo pasa a `unreachable`, un interruptor
+  o una luz se muestra de nuevo en el estado que tenía antes (salvo que un mando
+  lo haya cambiado entretanto), y el recorrido de una persiana temporizada se
+  anula, con el Parar que habría enviado al final — enviado a una persiana
+  Somfy parada, ese Parar es el botón «my». Solo la orden que falló: un PING de
+  «Identificar» rechazado no vuelve a apagar un enchufe cuyo ON salió, y cuando
+  el Abrir de un posicionamiento corto se rechaza después de enviarse su Parar,
+  es ese Abrir el que se anula, no el Parar. Cada respuesta se cuenta contra la
+  orden a la que se refiere, por tarde que vuelva: ON, OFF, ON pulsados más
+  rápido de lo que responde la pasarela, todos rechazados, dejan el enchufe
+  mostrado como estaba antes de los tres. Una orden cuya repetición nunca salió
+  (un mando pulsado entretanto, el AirSend Web Service reiniciándose) se
+  notifica en cuanto se sabe, no con la siguiente orden; y una orden que el
+  servicio nunca recibió no cuenta como sustituta de la anterior.
+
+### Cuando la pasarela dice que no
+
+Toda orden entregada a la pasarela recibe respuesta, y esa respuesta lleva un
+número. Por debajo de `256` la orden salió; a partir de `256` no, y el número
+dice dónde murió. Es lo que detalla la línea de los registros:
+
+```
+The box did not carry the order sent to "Kitchen". SYNCHRONIZATION (event type
+258): the exchange between the AirSend Web Service and the box lost its thread —
+a link error, not a radio one. Whether anything went out on the air, nothing
+says. Check nothing else drives the box at the same moment…
+```
+
+| Nombre (tipo)           | Lo que significa                         | Lo que hay que comprobar                                                               |
+| ----------------------- | ---------------------------------------- | -------------------------------------------------------------------------------------- |
+| `UNKNOWN` (256)         | rechazada sin decir por qué              | Reinicie la pasarela y luego la integración                                            |
+| `NETWORK` (257)         | el servicio nunca llegó a la pasarela    | La pasarela está encendida, en la red y sigue en la dirección de la cadena de conexión |
+| `SYNCHRONIZATION` (258) | el enlace con la pasarela perdió el hilo | Nada más controla la pasarela en ese momento; un enlace Wi-Fi débil también lo provoca |
+| `SECURITY` (259)        | la cadena de conexión fue rechazada      | Expórtela de nuevo desde airsend.cloud y péguela entera                                |
+| `BUSY` (260)            | otro cliente tenía la pasarela bloqueada | Cierre la app AirSend, o saque la pasarela de la otra instalación                      |
+| `TIMEOUT` (261)         | la pasarela no respondió a tiempo        | Una pasarela ocupada con otra cosa, o situada donde su Wi-Fi es débil                  |
+| `UNSUPPORTED` (262)     | la pasarela no puede enviar esto         | El `type` y el canal del dispositivo, comparados con la exportación de airsend.cloud   |
+| `INCOMPLETE` (263)      | faltaba algo                             | Pegue el canal entero, con todo lo que venía junto a `id`                              |
+| `FULL` (264)            | la petición era demasiado grande         | Notifíquelo: nada enviado desde aquí debería ser nunca tan largo                       |
+
+**Repeticiones de órdenes no resuelve ninguno de estos casos.** Las
+repeticiones son para una trama perdida en el ruido — y una trama perdida en el
+ruido es precisamente el fallo que nada notifica: nada confirma una orden de
+radio, así que una orden que la pasarela dice haber emitido es toda la
+confirmación que habrá nunca. Cuando la propia pasarela notifica el fallo, la
+orden ni siquiera llegó al ruido. Subir las repeticiones solo envía entonces
+órdenes más seguidas a una pasarela que ya tiene problemas para seguir el
+ritmo.
+
+## La posición de una persiana
+
+Una persiana de 433 MHz nunca dice dónde está: la radio lleva órdenes, no
+posiciones. Lo que sí tiene es una **duración** — un motor dado tarda siempre
+lo mismo en ir de un tope al otro. Cronometre ese recorrido una vez y la
+posición pasa a poder calcularse.
+
+Cronometre su persiana, desde el momento en que empieza a moverse hasta el
+momento en que se detiene sola, y anote las dos duraciones:
+
+```json
+{
+  "devices": {
+    "Living room shutter": {
+      "type": 4098,
+      "travel_up": 22,
+      "travel_down": 20,
+      "channel": { "id": 25455, "source": 94311 }
+    }
+  }
+}
+```
+
+A partir de ahí la integración sigue la persiana segundo a segundo, venga la
+orden de Gladys o de un mando de pared que oyó por radio (lo que requiere el
+canal de escucha descrito abajo). Un mando cuyo protocolo solo conoce
+Encendido/Apagado (Chacon DiO) cuenta como Subir/Bajar. Cuando muchas
+persianas se mueven a la vez, cada una publica su posición con menos
+frecuencia, de modo que juntas se quedan muy por debajo de los 300 estados por
+minuto que acepta Gladys y cada tope llega. De ello se derivan tres cosas:
+
+- **un `4098` también tiene posición** — la función aparece en cuanto la
+  persiana está cronometrada, y su control deslizante mueve el motor con un
+  Abrir/Parar temporizado: la integración pone en marcha la persiana en el
+  sentido correcto y envía el Parar en el momento en que el recorrido dice que
+  ha llegado;
+- **Parar es honesto**: una persiana detenida a mitad de camino informa de la
+  posición que realmente alcanzó, en lugar de conservar el 100 % que había
+  anunciado la orden;
+- **la estimación se corrige sola**: una persiana a la que se deja llegar a un
+  tope está exactamente al 0 % o al 100 %, porque el motor se detiene allí
+  físicamente. Cada apertura o cierre completo borra el error acumulado por los
+  recorridos parciales anteriores.
+
+Cuente con una precisión de unos ±5 %: un motor se ralentiza con la carga y con
+el frío. Si una persiana se desvía, basta con un escenario que la abra
+completamente una vez al día para mantenerla sincronizada.
+
+Una persiana que no ha cronometrado conserva su comportamiento anterior:
+Gladys muestra el destino de la última orden, que es todo lo que puede ofrecer
+un protocolo unidireccional.
+
+Dos cosas más que conviene saber:
+
+- hasta su primer recorrido completo, la posición de una persiana cronometrada
+  es **desconocida**, y la integración no publica nada antes que inventar un
+  valor. Ábrala o ciérrela una vez y queda fijada. Pedir una posición antes de
+  eso envía la persiana al tope más cercano, que es exactamente lo que
+  establece la referencia. Lo mismo vale para una persiana que acaba de
+  cronometrar, dijeran lo que dijeran antes sus órdenes, y para una enviada a
+  un lugar que nadie puede saber: el botón «my» sin `favorite_position`, un
+  llavero de un solo botón (alternar). Una reconexión a Gladys no la rellena con
+  el valor más antiguo que guardó Gladys;
+- la posición **se recuerda entre reinicios** de la integración: vuelve a
+  partir del valor que guardó Gladys. Una persiana que añada en Gladys después
+  de que la integración arrancara recibe de inmediato la posición ya conocida,
+  y una posición que Gladys se perdió mientras estaba inaccesible (reiniciada,
+  actualizada) se publica de nuevo cuando vuelve. Corregir `invert` refleja la
+  posición recordada, incluso con la persiana en movimiento: la persiana en sí
+  no se ha movido. Una persiana que sigue moviéndose cuando la integración se
+  detiene (actualización, reinicio de Gladys) tampoco se pierde: una llevada a
+  una posición recibe su Parar en ese mismo momento (o el que ya va camino de la
+  radio), y Gladys conserva dónde se detuvo; una que se abre o se cierra por
+  completo se publica en el tope hacia el que se dirige;
+- una persiana llevada a una posición **se detiene a tiempo aunque Gladys esté
+  brevemente inaccesible o tarde en responder**: el STOP sale antes de que se
+  publique la posición, y nunca espera a Gladys. Un STOP que la pasarela no
+  pudo enviar, lo diga de inmediato o un momento después (BUSY, NETWORK…),
+  activa el activador **Ha fallado una orden de radio**, y la posición sigue a
+  la persiana hasta su tope, ya que nada la detuvo — también para un Parar dado
+  desde Gladys mientras la persiana se mueve. Un STOP que aún espera la radio
+  cuando un mando de pared vuelve a poner en marcha la persiana se descarta.
+
+### La posición favorita
+
+Muchos motores tienen una posición propia, programada en el hardware (el botón
+«my» de Somfy). La radio dice «ve a tu posición» sin decir nunca cuál es. Mídala
+una vez y declárela con `"favorite_position": 40`: pulsar ese botón informa
+entonces de un 40 % en Gladys. Sin ella, la persiana se indica como detenida en
+algún punto intermedio — la respuesta honesta.
+
+La mayoría de los mandos Somfy RTS envían ese botón como un simple **STOP**:
+detiene una persiana en movimiento y envía una parada a su posición. Con
+`favorite_position` declarada, la integración distingue ambos casos con el
+recorrido: un STOP oído mientras la persiana está parada la envía también en
+Gladys a su posición favorita. Eso requiere una persiana cronometrada
+(`travel_up` / `travel_down`): sin tiempos de recorrido nada dice si se está
+moviendo, y un STOP sigue siendo un STOP.
+
+## Escuchar la radio
+
+La pasarela AirSend puede reenviar cada trama que oye — un mando de pared
+pulsado a mano, un sensor meteorológico que se despierta —, de modo que Gladys
+sigue lo que pasa en la casa y no solo lo que ella misma ordenó. Es lo que hace
+que la posición de una persiana se mueva cuando se abre desde su propio mando.
+
+Está **activado por defecto**, y no hay nada que configurar: la integración
+suscribe la pasarela al protocolo de radio de sus dispositivos y recibe ella
+misma las tramas. Nada que instalar, nada que vincular.
+
+La suscripción se **rearma después de cada orden** y se renueva cada diez
+minutos. Emitir saca a la pasarela de la recepción, y una suscripción que no
+sobrevivió a una orden es un mando de pared que Gladys deja de seguir en
+silencio — hasta la siguiente renovación.
+
+### El canal de escucha
+
+Lo que escucha la pasarela es un **protocolo**, no un dispositivo: tiene una
+sola radio, y suscribirla la pone en recepción permanente **de un único
+protocolo** a la vez. El canal `1` es la escucha genérica de 433 MHz, que cubre
+los protocolos hechos para caber en ella — pero no los demás, y una persiana
+Somfy escuchada en el canal `1` permanece tan muda como un mando que nadie
+pulsa.
+
+Así que la integración no adivina: pregunta al servicio AirSend qué canal
+decodifica qué protocolo, y suscribe la pasarela al que usan sus
+dispositivos. Deje vacío el campo **Canal de escucha**.
+
+Rellénelo solo para escuchar otra cosa: el `pid` de un protocolo que aún no ha
+declarado, o `0` para desactivar la escucha.
+
+Un `pid` indicado ahí pasa por la misma tabla que uno deducido: un protocolo
+que el servicio decodifica con el decodificador genérico de 433 MHz se escucha
+en el canal `1`, que es donde se oye. Y con `0`, las tramas que la pasarela aún
+envía por la suscripción anterior se ignoran hasta que deja de enviarlas.
+
+**`1` y un campo vacío significan lo mismo: «dedúcelo».** Era el valor por
+defecto del campo antes de que existiera la deducción, y se lee como tal — un
+`1` no pide la escucha genérica de 433 MHz. La escucha genérica es aquello a lo
+que recurre la deducción cuando no hay ningún dispositivo de radio declarado, y
+nada más. El campo es un campo de **texto** y no numérico precisamente por eso:
+un campo numérico no puede quedarse vacío, le obliga a escribir algo, y ese algo
+se lee luego como una elección que nadie hizo.
+
+Una consecuencia: el decodificador genérico de 433 MHz no se puede pedir por
+su pid, ya que ese pid es `1`. Se pide **por su nombre** — escriba `genérico`
+(o `generic`) en el campo. Es una prueba que vale la pena para un mando de 433
+MHz cuyo propio protocolo solo se decodifica a medias: el decodificador
+genérico es otra forma de leer las mismas tramas.
+
+En cualquier caso, la línea _Escucha_ de **Probar la conexión** dice qué canal
+se eligió realmente — esa línea es la que manda, no lo que está escrito en el
+campo.
+
+Para comprobarlo, haga clic en **Probar la conexión**: la línea _Escucha_ dice
+qué protocolo se escucha, qué dispositivos cubre y adónde se envían las tramas
+— o por qué no.
+
+Cuando dos protocolos están declarados por igual — una persiana por un lado,
+el mando de pared asociado a ella por otro —, gana el que **emite**. Una
+persiana, un interruptor, una lámpara no hablan: se les habla. Un mando
+declarado en `remotes` está ahí precisamente para ser oído, así que es a eso a
+lo que se suscribe la pasarela.
+
+Cada emisor cuenta una vez, por muchos dispositivos que lo declaren: un mando
+general escrito en los `remotes` de todas las persianas es un solo mando, y no
+se impone a tres sensores de otro protocolo.
+
+#### Un protocolo en el que nadie habla
+
+Si nada de lo declarado en el canal escuchado emite nunca por sí mismo, la
+suscripción está armada, la ruta funciona y nunca pasará nada por ella: la
+pasarela solo oirá el eco de las órdenes de Gladys. Es el estado normal de una
+casa en la que solo hay persianas declaradas — y se parece exactamente a una
+escucha que nunca se armó, así que la integración lo dice en voz alta, en sus
+registros al arrancar y en la línea _Escucha_ de **Probar la conexión**:
+
+```text
+Nothing declared on channel 25455 emits by itself: shutters, switches and lamps
+are talked to, they do not talk. The box will hear the echo of Gladys own orders
+and nothing else.
+```
+
+La salida es la misma que en todo el resto de esta página: asocie el mando de
+pared que controla el equipo (vea abajo). Tiene su propia dirección, es un
+emisor real y, una vez declarado, es lo que escucha la deducción.
+
+### 868 MHz y código variable
+
+El canal `1`, la escucha genérica, **es 433 MHz**. Un protocolo de 868 MHz —
+Profalux, Somfy io — no se oye en él en absoluto. Y mientras no haya declarado
+nada, no hay nada de lo que deducir, así que la integración recurre por defecto
+a ese canal `1`: la pasarela escucha entonces la banda equivocada, y el
+silencio que sigue se parece exactamente a un mando que nadie pulsa. La
+integración lo dice ahora, en sus registros y en **Probar la conexión**.
+
+Dos salidas: declarar un dispositivo con ese protocolo, o indicar su `pid` como
+**Canal de escucha**.
+
+#### «Escuchar en 868 MHz» no existe — esto es lo que existe
+
+Una pasarela no escucha una **banda**, escucha un **protocolo**: no hay ningún
+interruptor de «868 MHz» que accionar, y el canal `1` no es «el de 433» frente
+a un «el de 868» que viviría en otro sitio — es un decodificador entre unos
+doscientos, el que cubre los protocolos genéricos de 433 MHz. Escuchar en 868
+MHz significa por tanto **nombrar un protocolo de 868 MHz por su `pid`**. Tres
+formas, la más sencilla primero:
+
+1. **declarar el dispositivo** en la lista **Dispositivos** (la exportación de
+   airsend.cloud lleva su `pid`): la deducción hace el resto y el campo **Canal
+   de escucha** se queda vacío. Es lo que funciona nueve de cada diez veces;
+2. **asociar su mando** (`remotes`): un mando emite de verdad, así que la
+   deducción se queda con su protocolo y no con el de la persiana, que nunca
+   habla — por muchas persianas que lo compartan;
+3. **forzar el `pid`** en **Canal de escucha** cuando el protocolo aún no está
+   declarado. Para encontrarlo, la acción **Buscar un protocolo de radio**
+   pregunta al servicio AirSend y busca por marca o por `pid`:
+
+```text
+2 protocols for "somfy":
+- pid 25455 — Somfy RTS (decodes itself, declared on "Patio door")
+- pid 26848 — Somfy io (decodes itself)
+Put the pid you want in the Listening channel field…
+```
+
+También dice cómo se decodifica cada protocolo — por sí mismo, por el canal
+genérico de 433 MHz `1`, o solo en parte — y cuál se está escuchando ahora
+mismo.
+
+Y luego está el callejón sin salida, que conviene conocer: la pasarela tiene
+**una sola** radio, así que oír un mando cuyo protocolo no conoce requiere
+estar ya escuchando ese protocolo. No hay barrido. Si su `pid` no está escrito
+en ningún sitio — ni en la app AirSend ni en la exportación —, la única opción
+que queda es probar los candidatos de su marca uno por uno, pulsando el mando
+después de cada intento y ejecutando de nuevo **Probar la conexión**.
+
+El **código variable** de esos mandos no es lo que impide que lleguen las
+tramas. Protege la _emisión_: para controlar una persiana Profalux, la
+pasarela AirSend tiene que haberse emparejado con el motor, como un mando más.
+En la _recepción_ no estorba nada: el contador y los campos `mac` / `seed`
+cambian en cada trama, y la integración los ignora a propósito — un emisor se
+identifica por su `pid` y su `addr`, y esos no cambian.
+
+Lo que el código variable sí cambia es la **decodificación**: el servicio
+AirSend solo decodifica esos protocolos en parte. La trama llega, el emisor
+queda identificado, pero no lleva ninguna nota utilizable. Esas tramas se
+registran ahora con su `pid` y su `addr`: la prueba de que la radio funciona, y
+lo que necesita para asociar el emisor a un dispositivo.
+
+### El mando de pared
+
+Una persiana la controlan varios emisores: la pasarela AirSend y el mando
+atornillado en la pared. Hablan el mismo protocolo desde **direcciones
+distintas**, así que la pasarela los oye en canales distintos, y una trama que
+viene de la pared no pertenece a ningún dispositivo declarado. La integración
+la registra, con su `pid` y su `addr`.
+
+Asocie esa dirección al dispositivo que controla, y pulsar el mando de pared
+actualiza la persiana en Gladys igual que lo haría la propia Gladys:
+
+```json
+{
+  "devices": {
+    "Living room shutter": {
+      "type": 4098,
+      "travel_up": 30,
+      "travel_down": 26,
+      "channel": { "id": 25455, "source": 8295 },
+      "remotes": [94311]
+    }
+  }
+}
+```
+
+Una dirección sola se lee en el protocolo del propio dispositivo; un mando de
+otro protocolo se escribe completo: `"remotes": [{ "pid": 1368, "addr": 542 }]`.
+
+#### Deje que la integración escriba esa línea
+
+Copiar un par `pid`/`addr` de un registro a un JSON de una sola línea, con la
+grafía correcta, es exactamente el tipo de cosa que sale mal una de cada dos
+veces. La acción **Asociar un mando** lo hace por usted:
+
+1. pulse el mando de pared (la integración recuerda los emisores que oye,
+   incluidos los que nadie declara);
+2. en la pantalla de Configuración, ejecute **Asociar un mando** y elija el
+   dispositivo que controla;
+3. la acción responde con su lista de dispositivos, sin cambios, con el mando
+   asociado como `{"pid": …, "addr": …}`: péguela en el campo
+   **Dispositivos** y guarde.
+
+Asocia el **último** emisor oído que ningún dispositivo reclama, y nombra los
+demás sin tocarlos. También dice a qué se decodificaron sus tramas, y avisa
+cuando el mando habla otro protocolo que el dispositivo: la pasarela escucha
+uno a la vez.
+
+#### Una trama descartada, o una sin dirección
+
+La pasarela califica cada trama que decodifica, y la integración ignora las
+mal calificadas — exactamente como hace el plugin oficial de Jeedom. Dos formas
+muy distintas en los registros:
+
+```text
+Ignored a radio frame (unreliable, graded 0): pid 14177, carrying no note the service could decode.
+Ignored a radio frame (unreliable, graded 2): pid 25455, addr 94311, carrying level 100 (up).
+```
+
+**Una trama con dirección, calificada demasiado baja** (segunda línea): la
+pasarela decodificó tanto el emisor como la orden, simplemente no está segura —
+un mando al límite de su alcance, una banda saturada. Active **Aceptar tramas
+poco fiables**: se usan entonces igualmente, al precio de alguna falsa
+detección de vez en cuando. Un mando de pared declarado en `remotes` con su
+`pid` **y** su `addr` no necesita nada de eso: sus tramas se siguen sea cual
+sea su calificación, ya que una dirección exacta no es ruido.
+
+**Una trama sin dirección** (primera línea, un `pid` y nada más): la pasarela
+captó el protocolo **sin decodificarlo**. No hay emisor que nombrar ni orden
+que reproducir, y ningún ajuste hace utilizable lo que nunca se decodificó. Es
+la firma de una pasarela que escucha el **decodificador equivocado**: ponga ese
+`pid` en el campo **Canal de escucha** (la palabra `genérico` para el pid 1,
+que escrito tal cual significa «dedúcelo») para que la pasarela escuche ese
+protocolo con su propio decodificador, y ejecute de nuevo **Probar la
+conexión**. Si las tramas vuelven con una dirección, asóciela como de costumbre.
+
+Si el protocolo sigue sin dirección incluso en su propio canal, el servicio
+AirSend solo lo decodifica en parte (código variable de 868 MHz) y ningún
+ajuste de software lo cambiará. Como último recurso, un dispositivo puede
+seguir **todas** las tramas no atribuidas de un protocolo:
+
+```json
+{
+  "devices": {
+    "Patio door": { "type": 4098, "pid": 25455, "addr": 8295, "remotes": [{ "pid": 14177 }] }
+  }
+}
+```
+
+Una entrada de `remotes` reducida a un `pid` ya no nombra un mando sino un
+protocolo entero: el mando de un vecino con ese protocolo controlará su
+persiana. Úselo con conocimiento de causa.
+
+#### El mando está asociado y nada se mueve
+
+Una vez declarado el emisor, la trama sí llega al dispositivo — lo que queda es
+saber si **lleva una orden**. Empiece por **Probar la conexión**: su línea
+_Oído_ responde sin pasar por los registros (vea «Lo que la pasarela ha oído
+realmente»). Distingue cinco casos que se parecen y no tienen nada que ver:
+
+- `declarado en Living room shutter, pero sus tramas no llevan ninguna orden reproducible`
+  — la trama llegó, el dispositivo no puede hacer nada con ella. Es el destino
+  de los protocolos de 868 MHz con código variable: el servicio solo los
+  decodifica en parte, así que la trama demuestra que la radio funciona pero
+  no lleva nada que reproducir. **La posición no puede seguir**, y asociar el
+  mando no puede cambiarlo; con la primera trama de ese emisor la integración
+  lo dice también en los registros, en nivel info
+  (`no note the service could decode`);
+- `declarado en Plug, que no hace nada con la orden decodificada` — la trama
+  está completamente decodificada, pero en una orden a la que ese tipo de
+  dispositivo no reacciona: un TOGGLE de un mando de un solo botón asociado a
+  un interruptor o una luz, por ejemplo. El protocolo está bien; compruebe el
+  tipo declarado en airsend.cloud (un mando que envía TOGGLE controla un Botón,
+  tipo `4096`) o que el mando asociado sea el correcto;
+- `no oído desde el cambio de configuración` — el emisor se oyó antes del
+  último guardado (normalmente antes de asociarlo), y lo que hicieron sus
+  tramas entonces no dice nada del dispositivo que lo declara ahora: pulse el
+  mando y ejecute de nuevo la acción;
+- `ningún dispositivo lo declara` — el emisor se oye, simplemente no está
+  asociado a nada: ejecute de nuevo **Asociar un mando**;
+- el emisor no aparece en absoluto — la trama ya no llega. Cuando el mando se
+  declaró con otro protocolo que su dispositivo, la línea _Escucha_ lo nombra
+  como no oído, y poner su `pid` en el campo **Canal de escucha** escucha su
+  lado en su lugar.
+
+**¿Nada en los registros tras una pulsación?** La línea se escribe cuando
+llega una trama: pulse el mando y vuelva a leer los registros de la
+integración. Si sigue sin haber nada, la trama nunca llegó, y solo hay tres
+motivos posibles:
+
+- **la escucha no está en marcha.** Haga clic en **Probar la conexión**: la
+  línea _Escucha_ dice qué protocolo se escucha y adónde se envían las tramas —
+  o por qué no;
+- **el mando habla otro protocolo.** La pasarela solo escucha uno a la vez, el
+  de sus dispositivos declarados (vea «El canal de escucha»). Un mando de pared
+  suele usar el protocolo de la persiana que controla; si el suyo es de otra
+  marca, ponga su `pid` en el campo **Canal de escucha** el tiempo suficiente
+  para localizarlo;
+- **la trama se oyó, pero se calificó demasiado dudosa para publicarse.** La
+  radio es ruidosa, y la pasarela califica cada trama que decodifica. Active
+  **Registros detallados (depuración)**: esas tramas también se registran ahí,
+  con su `pid`, su `addr` y el motivo por el que no fueron más allá.
+
+#### Lo que una pulsación escribe en los registros
+
+Cada una de esas líneas se escribe **una vez por emisor** — un mando mantenido
+pulsado emite una trama cada medio segundo, y un registro que se desplaza sin
+parar es un registro que nadie lee. El contador se rearma **cada vez que
+guarda la configuración**: ha cambiado algo porque no funcionaba, y la
+siguiente pulsación es justo la que está esperando.
+
+Así que, tras guardar, una pulsación escribe exactamente una línea, y qué línea
+sea dice dónde se detuvo la trama:
+
+```text
+Heard pid 25455, addr 94311 -> "Baie vitrée" followed it: level 0 (down).
+Heard a frame on a channel no device declares: pid 14177, addr 3359265281.
+Heard pid 14177, addr 3359265281 for "Baie vitrée", but no note the service could decode
+Ignored a radio frame (unreliable, graded 2): pid 25455, addr 94311, carrying level 100 (up).
+```
+
+La primera es la única que dice que funciona — y merece leerse dos veces antes
+de culpar a la integración de una persiana que no se movió: la trama se oyó,
+se encaminó y se siguió, así que lo que queda está entre la orden y el motor.
+Ninguna línea significa que no llegó ninguna trama; vea los tres motivos de
+arriba.
+
+#### ¿Es de verdad mi mando?
+
+Un emisor oído no prueba que sea el que tiene en la mano: 433 MHz es una banda
+pública, y el vecindario también está en ella. Pulse el suyo cinco veces,
+ejecute luego **Probar la conexión** y lea el contador del emisor bajo
+_Oído_:
+
+```text
+pid 14177, addr 3359265281 (5 frames, last one 3 s ago, no decoded note)
+```
+
+Cinco tramas y «hace 3 s» es su mando. Un contador que no se mueve mientras
+pulsa es el de otra persona, y asociarlo declara el mando de un desconocido en
+su persiana.
+
+### Lo que la pasarela ha oído realmente
+
+Todas las comprobaciones de arriba responden a «¿pueden entrar las tramas?».
+La línea _Oído_ de **Probar la conexión** responde a la pregunta siguiente, la
+única que importa una vez asociado un mando: **¿han entrado, y se ha movido
+algo?**
+
+La integración recuerda los emisores que oye, los más recientes primero, con
+cuántas tramas envió cada uno, hace cuánto, a qué se decodificaron y qué
+hicieron los dispositivos con ellas:
+
+```text
+Heard: 1 emitter heard: pid 14177 "Profalux", addr 3359265281 (3 frames, last one 4 s ago,
+no decoded note) — declared on Living room shutter, but its frames carry no
+order to replay (a protocol the service only partially decodes): the position
+cannot follow.
+```
+
+El `pid` se **nombra** siempre que el servicio ha respondido con su tabla de
+protocolos: es la respuesta más fiable a «¿qué protocolo habla mi mando?». La
+marca impresa en el plástico no siempre lo dice — una persiana vendida con un
+nombre puede llevar la radio de otro fabricante —, mientras que el nombre de
+aquí es el decodificador que realmente decodificó la trama.
+
+Los veredictos posibles por emisor:
+
+| Veredicto                                    | Lo que significa                                                                                 |
+| -------------------------------------------- | ------------------------------------------------------------------------------------------------ |
+| `seguido por <dispositivo>`                  | funciona: esas tramas controlan de verdad el dispositivo                                         |
+| `ningún dispositivo lo declara`              | el emisor se oye pero no está asociado a nada — **Asociar un mando**                             |
+| `que no declara`                             | un sensor bien decodificado, en medidas que faltan en sus `features`: añádalas                   |
+| `que no hace nada con la orden decodificada` | la orden está decodificada, pero ese tipo de dispositivo no reacciona a ella — compruebe su tipo |
+| `no llevan ninguna orden reproducible`       | la trama llega a su dispositivo y no lleva nada que reproducir (código variable)                 |
+| `no oído desde el cambio de configuración`   | sus tramas se juzgaron con la configuración anterior: púlselo y ejecute de nuevo la acción       |
+
+La línea cita **todas** las notas distintas que se han oído decir a un emisor,
+no solo su última trama — es lo que distingue un mando cuyos botones decodifica
+el servicio (`notas: level 100 (up); level 0 (down); state stop`) de uno en el
+que todos los botones se decodifican en la misma orden. El segundo es un
+`seguido por` que no mueve nada: un STOP reproducido en una persiana que no se
+mueve cambia un estado, no un porcentaje. El informe lo dice ahora y propone la
+comprobación: pulse Abrir, luego Cerrar, y ejecute de nuevo la acción. Si la
+nota no cambia, el servicio AirSend no decodifica los botones de ese mando, y
+la posición no puede seguir.
+
+Los ecos de sus propias órdenes no son emisores: se cuentan aparte, al final de
+la línea (`Además, 3 ecos de sus propias órdenes`). Es la prueba de que las
+tramas tienen una ruta de vuelta, aunque no se oiga nada más.
+
+El registro se vacía cuando la integración se reinicia: «ninguna trama de radio
+desde que se inició la integración» significa «nada desde entonces», no
+«nunca». Pulse el mando y ejecute de nuevo la acción.
+
+#### Tres silencios que se parecen
+
+«No se oye nada» abarca tres problemas muy distintos, y la línea _Oído_ los
+distingue ahora:
+
+| Lo que dice                                                 | Lo que está pasando                                                                    |
+| ----------------------------------------------------------- | -------------------------------------------------------------------------------------- |
+| `ninguna trama de radio desde que se inició la integración` | no entra nada en absoluto: ni las tramas de la casa ni los ecos de sus propias órdenes |
+| `ninguna trama de otro emisor, pero N ecos`                 | la ruta funciona — la pasarela simplemente no oye nada más en el protocolo que escucha |
+| `N tramas recibidas y descartadas`                          | la radio funciona: son las propias tramas las que no eran utilizables                  |
+
+De ahí la prueba que hacer cuando la línea dice «ninguna trama de radio»:
+**accione un dispositivo desde Gladys** y ejecute de nuevo la acción. Todo lo
+que la integración emite vuelve a ella, así que el eco de esa orden tiene que
+aparecer en el contador.
+
+- el eco vuelve → la ruta está bien, y es el **protocolo escuchado** el que no
+  es el de su mando. Vuelva a leer la línea _Escucha_: dice qué canal está
+  suscrito y qué dispositivos cubre. Un mando de 868 MHz (Profalux, Somfy io)
+  nunca se oye en el canal `1`, que es 433 MHz;
+- el eco tampoco vuelve → el problema está antes de la radio: el servicio
+  AirSend no envía nada a la integración. Compruebe la línea _Escucha_ (¿aceptó
+  la pasarela la suscripción?) y la línea _Local_ (¿responde el servicio?), y
+  luego los registros detallados.
+
+### Registros detallados
+
+La radio es la única parte de esta integración que nadie puede observar: un
+mando que nunca aparece o no se oye, o se descarta por poco fiable, o se oye y
+no se puede decodificar — y solo los registros de depuración distinguen esos
+tres casos.
+
+El campo **Registros detallados (depuración)** de la pantalla de Configuración
+los activa. Surte efecto de inmediato, sin reinicio: márquelo, pulse el mando,
+lea los registros, desmárquelo. Es muy prolijo y no está pensado para quedarse
+activado.
+
+La **contraseña** de su cadena de conexión `sp://` nunca se registra, en ningún
+nivel: el resto de la cadena — la dirección, `gw`, `rhost` — sí, en nivel de
+depuración, con la contraseña sustituida solo por su longitud (vea «No la
+vuelva a escribir nunca»).
+
+Si prefiere usar la variable de entorno del contenedor, `LOG_LEVEL` sigue
+funcionando y sigue teniendo prioridad: el interruptor sube el nivel a
+depuración mientras está activado, y devuelve su `LOG_LEVEL` cuando lo
+desactiva.
+
+Las líneas de registro se fechan con el campo **Zona horaria de los
+registros** (por defecto `Europe/Paris`), para que muestren la misma hora que
+el widget del panel: `[2026-09-28T14:02:05.123+02:00] [INFO] …`. Cualquier
+nombre IANA sirve (`Europe/Madrid`, `America/Montreal`…); si se deja vacío, se
+usa la `TZ` del contenedor, o UTC.
+
+### Si ejecuta el servicio AirSend en otro lugar
+
+El AirSend Web Service envía las tramas desde la máquina en la que se ejecuta.
+Cuando es la integración quien lo ejecuta (por defecto), las envía directamente
+a la integración. Un servicio que se ejecuta **en otra máquina** no tiene forma
+de llegar a la integración, así que las tramas tienen que pasar por una URL
+pública, que proporciona Gladys Plus: vincule su cuenta de Gladys Plus y pegue
+su clave de Open API en el bloque **Webhooks de Gladys Plus** de la pantalla de
+Configuración.
+
+## Acciones
+
+- **Probar la conexión** — comprueba el canal local, dice qué protocolo se
+  escucha, **lo que la pasarela ha oído realmente** y qué dispositivos se
+  leyeron. La forma más rápida de detectar una cadena de conexión mal escrita,
+  una lista de dispositivos que no se pudo leer o un mando asociado cuyas
+  tramas no llevan ninguna orden.
+- **Asociar un mando** — pulse el mando y elija el dispositivo que controla: la
+  acción escribe la lista de dispositivos que hay que volver a pegar, con el
+  mando incluido (vea «El mando de pared»).
+- **Buscar un protocolo de radio** — busca entre los protocolos que conoce el
+  servicio AirSend, por marca o por `pid`, dice cómo se decodifica cada uno y
+  cuál se está escuchando: de aquí sale el `pid` para **Canal de escucha** (vea
+  «Escuchar en 868 MHz»).
+- **Identificar un dispositivo** — elija un dispositivo y se le envía un PING.
+  No todos los equipos de 433 MHz reaccionan.
+
+## Escenas y panel (Gladys 5.1+)
+
+Requieren **Gladys 5.1 o posterior**; un Gladys más antiguo conserva la
+versión anterior de la integración.
+
+### Activadores de escenas
+
+En el editor de escenas, en **Integraciones**:
+
+- **Se pulsa un mando de radio** — se ha oído un mando de pared, un llavero o
+  un botón de radio declarado en un dispositivo (los `remotes` de un
+  dispositivo, un mando de tipo `1`, un mando de repuesto asociado a un botón de
+  tipo `4096`). Filtre por el dispositivo que controla y por la orden (`up`,
+  `down`, `stop`, `favorite`, `on`, `off`, `toggle`). La escena puede leer
+  `device_name`, `order`, `pid` y `addr`. Las propias órdenes de Gladys nunca
+  lo activan, así que una escena no puede entrar en bucle consigo misma. Un
+  mando mantenido pulsado es una sola pulsación, dure lo que dure, no un evento
+  por trama — y también un solo clic en la función `click` de un mando de tipo
+  `1`, sea cual sea el botón (parar y _my_ incluidos). Esa función, como las
+  medidas de un sensor de radio, también puede iniciar una escena a través de
+  los activadores de dispositivo de Gladys.
+- **Ha fallado una orden de radio** — la pasarela no emitió una orden dada por
+  Gladys: inaccesible, cadena de conexión rechazada, pasarela ocupada… La
+  escena puede leer `device_name`, `reason` (`NETWORK`, `SECURITY`, `BUSY`,
+  `HTTP_401`, `UNREACHABLE`…) y `message`. Un evento por dispositivo y motivo
+  por minuto: hecho para una notificación. Solo la propia orden de radio: una
+  repetición rechazada mientras la orden salía, o un estado que Gladys rechazó
+  una vez emitida la orden, no lo activa.
+
+### Acciones de escenas
+
+- **Fijar la posición conocida de una persiana** — indica a la integración
+  dónde está realmente una persiana temporizada (0-100 %), **sin moverla**:
+  tras un corte de luz, una manivela girada a mano, un motor detenido por un
+  obstáculo.
+- **Rearmar la escucha de radio** — vuelve a suscribir la pasarela, ahora
+  mismo. Útil justo después de volver a encender la pasarela (olvida su
+  suscripción). Devuelve el canal escuchado como `channel`.
+
+### El widget «Radio AirSend»
+
+Añádalo a un panel: el estado del servicio AirSend, el protocolo que escucha la
+pasarela, la última trama oída, los ecos de las órdenes de Gladys, las tramas
+descartadas, la temperatura y la luminosidad de la pasarela cuando tiene
+`sensors: true`, y los últimos emisores oídos con lo que fue de ellos
+(seguido, desconocido, descartado…). Su botón **Rearmar la escucha** hace lo
+mismo que la acción de escena. El ajuste **Emisores mostrados** (0 a 8) fija la
+longitud de la lista.
+
+## Conviene saber
+
+- 433 MHz es un protocolo **unidireccional** para la mayoría de los equipos:
+  nada confirma que una orden se haya recibido, y Gladys muestra el valor que
+  envió. La escucha (arriba) es lo que convierte esa suposición en un estado
+  real, y cronometrar una persiana (arriba) es lo que le da una posición.
+- Los sensores se leen de la **propia pasarela**, por el canal local.
+- El servicio integrado llega a su pasarela **desde dentro del contenedor de la
+  integración**, a través de su red local: el `rhost=<IPv4>` de la cadena de
+  conexión es la dirección que marca, y tiene que ser enrutable desde el host
+  de Gladys.
+- Cambiar el `type` de un dispositivo en la lista crea un dispositivo nuevo en
+  Gladys (el identificador cambia) — salvo entre `4098` y `4099`, que lo
+  comparten.
+
+## Solución de problemas
+
+| Síntoma                                    | Lo que hay que comprobar                                                                                                         |
+| ------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------- |
+| `Invalid connection string`                | **Probar la conexión**: muestra la cadena `sp://` sin la contraseña                                                              |
+| `Invalid input`                            | El `channel` del dispositivo (`id`/`pid` y `source`/`addr`)                                                                      |
+| `no radio channel` en los registros        | La entrada no lleva canal: necesita `channel.id`, o el par `pid`/`addr`                                                          |
+| `no radio confirmation`                    | Normal en equipos sin retorno: ponga `wait: false`                                                                               |
+| Ningún dispositivo en la pestaña Descubrir | **Probar la conexión**: probablemente la lista de dispositivos no se pudo leer                                                   |
+| La pasarela es inaccesible                 | La parte `?gw=0&rhost=<IPv4>` de la cadena de conexión                                                                           |
+| `Servicio AirSend integrado no disponible` | Los registros de la integración: el servicio registra ahí su propio arranque                                                     |
+| La pasarela responde a mano, pero no aquí  | La IPv4 de `rhost=` debe ser accesible **desde el contenedor**, no solo desde su ordenador                                       |
+| Hay que hacer clic varias veces            | Suba **Repeticiones de órdenes** a `2` o `3`, o el `repeat` propio del dispositivo                                               |
+| Una orden tarda un segundo en salir        | `gw=1` en la cadena de conexión: desactive **Internet gateway** en airsend.cloud                                                 |
+| Una orden es lenta tras una larga pausa    | Los registros dicen dónde se fue el tiempo — vea [La primera orden tras una larga pausa](#la-primera-orden-tras-una-larga-pausa) |
+| Una persiana no muestra ninguna posición   | Cronométrela: `travel_up` / `travel_down`, y luego ábrala o ciérrela completamente una vez                                       |
+| La posición se desvía con el tiempo        | Vuelva a cronometrar el recorrido, y abra la persiana completamente una vez al día para resincronizarla                          |
+| Ninguna trama de un mando de 868 MHz       | **Probar la conexión**: el canal `1` es 433 MHz. Declare el dispositivo, o su `pid`                                              |
+| Mando asociado, nada se mueve              | **Probar la conexión**, línea _Oído_: dice si las tramas llevan una orden                                                        |
+| `unreliable, graded N` en los registros    | Una trama calificada demasiado baja: **Aceptar tramas poco fiables**, o acerque la pasarela                                      |
+| `did not carry the order` en los registros | El nombre que esa línea da al fallo — vea [Cuando la pasarela dice que no](#cuando-la-pasarela-dice-que-no)                      |
+| Una trama con `pid` y sin `addr`           | El protocolo no se decodifica: ponga ese `pid` (`genérico` para el 1) en **Canal de escucha**                                    |
+
+La integración registra todo lo que hace: lea los registros de la integración
+desde la interfaz de Gladys (pestaña **Registros**, o `docker logs` en el host)
+y marque **Registros detallados (depuración)** en su configuración para ver
+todo el detalle.

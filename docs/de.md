@@ -1,0 +1,1168 @@
+# Devmel (AirSend)
+
+Diese Integration verbindet Gladys mit einem **Devmel AirSend**- oder **AirSend
+Duo**-Funkgateway und über dieses mit den 433-MHz- / 868-MHz-Geräten, die es
+steuert: Rollläden, Schalter, dimmbare Lampen, Tore und die Sensoren, die
+antworten (Somfy RTS, Chacon DiO, Nice, FAAC, Bubendorff…).
+
+## Bevor du beginnst
+
+Deine Geräte werden in der **AirSend-App** oder auf
+[airsend.cloud](https://airsend.cloud) angelernt, nicht in Gladys: Diese
+Integration wiederholt die Funkbefehle, die sie bereits kennen. Bringe sie
+zuerst dort zum Laufen.
+
+Danach läuft alles über den unten beschriebenen lokalen Kanal: Die Integration
+steuert deine Box in deinem eigenen Netzwerk und ruft nie airsend.cloud auf, um
+einen Befehl zu senden.
+
+### Lokal
+
+Der lokale Kanal spricht mit dem **AirSend Web Service**, dem kleinen
+HTTP-Server, den Devmel liefert, um die Box über dein LAN zu steuern.
+
+**Er ist enthalten.** Die Integration führt ihn in ihrem eigenen Container
+unter `http://127.0.0.1:33863` aus und überwacht ihn: Neben Gladys muss nichts
+installiert, keine URL eingetragen werden. Der standardmäßig eingeschaltete
+Schalter **Integrierten AirSend-Dienst verwenden** steuert ihn.
+
+Das Einzige, was der lokale Kanal von dir braucht, ist also die von
+airsend.cloud exportierte **Verbindungszeichenfolge**, die so aussieht:
+
+```
+sp://password@fe80::xxxx:xxxx:xxxx:xxxx?gw=0&rhost=192.168.1.50
+```
+
+Füge sie **genau so ein, wie airsend.cloud sie dir gibt**: nichts
+hinzufügen, nichts entfernen, nicht abtippen.
+
+Behalte immer den Teil `?gw=0&rhost=<IPv4 der Box>`: Ohne ihn ist die Box
+nur per IPv6 Link-Local erreichbar und der Dienst antwortet mit unerwarteten
+Fehlern.
+
+#### Wo diese Zeichenfolge auf airsend.cloud eingestellt wird
+
+Sie ist nicht dafür gedacht, von Hand geschrieben zu werden: Sie wird vom
+Bildschirm **Communication** von
+[app.airsend.cloud](https://app.airsend.cloud) erzeugt. Jedes Feld dort
+schreibt einen Teil der Zeichenfolge, und zwei davon entscheiden, ob die
+Integration mit deiner Box über dein eigenes Netzwerk oder über das Internet
+spricht.
+
+| Feld auf airsend.cloud                   | Was es in die Zeichenfolge schreibt | Was du für Gladys einstellst                                                    |
+| ---------------------------------------- | ----------------------------------- | ------------------------------------------------------------------------------- |
+| **Local IP**                             | den Teil nach `@`                   | Nichts einzutragen: die IPv6-Link-Local-Adresse der Box, dieselbe wie `localip` |
+| **Password**                             | den Teil vor `@`                    | Das Passwort der Box                                                            |
+| **Internet gateway**                     | `gw=1` oder `gw=0`                  | **Aus**, also `gw=0`: Der Befehl bleibt in deinem Netzwerk                      |
+| **Secondary address**                    | `rhost=`                            | Die **IPv4 der Box** in deinem Netzwerk, nicht die deines Routers               |
+| **Connection mode** / **WebService Url** | nichts                              | Betrifft nur die Seite airsend.cloud selbst (siehe unten)                       |
+| **Maximum delay (ms)**                   | nichts                              | Leer lassen                                                                     |
+
+**Connection mode** und **WebService Url** geben an, wie die _Seite
+airsend.cloud_ deine Box von deinem Browser aus erreicht — typischerweise über
+einen AirSend-Dienst auf deinem eigenen PC, daher das `http://127.0.0.1:33863`.
+Gladys verwendet sie nie: Sie führt ihren eigenen Dienst in ihrem Container
+aus. Diese beiden Felder können bleiben, wie sie sind.
+
+Die beiden entscheidenden sind die anderen:
+
+- **Internet gateway** eingeschaltet schreibt `gw=1`, und die Box wird über
+  das Internet erreichbar. Praktisch von einem Telefon im Mobilfunknetz, und
+  ein unnötiger Umweg für eine Integration im selben Netzwerk wie die Box:
+  Jeder Befehl macht einen Umweg über die Cloud, was man in den Protokollen
+  sieht (eine gute Sekunde zwischen einem Befehl und seinem Echo statt zwei
+  oder drei Zehntelsekunden). Schalte es aus und behalte `gw=0`.
+- **Secondary address** schreibt `rhost=`. Das ist die Adresse, die der
+  AirSend-Dienst **aus dem Gladys-Container** anwählt; sie muss also die IPv4
+  der Box sein, vom Gladys-Host aus routbar. Lies sie aus den DHCP-Leases
+  deines Routers ab und reserviere sie, damit sie sich nicht ändert; ohne
+  sie ist die Box nur per IPv6 Link-Local erreichbar und der Dienst antwortet
+  mit unerwarteten Fehlern.
+
+Klicke nach jeder Änderung auf **Save** und **kopiere die
+Verbindungszeichenfolge erneut** in Gladys: Sie hat sich geändert.
+
+#### Nie abtippen
+
+Kopiere die ganze Zeichenfolge, von `sp://` bis zum Ende, und füge
+sie in ein geleertes Feld ein. Auf eine beschädigte Zeichenfolge antwortet die
+Box genau so wie auf ein falsches Passwort:
+
+```
+[WARN] [airsend] Local transfer failed for "Chambre parents": Invalid connection string (HTTP 401)
+[WARN] Could not listen through "AirSend box": Invalid connection string (HTTP 401)
+```
+
+Was beim Abtippen ebenso wie beim Korrekturlesen beschädigt wird:
+
+- **der doppelte Doppelpunkt.** Eine Link-Local-Adresse schreibt sich
+  `fe80::dcf6:e5ff:fe8f:89cd` — `fe80`, dann **zwei** Doppelpunkte. Abgetippt
+  wird daraus `fe80:dcf6:e5ff:fe8f:89cd`: fünf Gruppen einer Adresse mit acht
+  Gruppen. Sieht noch wie eine Adresse aus, ist aber keine mehr;
+- **was nach einer nötigen Korrektur aussieht.** Eine URL setzt eine
+  IPv6-Adresse normalerweise in eckige Klammern; airsend.cloud exportiert sie
+  ohne, und die Boxen akzeptieren diese Form. Beide Schreibweisen gibt es,
+  keine ist hinzuzufügen: Was airsend.cloud dir gibt, fügst du ein;
+- **was man nicht sieht.** Das Feld ist geheim und zeigt nur Punkte: die
+  Maskierungspunkte statt des Passworts kopiert, ein schmales Leerzeichen von
+  einer Webseite, ein Apostroph, den eine Notiz-App typografisch gemacht hat —
+  all das wird eingefügt, ohne dass man etwas sieht.
+
+Die Integration prüft jetzt, was sich ohne Box prüfen lässt — das `sp://`, das
+Passwort, die Adresse, Zeichen, die dort nichts zu suchen haben — und schreibt
+es beim Laden der Konfiguration in die Protokolle, auf den Bildschirm
+Konfiguration und in die Zeile _Lokal_ von **Verbindung testen**.
+
+Vor allem zeigt diese Aktion **die Zeichenfolge selbst, ohne Passwort**:
+
+```
+Connection string: sp://<16 characters>@fe80::dcf6:e5ff:fe8f:89cd?gw=0&rhost=192.168.1.50
+```
+
+Nur so siehst du, was Gladys wirklich verwendet. Die Hälfte der Fehler, die sie
+aufdeckt, kann keine Prüfung benennen: die Adresse der anderen Box, ein `gw=1`,
+das niemand wollte, ein `rhost`, das auf der alten IP geblieben ist. Das
+Passwort selbst wird nie angezeigt und nie protokolliert — nur seine Länge, was
+genügt, um eine an seiner Stelle eingefügte Maske zu erkennen.
+
+Eine bei einem Gerät der Liste eingetragene Zeichenfolge (eine zweite Box) wird
+genauso geprüft und in einer eigenen Zeile gezeigt:
+`Verbindungszeichenfolge von „Box garage“: sp://<…>`.
+
+#### Einen bereits laufenden Dienst verwenden
+
+Läuft der AirSend Web Service bereits irgendwo in deinem Netzwerk — das
+Home-Assistant-Add-on, der Jeedom-Daemon, ein eigener Container —, trägst du
+einfach das Feld **URL des AirSend Web Service** ein
+(`http://192.168.1.50:33863/`). Eine dort eingetragene URL hat Vorrang: Die
+Integration verwendet sie und startet nichts Eigenes.
+
+## Konfiguration
+
+1. Öffne den Tab **Konfiguration** der Integration.
+2. Füge die **Verbindungszeichenfolge** deiner Box ein. Das genügt: Der
+   AirSend-Dienst läuft bereits in der Integration.
+3. Füge deine **Geräteliste** ein (siehe unten).
+4. Speichere und klicke dann auf **Verbindung testen**: Die Aktion
+   meldet den integrierten Dienst, den lokalen Kanal und wie viele Geräte sie
+   verstanden hat.
+5. Die Geräte erscheinen im Tab **Entdecken**, bereit, zu Gladys hinzugefügt
+   zu werden.
+
+Die **URL des AirSend Web Service** wird nur im oben beschriebenen Fall
+gebraucht: ein eigener Dienst.
+
+Jedes Gerät zeigt als Badge den Kanal, der seinen letzten Befehl übertragen hat
+— `local`, wenn deine Box geantwortet hat, `unreachable`, wenn sie nicht
+erreichbar war. Sobald du den Dienst oder die Verbindungszeichenfolge änderst,
+zeigt das Badge bis zum nächsten Befehl des Geräts, was die neue Konfiguration
+erlaubt.
+
+## Die Geräteliste
+
+Öffne auf airsend.cloud **Import/Export** und exportiere deine Geräte
+als **JSON**. Dieser Export wird so gelesen, wie er kommt, auch auf einer
+einzigen Zeile, und genau das erwartet das Feld **Geräte**.
+
+### Der JSON-Export
+
+Er sieht so aus — eine Liste, mit flach geschriebenem Funkkanal:
+
+```json
+{
+  "devices": [
+    {
+      "name": "Living room shutter",
+      "localip": "fe80::dcf6:e5ff:fe8f:89cd",
+      "type": 4098,
+      "pid": 25455,
+      "addr": 8295
+    }
+  ]
+}
+```
+
+Füge ihn so ein, wie er ist, auch auf einer Zeile. `pid` und `addr` sind
+der Funkkanal des Geräts: `pid` ist die Kanal-ID (das Protokoll, das alle auf
+dieselbe Weise gesteuerten Geräte teilen) und `addr` seine Quelle (die Adresse
+des Senders). `localip` ist die Adresse der Box, zu der das Gerät gehört; die
+Box selbst wird weiterhin über die oben eingetragene
+`sp://`-Verbindungszeichenfolge erreicht.
+
+Ein Eintrag ohne Funkkanal wird ignoriert: Die Box könnte dafür nichts senden.
+Die Box selbst (`type: 0`) ist die Ausnahme — sie antwortet immer auf Kanal 1.
+
+### Die Liste von Hand schreiben
+
+Dieselbe Liste kann von Hand geschrieben werden, nach Namen geordnet, mit dem
+Kanal verschachtelt unter `channel` statt des flachen Paars `pid` / `addr`. Sie
+bleibt JSON:
+
+```json
+{
+  "devices": {
+    "AirSend box": { "type": 0, "sensors": true, "refresh": 300 },
+    "Living room shutter": {
+      "type": 4098,
+      "invert": true,
+      "channel": { "id": 25455, "source": 94311 }
+    },
+    "Pergola light": { "type": 4100, "channel": { "id": 26848, "source": 1442421508 } },
+    "Outdoor sensor": {
+      "type": 1,
+      "features": ["temperature", "humidity"],
+      "channel": { "id": 1368, "source": 542 }
+    }
+  }
+}
+```
+
+### Gerätetypen
+
+| `type` | Gerät                      | Was du in Gladys erhältst                                    |
+| ------ | -------------------------- | ------------------------------------------------------------ |
+| `0`    | AirSend-Box                | Ihre Temperatur- und Helligkeitssensoren                     |
+| `1`    | Funksensor / Fernbedienung | Die Messwerte, die er sendet (siehe `features` unten)        |
+| `4096` | Taster                     | Ein Taster, der TOGGLE sendet                                |
+| `4097` | Schalter                   | Ein/Aus                                                      |
+| `4098` | Rollladen                  | Öffnen / Stopp / Schließen (**+** Position, sobald gemessen) |
+| `4099` | Rollladen mit Position     | Öffnen / Stopp / Schließen **+** eine Position 0-100 %       |
+| `4100` | Dimmbare Lampe             | Ein/Aus **+** Helligkeit                                     |
+
+### Geräteoptionen
+
+| Option              | Bedeutung                                                                         |
+| ------------------- | --------------------------------------------------------------------------------- |
+| `type`              | Gerätetyp (Tabelle oben), **erforderlich**                                        |
+| `channel`           | Funkkanal (`id`, `source`, `mac`, `seed`), **erforderlich**                       |
+| `pid`               | Das `channel.id` des JSON-Exports (eine der beiden Formen verwenden)              |
+| `addr`              | Das `channel.source` des JSON-Exports                                             |
+| `remotes`           | Weitere Sender, die das Gerät steuern (siehe „Der Wandsender“)                    |
+| `spurl`             | Verbindungszeichenfolge dieses Geräts, wenn sie von der globalen abweicht         |
+| `wait`              | Vor der Antwort auf die Funkbestätigung warten (standardmäßig `false`)            |
+| `repeat`            | Zusätzliche Sendungen der Befehle an dieses Gerät (siehe unten)                   |
+| `invert`            | Öffnen und Schließen vertauschen, für umgekehrt eingebaute Rollläden              |
+| `travel_up`         | Bei einem Rollladen: Sekunden für ein vollständiges Öffnen (siehe unten)          |
+| `travel_down`       | Bei einem Rollladen: Sekunden für ein vollständiges Schließen                     |
+| `travel`            | Beides auf einmal, für einen Motor, der sich in beide Richtungen gleich verhält   |
+| `favorite_position` | Bei einem Rollladen: die im Motor programmierte Position, in %                    |
+| `sensors`           | Bei einer Box (`type: 0`): ihre Temperatur- und Helligkeitssensoren bereitstellen |
+| `refresh`           | Leseintervall dieser Sensoren, in Sekunden                                        |
+| `features`          | Bei einem Sensor (`type: 1`): `temperature`, `humidity`, `illuminance`, `click`   |
+
+Eine ohne `sensors: true` angegebene Box erzeugt kein Gerät in Gladys — sie ist
+nur da, um die Verbindungszeichenfolge zu tragen. Ist das globale Feld
+**Lokale Verbindungszeichenfolge** leer, dient die bei der Box angegebene allen
+Geräten.
+
+Eine Box, die mit einer **anderen** Verbindungszeichenfolge als der globalen
+angegeben ist, ist eine zweite Box: Die Box hinter der globalen Zeichenfolge
+wird daneben weiterhin empfangen und warm gehalten.
+
+## Einen Befehl durchbringen
+
+Nichts bestätigt einen Funkbefehl. Ein 433-MHz-Rollladen hat keinen Rückweg:
+Die Box sendet, und niemand wird je sagen, ob der Motor es gehört hat. Ein im
+Rauschen verlorenes Telegramm — eine Mikrowelle, die Fernbedienung des
+Nachbarn, ein Garagentor — ist daher kein Fehler, der irgendwo angezeigt wird,
+sondern ein Klick ohne Wirkung. Genau daraus besteht „ich muss zwei- oder
+dreimal auf Öffnen drücken“.
+
+Drei Dinge helfen dagegen, ohne dass du etwas einstellen musst:
+
+- **Befehle gehen einzeln hinaus.** Eine Box hat ein Funkmodul: Während sie
+  sendet, hört sie nichts, und ein direkt danach abgesetzter zweiter Befehl
+  trifft auf eine noch beschäftigte Box. Befehle werden daher in eine
+  Warteschlange gestellt, im Abstand einer Viertelsekunde, in der Reihenfolge,
+  in der du sie gegeben hast — eine Warteschlange pro Box, sodass eine Box,
+  die nicht antwortet, nie die über eine andere gesendeten Befehle aufhält;
+- **ein Befehl, den die Box nicht senden konnte, wird erneut gesendet.** Eine
+  Ablehnung nicht: Eine zurückgewiesene Verbindungszeichenfolge und ein
+  unbekannter Kanal antworten beim zweiten Mal genauso. Ein TOGGLE eines
+  Tasters oder ein Stopp wird nur erneut gesendet, wenn er sicher nie
+  hinausgegangen ist (Dienst nicht erreichbar, Box belegt): Nach einer
+  Zeitüberschreitung hat er das Tor vielleicht schon geöffnet, und ein zweiter
+  würde es schließen. Ebenso wenig wird ein Befehl erneut gesendet, sobald du
+  dem Gerät einen neueren gegeben hast — aus Gladys oder über seinen
+  Wandsender: Ein nach deinem Stopp erneut gesendetes Öffnen würde den Rollladen
+  wieder in Bewegung setzen;
+- **ein Befehl wird über Funk wiederholt**, so wie eine echte Fernbedienung ihn
+  wiederholt, solange die Taste gedrückt ist. Standardmäßig geht jeder Befehl
+  zweimal hinaus.
+
+Das Feld **Befehlswiederholungen** legt diese Zahl zusätzlicher Sendungen fest:
+Erhöhe auf `2` oder `3`, wenn ein Gerät Gladys noch ab und zu ignoriert;
+`0` sendet jeden Befehl einmal. Ein hartnäckiges Gerät kann seinen eigenen Wert
+haben, ohne dass sich für die anderen etwas ändert:
+
+```json
+{ "devices": { "Patio door": { "type": 4098, "pid": 25455, "addr": 8295, "repeat": 3 } } }
+```
+
+Wiederholt werden nur Befehle, die zweimal dasselbe bedeuten — Öffnen,
+Schließen, eine Position. Ein TOGGLE eines Tasters geht einmal hinaus: Zweimal
+gehört, wäre er wieder am Ausgangspunkt. Ebenso Stopp: Bei Somfy RTS sind STOP
+und die Taste „my“ dasselbe Telegramm, und ein zweites, das einen gerade vom
+ersten angehaltenen Rollladen erreicht, schickt ihn in seine Lieblingsposition.
+Eine noch wartende Wiederholung wird verworfen, wenn das Gerät einen neueren
+Befehl erhält, aus Gladys oder über seinen Wandsender.
+
+Diese Wiederholungen lassen die Oberfläche **nicht** warten: Gladys erhält die
+Antwort, sobald der Befehl gesendet ist, und die Wiederholungen laufen dahinter
+an ihrem Platz in der Warteschlange weiter. Sie sind eine zweite Chance für ein
+im Rauschen verlorenes Telegramm, kein Teil der Antwort — und das erneute
+Aktivieren des Empfangs, das ebenfalls das Funkmodul braucht, wartet jetzt, bis
+die Warteschlange leer ist, statt sich zwischen zwei Befehle zu schieben. Das
+ließ ein direkt nach einem „Öffnen“ geklicktes „Schließen“ einige Sekunden bis
+zum Senden brauchen. Es wartet auch auf den Stopp eines auf eine Position
+gefahrenen Rollladens, wenn dieser Stopp in den nächsten Sekunden fällig ist:
+Hinter der erneuten Aktivierung zurückgehalten, ging er zu spät hinaus, und der
+Rollladen hielt hinter der gewünschten Position an.
+
+### Der erste Befehl nach einer langen Pause
+
+Ein Befehl, der meist in einem Bruchteil einer Sekunde hinausgeht und nach
+einem ruhigen Abend mehrere Sekunden braucht, liegt nicht am Funk: Die
+**Verbindung zur Box** ist kalt geworden. Stundenlang hatte niemand mit ihr
+gesprochen, also musste die Sitzung neu aufgebaut werden, bevor etwas gesendet
+werden konnte, und diese Wartezeit traf den, der geklickt hat.
+
+Die Integration verhindert das: Wenn die Box vier Minuten in Ruhe gelassen
+wurde, liest sie die eigenen Sensoren der Box — eine Anfrage, die die Box
+erreicht und nie über Funk geht. Eine genutzte Installation bleibt durch ihren
+eigenen Verkehr warm, und nichts Zusätzliches wird gesendet. Das kostet eine
+kleine Anfrage pro untätiger Box, und es ist das, was die Abfrage für eine mit
+`sensors: true` angegebene Box schon tat; eine Box, die nur die
+Verbindungszeichenfolge trägt, hatte nichts.
+
+Vier Minuten sind ein Startwert, keine Tatsache: Wie lange eine Box es
+verträgt, in Ruhe gelassen zu werden, ist nirgends dokumentiert, und es ist
+über WLAN nicht dasselbe wie über das Cloud-Gateway. Also sagt es die Box. Wenn
+das Aufwecken länger als eine Sekunde dauert, war die Verbindung schon kalt
+geworden; die Integration halbiert die Wartezeit — bis auf eine Minute, nie
+darunter — und schreibt die Zeile:
+
+```
+Waking the link to "AirSend" took 2.6 s after 4 min of silence: it goes cold
+faster than it was being kept warm… Touching it every 2 min from now on.
+```
+
+Sie wird immer nur kürzer: Ein schnelles Aufwecken beweist, dass das verwendete
+Intervall funktioniert, nie, dass ein längeres funktionieren würde. Und nur eine
+Box, die geantwortet hat, lehrt etwas: Der erste Kontakt nach dem Start baut
+die Sitzung auf und ist unabhängig vom Intervall langsam, und eine
+ausgeschaltete Box lässt jedes Aufwecken die volle Zeitüberschreitung dauern.
+Jede Box wird nach ihrer eigenen Stille warm gehalten.
+
+Braucht ein Befehl dennoch mehr als anderthalb Sekunden, um hinauszugehen,
+sagen es die Protokolle und sagen, **wo die Zeit geblieben ist**:
+
+```
+The order sent to "Kitchen shutter" took 4.2 s to reach the air: 0.1 s waiting
+for the radio, 4.1 s in the box. The time went into the box, not into the
+queue: …
+```
+
+- **in the box** (in der Box) — die Box selbst hat langsam geantwortet. Zwei
+  übliche Gründe: Die Verbindungszeichenfolge enthält `gw=1`, sodass jeder
+  Befehl zu den Servern von Devmel und zurück reist (schalte **Internet
+  gateway** auf airsend.cloud aus und gib der Zeichenfolge die IPv4 der
+  Box mit `rhost=`), oder die Box steht dort, wo ihr WLAN schwach ist;
+- **waiting for the radio** (Warten auf das Funkmodul) — die Befehle vor diesem
+  gingen noch hinaus. Wiederholungen sind der übliche Grund, warum es mehrere
+  waren: Senke **Befehlswiederholungen**, wenn du den Wert erhöht hast.
+
+### Gladys hält sich nicht für die Fernbedienung
+
+Alles, was die Integration sendet, kommt zu ihr zurück: Die Box beantwortet den
+Befehl, und da sie dauerhaft empfängt, hört sie sich selbst senden. Dieses Echo
+trägt den gerade gesendeten Befehl — und es als neuen Befehl zu lesen, macht
+rückgängig, was der Befehl gerade tat. Ein zeitgesteuerter Rollladen, auf 40 %
+geschickt, ist das Beispiel: Das Echo seines „Öffnen“ richtete ihn neu auf
+100 % aus und hob den auf halbem Weg fälligen Stopp auf, sodass der Rollladen
+ganz nach oben fuhr. Die Integration erkennt jetzt ihre eigenen Befehle und
+wiederholt sie nicht.
+
+Was ein Echo kennzeichnet, ist **die Adresse, von der es kommt**. Der Kanal,
+auf dem Gladys sendet, ist der eigene der Box: Nichts anderes im Haus spricht
+mit dieser Stimme, unabhängig von der Verzögerung. Eine Box, die zehn Sekunden
+braucht, um sich zu wiederholen, wird nicht mehr für eine Hand an einer
+Fernbedienung gehalten — was genügte, um einen bei 40 % angehaltenen Rollladen
+wieder nach oben zu schicken. Diese Stimme gehört Gladys für eine Minute nach
+ihrem letzten Befehl: Eine in die AirSend-App kopierte Fernbedienung (gleiche
+Adresse wie das Gerät, der übliche Weg bei einem Tor mit festem Code) spricht
+ebenfalls mit ihr. Innerhalb dieser Minute wird eine solche Fernbedienung
+weiterhin befolgt — das Hoch, Runter oder Stopp eines Rollladens oder eines
+Tors, das ON, OFF oder die Stufe eines Schalters oder einer Lampe —, verwirft
+die Wiederholung eines noch auf das Funkmodul wartenden Gladys-Befehls und löst
+**Eine Funkfernbedienung wird gedrückt** aus, wie jede Fernbedienung. Nur ein
+Druck, der wiederholt, was Gladys gerade gesagt hat und nichts ändert, oder was
+die Box noch nicht wiederholt gehört hat, wird für das Echo gehalten. Und nur
+ein Telegramm, das die Integration zu jeder anderen Zeit befolgen würde: Bei
+ausgeschaltetem Empfang oder zu niedrig bewertet (siehe **Unzuverlässige
+Telegramme akzeptieren**) wird es auch innerhalb dieser Minute verworfen. Die
+Antwort der Box auf einen Befehl von Gladys ist nie ein Tastendruck, wie spät
+sie auch zurückkommt.
+
+Dasselbe gilt für einen Prozentwert oder ein ON/OFF, das Gladys gesendet hat:
+Sein Echo wird nicht als Meldung des Geräts über seinen Zustand genommen. So
+gelesen zeigte ein auf 30 % geschickter zeitgesteuerter 4099 eine Sekunde nach
+dem Start 30 %, und ein spätes Echo eines ON schaltete eine Steckdose nach dem
+inzwischen gegebenen OFF wieder ein.
+
+Sichtbare Folgen:
+
+- ein Wandsender sendet von **einer anderen Adresse**: Er wird nie für dieses
+  Echo gehalten und steuert den Rollladen in Gladys weiter;
+- ein Gerät, das diesen Kanal in seinen `remotes` führt (ein Gruppenkanal, der
+  es mit anderen steuert), **befolgt** den Befehl: Es hat ihn nie ausgeführt,
+  und für es ist das Telegramm ein Befehl wie jeder andere. Einmal: Die
+  weiteren Echos dieses Befehls und jedes Echo, das nach einem inzwischen an
+  dieses Gerät gegebenen Befehl ankommt, werden nicht wiederholt — „alle
+  schließen, dann das Wohnzimmer auf 50 %“ lässt das Wohnzimmer bei 50 %. Ein
+  spätes Echo des Schließen der Gruppe, nach ihrem Stopp gehört, ist dieses
+  Schließen, nicht der Stopp: „alle schließen, dann alle stoppen“ stoppt auch
+  das Wohnzimmer;
+- wenn die Box antwortet, dass sie **den Befehl nicht gesendet hat** — jede
+  Sendung davon, Wiederholungen eingeschlossen: Eine nach dem Hinausgehen des
+  Befehls abgelehnte Wiederholung ändert nichts —, schreibt die Integration es
+  in ihre Protokolle, mit dem Gerät und dem, was die Box gesagt hat. Das ist
+  die einzige Spur eines Befehls, der nirgends angekommen ist, und es lohnt
+  einen Blick, wenn du oft zweimal klickst. Sagt die Box, dass nichts über
+  Funk hinausging (`NETWORK`, `BUSY`…), wechselt das Badge des Geräts auf
+  `unreachable`, ein Schalter oder eine Lampe wird wieder im vorherigen Zustand
+  angezeigt (sofern eine Fernbedienung ihn nicht inzwischen geändert hat), und
+  die Fahrt eines zeitgesteuerten Rollladens wird zurückgenommen, mit dem
+  Stopp, den er am Ende gesendet hätte — an einen stehenden Somfy-Rollladen
+  gesendet, ist dieser Stopp die Taste „my“. Nur der fehlgeschlagene Befehl:
+  Ein abgelehnter PING von „Identifizieren“ schaltet eine Steckdose, deren ON
+  hinausging, nicht zurück, und wenn das Öffnen einer kurzen Positionierung
+  abgelehnt wird, nachdem ihr Stopp gesendet wurde, wird dieses Öffnen
+  zurückgenommen, nicht der Stopp. Jede Antwort wird dem Befehl zugerechnet,
+  den sie betrifft, wie spät sie auch zurückkommt: ON, OFF, ON schneller
+  geklickt, als die Box antwortet, alle abgelehnt, lassen die Steckdose so
+  angezeigt wie vor den dreien. Ein Befehl, dessen Wiederholung nie hinausging
+  (inzwischen eine Fernbedienung gedrückt, der AirSend Web Service neu
+  gestartet), wird gemeldet, sobald das bekannt ist, nicht erst mit dem
+  nächsten Befehl; und ein Befehl, den der Dienst nie erhalten hat, zählt
+  nicht als Ersatz für den vorherigen.
+
+### Wenn die Box Nein sagt
+
+Jeder an die Box übergebene Befehl wird beantwortet, und diese Antwort trägt
+eine Zahl. Unter `256` ist der Befehl hinausgegangen; ab `256` nicht, und die
+Zahl sagt, wo er gescheitert ist. Genau das schreibt die Zeile in den
+Protokollen aus:
+
+```
+The box did not carry the order sent to "Kitchen". SYNCHRONIZATION (event type
+258): the exchange between the AirSend Web Service and the box lost its thread —
+a link error, not a radio one. Whether anything went out on the air, nothing
+says. Check nothing else drives the box at the same moment…
+```
+
+| Name (Typ)              | Was es bedeutet                               | Was zu prüfen ist                                                                             |
+| ----------------------- | --------------------------------------------- | --------------------------------------------------------------------------------------------- |
+| `UNKNOWN` (256)         | ohne Begründung abgelehnt                     | Box neu starten, dann die Integration                                                         |
+| `NETWORK` (257)         | der Dienst hat die Box nie erreicht           | Die Box ist eingeschaltet, im Netzwerk und noch unter der Adresse der Verbindungszeichenfolge |
+| `SYNCHRONIZATION` (258) | die Verbindung zur Box hat den Faden verloren | Nichts anderes steuert die Box in diesem Moment; eine schwache WLAN-Verbindung tut es auch    |
+| `SECURITY` (259)        | die Verbindungszeichenfolge wurde abgelehnt   | Erneut von airsend.cloud exportieren und vollständig einfügen                                 |
+| `BUSY` (260)            | ein anderer Client hatte die Box gesperrt     | Die AirSend-App schließen oder die Box aus der anderen Installation entfernen                 |
+| `TIMEOUT` (261)         | die Box hat nicht rechtzeitig geantwortet     | Eine für jemand anderen beschäftigte Box oder eine Box mit schwachem WLAN                     |
+| `UNSUPPORTED` (262)     | die Box kann das nicht senden                 | Den `type` und den Kanal des Geräts mit dem airsend.cloud-Export vergleichen                  |
+| `INCOMPLETE` (263)      | etwas fehlte                                  | Den Kanal vollständig einfügen, mit allem, was neben `id` dabei war                           |
+| `FULL` (264)            | die Anfrage war zu groß                       | Melde es: Nichts, was von hier gesendet wird, sollte je so lang sein                          |
+
+**Befehlswiederholungen helfen bei keinem davon.** Wiederholungen sind für ein
+im Rauschen verlorenes Telegramm da — und ein im Rauschen verlorenes Telegramm
+ist genau der Fehler, den nichts meldet: Nichts bestätigt einen Funkbefehl, ein
+Befehl, den die Box nach eigener Aussage gesendet hat, ist also die einzige
+Bestätigung, die es je geben wird. Meldet die Box selbst den Fehler, ist der
+Befehl nie bis ins Rauschen gekommen. Mehr Wiederholungen senden dann nur
+Befehle dichter hintereinander an eine Box, die schon Mühe hat mitzuhalten.
+
+## Die Position eines Rollladens
+
+Ein 433-MHz-Rollladen sagt nie, wo er steht: Der Funk trägt Befehle, keine
+Positionen. Was er hat, ist eine **Dauer** — ein bestimmter Motor braucht immer
+gleich lange, um von einem Endanschlag zum anderen zu fahren. Miss diese
+Fahrt einmal, und die Position wird berechenbar.
+
+Stoppe deinen Rollladen mit einer Stoppuhr, vom Beginn der Bewegung bis zu
+dem Moment, in dem er von selbst anhält, und notiere die beiden Dauern:
+
+```json
+{
+  "devices": {
+    "Living room shutter": {
+      "type": 4098,
+      "travel_up": 22,
+      "travel_down": 20,
+      "channel": { "id": 25455, "source": 94311 }
+    }
+  }
+}
+```
+
+Von da an verfolgt die Integration den Rollladen Sekunde für Sekunde, ob der
+Befehl von Gladys kam oder von einem Wandsender, den sie über Funk gehört hat
+(dafür braucht es den unten beschriebenen Empfangskanal). Eine Fernbedienung,
+deren Protokoll nur Ein/Aus kennt (Chacon DiO), zählt als Hoch/Runter. Wenn
+sich viele Rollläden gleichzeitig bewegen, veröffentlicht jeder seine Position
+seltener, sodass sie zusammen deutlich unter den 300 Zuständen pro Minute
+bleiben, die Gladys annimmt, und jeder Endanschlag durchkommt. Daraus folgen
+drei Dinge:
+
+- **auch ein `4098` erhält eine Position** — die Funktion erscheint, sobald der
+  Rollladen gemessen ist, und ihr Schieberegler steuert den Motor mit einem
+  zeitgesteuerten Öffnen/Stopp: Die Integration startet den Rollladen in die
+  richtige Richtung und sendet den Stopp in dem Moment, in dem die Fahrzeit
+  sagt, dass er angekommen ist;
+- **Stopp ist ehrlich**: Ein auf halbem Weg angehaltener Rollladen meldet die
+  tatsächlich erreichte Position, statt die vom Befehl angekündigten 100 % zu
+  behalten;
+- **die Schätzung korrigiert sich selbst**: Ein Rollladen, der einen
+  Endanschlag erreichen darf, steht genau bei 0 % oder 100 %, weil der Motor
+  dort physisch anhält. Jedes vollständige Öffnen oder Schließen löscht den
+  durch vorherige Teilfahrten angesammelten Fehler.
+
+Rechne mit etwa ±5 % Genauigkeit: Ein Motor wird unter Last und bei Kälte
+langsamer. Driftet ein Rollladen, genügt ein Szenario, das ihn einmal am Tag
+vollständig öffnet, um ihn im Takt zu halten.
+
+Ein nicht gemessener Rollladen behält sein bisheriges Verhalten: Gladys zeigt
+das Ziel des letzten Befehls, mehr kann ein Einweg-Protokoll nicht bieten.
+
+Zwei weitere wissenswerte Dinge:
+
+- bis zu seiner ersten vollständigen Fahrt ist die Position eines gemessenen
+  Rollladens **unbekannt**, und die Integration veröffentlicht lieber nichts,
+  als einen Wert zu erfinden. Öffne oder schließe ihn einmal, und sie ist
+  gesetzt. Eine vorher angeforderte Position schickt den Rollladen zum nächsten
+  Endanschlag, was genau die Referenz herstellt. Dasselbe gilt für einen gerade
+  gemessenen Rollladen, was auch immer seine Befehle vorher sagten, und für
+  einen, der irgendwohin geschickt wurde, was niemand wissen kann: die Taste
+  „my“ ohne `favorite_position`, ein Schlüsselanhänger mit einer Taste
+  (Umschalten). Eine erneute Verbindung zu Gladys füllt sie nicht mit dem
+  älteren Wert, den Gladys gespeichert hat;
+- die Position wird **über Neustarts** der Integration hinweg **gemerkt**: Sie
+  startet wieder mit dem Wert, den Gladys gespeichert hat. Ein Rollladen, den
+  du nach dem Start der Integration in Gladys hinzufügst, erhält sofort die
+  bereits bekannte Position, und eine Position, die Gladys verpasst hat,
+  während sie nicht erreichbar war (neu gestartet, aktualisiert), wird erneut
+  veröffentlicht, wenn sie zurück ist. Eine Korrektur von `invert` spiegelt
+  die gemerkte Position, auch bei einem fahrenden Rollladen: Der Rollladen
+  selbst hat sich nicht bewegt. Ein Rollladen, der noch fährt, wenn die
+  Integration anhält (Update, Neustart von Gladys), geht auch nicht verloren:
+  Einer, der auf eine Position gefahren wird, erhält seinen Stopp sofort (oder
+  den, der schon auf dem Weg zum Funkmodul ist), und Gladys behält, wo er
+  angehalten wurde; einer, der vollständig öffnet oder schließt, wird am
+  Endanschlag veröffentlicht, auf den er zufährt;
+- ein auf eine Position gefahrener Rollladen wird **pünktlich angehalten, auch
+  wenn Gladys kurz nicht erreichbar ist oder langsam antwortet**: Der STOP geht
+  hinaus, bevor die Position veröffentlicht wird, und wartet nie auf Gladys.
+  Ein STOP, den die Box nicht senden konnte, ob sie es sofort oder etwas später
+  sagt (BUSY, NETWORK…), löst den Auslöser **Ein Funkbefehl ist
+  fehlgeschlagen** aus, und die Position folgt dem Rollladen bis zu seinem
+  Endanschlag, da ihn nichts angehalten hat — ebenso bei einem Stopp, der aus
+  Gladys während der Fahrt gegeben wird. Ein STOP, der noch auf das Funkmodul
+  wartet, wenn ein Wandsender den Rollladen wieder in Bewegung setzt, wird
+  verworfen.
+
+### Die Lieblingsposition
+
+Viele Motoren haben eine eigene, in der Hardware programmierte Position (die
+Taste „my“ von Somfy). Der Funk sagt „fahr in deine Position“, ohne je zu
+sagen, welche das ist. Miss sie einmal und gib sie mit
+`"favorite_position": 40` an: Ein Druck auf diese Taste meldet dann 40 % in
+Gladys. Ohne sie wird der Rollladen als irgendwo dazwischen angehalten
+gemeldet — die ehrliche Antwort.
+
+Die meisten Somfy-RTS-Fernbedienungen senden diese Taste als einfaches
+**STOP**: Es hält einen fahrenden Rollladen an und schickt einen stehenden in
+seine Position. Mit angegebener `favorite_position` unterscheidet die
+Integration beides anhand der Fahrzeit: Ein STOP, gehört, während der
+Rollladen steht, schickt ihn auch in Gladys in seine Lieblingsposition. Das
+setzt einen gemessenen Rollladen voraus (`travel_up` / `travel_down`): Ohne
+Fahrzeiten sagt nichts, ob er sich bewegt, und ein STOP bleibt ein STOP.
+
+## Den Funk empfangen
+
+Die AirSend-Box kann jedes Telegramm weiterleiten, das sie hört — ein von Hand
+gedrückter Wandsender, ein aufwachender Wettersensor —, sodass Gladys verfolgt,
+was im Haus passiert, statt nur das, was sie selbst befohlen hat. Dadurch
+bewegt sich die Position eines Rollladens, wenn er über seine eigene
+Fernbedienung geöffnet wird.
+
+Das ist **standardmäßig eingeschaltet**, und es gibt nichts einzustellen: Die
+Integration abonniert die Box für das Funkprotokoll deiner Geräte und empfängt
+die Telegramme selbst. Nichts zu installieren, nichts zu verknüpfen.
+
+Das Abonnement wird **nach jedem Befehl neu aktiviert** und alle zehn Minuten
+erneuert. Senden nimmt die Box aus dem Empfang, und ein Abonnement, das einen
+Befehl nicht überlebt hat, ist ein Wandsender, dem Gladys stillschweigend nicht
+mehr folgt — bis zur nächsten Erneuerung.
+
+### Der Empfangskanal
+
+Was die Box empfängt, ist ein **Protokoll**, kein Gerät: Sie hat ein
+Funkmodul, und das Abonnieren schaltet sie auf Dauerempfang **eines einzigen
+Protokolls** auf einmal. Kanal `1` ist der generische 433-MHz-Empfang, der die
+dafür gebauten Protokolle abdeckt — aber nicht die anderen, und ein auf Kanal
+`1` empfangener Somfy-Rollladen bleibt so stumm wie eine Fernbedienung, die
+niemand drückt.
+
+Die Integration rät also nicht: Sie fragt den AirSend-Dienst, welcher Kanal
+welches Protokoll dekodiert, und abonniert die Box für das, das deine Geräte
+verwenden. Lass das Feld **Empfangskanal** leer.
+
+Trage es nur ein, um etwas anderes zu empfangen: die `pid` eines noch
+nicht angegebenen Protokolls, oder `0`, um den Empfang auszuschalten.
+
+Eine dort eingetragene `pid` durchläuft dieselbe Tabelle wie eine abgeleitete:
+Ein Protokoll, das der Dienst mit dem generischen 433-MHz-Decoder dekodiert,
+wird auf Kanal `1` empfangen, denn dort wird es gehört. Und mit `0` werden die
+Telegramme, die die Box aus dem vorherigen Abonnement noch sendet, ignoriert,
+bis sie damit aufhört.
+
+**`1` und ein leeres Feld bedeuten dasselbe: „ableiten“.** Das war der
+Standardwert des Feldes, bevor es die Ableitung gab, und er wird so gelesen —
+eine `1` fordert keinen generischen 433-MHz-Empfang an. Der generische Empfang
+ist das, worauf die Ableitung zurückfällt, wenn kein Funkgerät angegeben ist,
+und nichts sonst. Das Feld ist genau aus diesem Grund ein **Text**feld und kein
+Zahlenfeld: Ein Zahlenfeld kann nicht leer bleiben, es zwingt dich, etwas
+einzugeben, und dieses Etwas liest sich dann wie eine Wahl, die niemand
+getroffen hat.
+
+Eine Folge: Der generische 433-MHz-Decoder kann nicht über seine pid
+angefordert werden, da diese pid `1` ist. Er wird stattdessen **über seinen
+Namen** angefordert — gib `generisch` (oder `generic`) in das Feld ein.
+Das ist ein lohnender Test für eine 433-MHz-Fernbedienung, die ihr eigenes
+Protokoll nur halb dekodiert: Der generische Decoder ist eine andere Art, dieselben
+Telegramme zu lesen.
+
+So oder so sagt die Zeile _Empfang_ von **Verbindung testen**, welcher Kanal
+tatsächlich gewählt wurde — diese Zeile ist maßgeblich, nicht das, was im Feld
+steht.
+
+Zum Prüfen klickst du auf **Verbindung testen**: Die Zeile _Empfang_ sagt,
+welches Protokoll empfangen wird, welche Geräte es abdeckt und wohin die
+Telegramme gesendet werden — oder warum nicht.
+
+Wenn zwei Protokolle gleich oft angegeben sind — ein Rollladen auf der einen
+Seite, der ihm zugeordnete Wandsender auf der anderen —, gewinnt das, das
+**sendet**. Ein Rollladen, ein Schalter, eine Lampe sprechen nicht: Mit ihnen
+wird gesprochen. Eine in `remotes` angegebene Fernbedienung steht genau dort,
+um gehört zu werden, also wird die Box dafür abonniert.
+
+Jeder Sender zählt einmal, egal wie viele Geräte ihn angeben: Eine
+Zentralfernbedienung, die in die `remotes` jedes Rollladens geschrieben ist,
+ist eine Fernbedienung und überstimmt nicht drei Sensoren auf einem anderen
+Protokoll.
+
+#### Ein Protokoll, auf dem niemand spricht
+
+Wenn nichts, was auf dem empfangenen Kanal angegeben ist, je von selbst
+sendet, ist das Abonnement aktiv, der Weg funktioniert, und es wird nie etwas
+darüber kommen: Die Box hört nur das Echo der Befehle von Gladys. Das ist der
+Normalzustand eines Hauses, in dem nur Rollläden angegeben sind — und es sieht
+genau aus wie ein Empfang, der nie aktiviert wurde, also sagt die Integration
+es laut, in ihren Protokollen beim Start und in der Zeile _Empfang_ von
+**Verbindung testen**:
+
+```text
+Nothing declared on channel 25455 emits by itself: shutters, switches and lamps
+are talked to, they do not talk. The box will hear the echo of Gladys own orders
+and nothing else.
+```
+
+Der Ausweg ist derselbe wie überall auf dieser Seite: Ordne den
+Wandsender zu, der das Gerät steuert (siehe unten). Er hat seine eigene
+Adresse, er ist ein echter Sender, und sobald er angegeben ist, empfängt die
+Ableitung ihn.
+
+### 868 MHz und Rolling Code
+
+Kanal `1`, der generische Empfang, **ist 433 MHz**. Ein 868-MHz-Protokoll —
+Profalux, Somfy io — wird darauf überhaupt nicht gehört. Und solange du nichts
+angegeben hast, gibt es nichts abzuleiten, also fällt die Integration
+standardmäßig auf diesen Kanal `1` zurück: Die Box empfängt dann das falsche
+Band, und die darauf folgende Stille sieht genau aus wie eine Fernbedienung,
+die niemand drückt. Die Integration sagt das jetzt, in ihren Protokollen und
+in **Verbindung testen**.
+
+Zwei Auswege: ein Gerät mit diesem Protokoll angeben, oder seine `pid` als
+**Empfangskanal** eintragen.
+
+#### „Auf 868 MHz empfangen“ gibt es nicht — das gibt es stattdessen
+
+Eine Box empfängt kein **Band**, sie empfängt ein **Protokoll**: Es gibt keinen
+„868-MHz“-Schalter, und Kanal `1` ist nicht „der für 433“ im Gegensatz zu
+einem „für 868“, der woanders lebt — er ist ein Decoder unter etwa zweihundert,
+der für die generischen 433-MHz-Protokolle. Auf 868 MHz zu empfangen heißt
+daher, **ein 868-MHz-Protokoll mit seiner `pid` zu benennen**. Drei Wege, der
+einfachste zuerst:
+
+1. **das Gerät angeben** in der Liste **Geräte** (der airsend.cloud-Export
+   enthält seine `pid`): Die Ableitung erledigt den Rest, und das Feld
+   **Empfangskanal** bleibt leer. Das funktioniert in neun von zehn Fällen;
+2. **seine Fernbedienung zuordnen** (`remotes`): Eine Fernbedienung sendet
+   tatsächlich, also behält die Ableitung ihr Protokoll statt das des
+   Rollladens, der nie spricht — egal wie viele Rollläden es teilen;
+3. **die `pid` erzwingen** in **Empfangskanal**, wenn das Protokoll noch nicht
+   angegeben ist. Um sie zu finden, fragt die Aktion **Funkprotokoll suchen**
+   den AirSend-Dienst und sucht nach Marke oder nach `pid`:
+
+```text
+2 protocols for "somfy":
+- pid 25455 — Somfy RTS (decodes itself, declared on "Patio door")
+- pid 26848 — Somfy io (decodes itself)
+Put the pid you want in the Listening channel field…
+```
+
+Sie sagt auch, wie jedes Protokoll dekodiert wird — von sich selbst, vom
+generischen 433-MHz-Kanal `1` oder nur teilweise — und welches gerade
+empfangen wird.
+
+Und dann gibt es die Sackgasse, die man kennen sollte: Die Box hat **ein**
+Funkmodul, um also eine Fernbedienung zu hören, deren Protokoll du nicht
+kennst, musst du dieses Protokoll bereits empfangen. Es gibt keinen Suchlauf.
+Steht ihre `pid` nirgends — nicht in der AirSend-App, nicht im Export —, bleibt
+nur, die Kandidaten deiner Marke einen nach dem anderen auszuprobieren, nach
+jedem Versuch die Fernbedienung zu drücken und **Verbindung testen** erneut
+auszuführen.
+
+Der **Rolling Code** dieser Fernbedienungen ist nicht das, was die Telegramme
+am Ankommen hindert. Er schützt das _Senden_: Um einen Profalux-Rollladen zu
+steuern, muss die AirSend-Box mit dem Motor angelernt worden sein, wie eine
+weitere Fernbedienung. Beim _Empfang_ stört er nicht: Der Zähler und die
+Felder `mac` / `seed` ändern sich bei jedem Telegramm, und die Integration
+ignoriert sie absichtlich — ein Sender wird über seine `pid` und seine `addr`
+identifiziert, und die bewegen sich nicht.
+
+Was der Rolling Code tatsächlich ändert, ist die **Dekodierung**: Der
+AirSend-Dienst dekodiert diese Protokolle nur teilweise. Das Telegramm kommt
+an, der Sender wird benannt, aber es trägt keine verwertbare Note. Solche
+Telegramme werden jetzt mit ihrer `pid` und ihrer `addr` protokolliert: der
+Beweis, dass der Funk funktioniert, und das, was du brauchst, um den Sender
+einem Gerät zuzuordnen.
+
+### Der Wandsender
+
+Ein Rollladen wird von mehreren Sendern gesteuert: der AirSend-Box und der an
+die Wand geschraubten Fernbedienung. Sie sprechen dasselbe Protokoll von
+**verschiedenen Adressen**, sodass die Box sie auf verschiedenen Kanälen hört,
+und ein von der Wand kommendes Telegramm gehört zu keinem angegebenen Gerät. Es
+wird von der Integration protokolliert, mit seiner `pid` und seiner `addr`.
+
+Ordne diese Adresse dem Gerät zu, das sie steuert, und ein Druck auf den
+Wandsender aktualisiert den Rollladen in Gladys genau so, wie Gladys selbst es
+täte:
+
+```json
+{
+  "devices": {
+    "Living room shutter": {
+      "type": 4098,
+      "travel_up": 30,
+      "travel_down": 26,
+      "channel": { "id": 25455, "source": 8295 },
+      "remotes": [94311]
+    }
+  }
+}
+```
+
+Eine bloße Adresse wird auf dem Protokoll des Geräts selbst gelesen; eine
+Fernbedienung auf einem anderen Protokoll wird vollständig geschrieben:
+`"remotes": [{ "pid": 1368, "addr": 542 }]`.
+
+#### Die Integration diese Zeile schreiben lassen
+
+Ein `pid`/`addr`-Paar aus einem Protokoll in einzeiliges JSON zu kopieren, in
+der richtigen Schreibweise, ist genau die Art Sache, die jedes zweite Mal
+schiefgeht. Die Aktion **Fernbedienung zuordnen** erledigt es für dich:
+
+1. drücke den Wandsender (die Integration merkt sich die Sender, die sie
+   hört, auch die, die niemand angibt);
+2. führe auf dem Bildschirm Konfiguration **Fernbedienung zuordnen** aus
+   und wähle das Gerät, das er steuert;
+3. die Aktion antwortet mit deiner unveränderten Geräteliste, die Fernbedienung
+   als `{"pid": …, "addr": …}` zugeordnet: Füge sie in das Feld
+   **Geräte** ein und speichere.
+
+Sie ordnet den **zuletzt** gehörten Sender zu, den kein Gerät beansprucht, und
+nennt die anderen, ohne sie anzutasten. Sie sagt auch, wozu seine Telegramme
+dekodiert wurden, und warnt, wenn die Fernbedienung ein anderes Protokoll als
+das Gerät spricht: Die Box empfängt nur eines auf einmal.
+
+#### Ein verworfenes Telegramm, oder eines ohne Adresse
+
+Die Box bewertet jedes Telegramm, das sie dekodiert, und die Integration
+ignoriert die schlecht bewerteten — genau wie das offizielle Jeedom-Plugin.
+Zwei sehr unterschiedliche Formen in den Protokollen:
+
+```text
+Ignored a radio frame (unreliable, graded 0): pid 14177, carrying no note the service could decode.
+Ignored a radio frame (unreliable, graded 2): pid 25455, addr 94311, carrying level 100 (up).
+```
+
+**Ein Telegramm mit Adresse, zu niedrig bewertet** (zweite Zeile): Die Box hat
+sowohl den Sender als auch den Befehl dekodiert, sie ist sich nur nicht sicher
+— eine Fernbedienung am Rand ihrer Reichweite, ein überfülltes Band. Schalte
+**Unzuverlässige Telegramme akzeptieren** ein: Sie werden dann trotzdem
+verwendet, um den Preis gelegentlicher Fehlauslösungen. Ein in `remotes` mit
+seiner `pid` **und** `addr` angegebener Wandsender braucht nichts davon: Seine
+Telegramme werden unabhängig von ihrer Bewertung befolgt, da eine genaue
+Adresse kein Rauschen ist.
+
+**Ein Telegramm ohne Adresse** (erste Zeile, eine `pid` und sonst nichts): Die
+Box hat das Protokoll erfasst, **ohne es zu dekodieren**. Es gibt keinen
+Sender zu benennen und keinen Befehl zu wiederholen, und keine Einstellung
+macht verwertbar, was nie dekodiert wurde. Es ist das Kennzeichen einer Box,
+die den **falschen Decoder** empfängt: Trage diese `pid` in das Feld
+**Empfangskanal** ein (das Wort `generisch` für pid 1, das so eingegeben
+„ableiten“ bedeutet), damit die Box dieses Protokoll mit seinem eigenen Decoder
+empfängt, und führe dann **Verbindung testen** erneut aus. Kommen die
+Telegramme mit einer Adresse zurück, ordne sie wie gewohnt zu.
+
+Bleibt das Protokoll selbst auf seinem eigenen Kanal ohne Adresse, dekodiert
+der AirSend-Dienst es nur teilweise (868-MHz-Rolling-Code), und keine
+Software-Einstellung wird daran etwas ändern. Als letzter Ausweg kann ein
+Gerät **jedem** nicht zugeordneten Telegramm eines Protokolls folgen:
+
+```json
+{
+  "devices": {
+    "Patio door": { "type": 4098, "pid": 25455, "addr": 8295, "remotes": [{ "pid": 14177 }] }
+  }
+}
+```
+
+Ein auf eine `pid` reduzierter `remotes`-Eintrag benennt keine Fernbedienung
+mehr, sondern ein ganzes Protokoll: Die Fernbedienung eines Nachbarn auf diesem
+Protokoll wird deinen Rollladen steuern. Verwende das bewusst.
+
+#### Die Fernbedienung ist zugeordnet, und nichts bewegt sich
+
+Sobald der Sender angegeben ist, erreicht das Telegramm das Gerät — bleibt die
+Frage, ob es **einen Befehl trägt**. Beginne mit **Verbindung testen**:
+Seine Zeile _Gehört_ antwortet, ohne durch die Protokolle zu gehen (siehe „Was
+die Box tatsächlich gehört hat“). Sie unterscheidet fünf Fälle, die sich
+ähneln und nichts miteinander zu tun haben:
+
+- `angegeben bei Living room shutter, aber seine Telegramme tragen keinen wiederholbaren Befehl`
+  — das Telegramm ist angekommen, das Gerät kann nichts damit anfangen. Das ist
+  das Los der 868-MHz-Protokolle mit Rolling Code: Der Dienst dekodiert sie nur
+  teilweise, das Telegramm beweist also, dass der Funk funktioniert, trägt aber
+  nichts zu wiederholen. **Die Position kann nicht folgen**, und das Zuordnen
+  der Fernbedienung kann daran nichts ändern; beim ersten Telegramm dieses
+  Senders sagt die Integration es auch in den Protokollen, auf Stufe info
+  (`no note the service could decode`);
+- `angegeben bei Plug, das mit dem dekodierten Befehl nichts anfängt` — das
+  Telegramm ist vollständig dekodiert, aber zu einem Befehl, auf den dieser
+  Gerätetyp nicht reagiert: etwa ein TOGGLE einer Fernbedienung mit einer
+  Taste, die einem Schalter oder einer Lampe zugeordnet ist. Das Protokoll ist
+  in Ordnung; prüfe den auf airsend.cloud angegebenen Typ (eine
+  Fernbedienung, die TOGGLE sendet, steuert einen Taster, Typ `4096`) oder ob
+  die richtige Fernbedienung zugeordnet ist;
+- `seit der Konfigurationsänderung nicht gehört` — der Sender wurde vor dem
+  letzten Speichern gehört (typischerweise bevor er zugeordnet wurde), und was
+  seine Telegramme damals taten, sagt nichts über das Gerät aus, das ihn jetzt
+  angibt: Drücke die Fernbedienung und führe die Aktion erneut aus;
+- `kein Gerät gibt ihn an` — der Sender wird gehört, er ist nur nichts
+  zugeordnet: Führe **Fernbedienung zuordnen** erneut aus;
+- der Sender wird gar nicht aufgeführt — das Telegramm kommt nicht mehr an.
+  Wurde die Fernbedienung auf einem anderen Protokoll als ihr Gerät angegeben,
+  nennt die Zeile _Empfang_ sie als ungehört, und ihre `pid` in das Feld
+  **Empfangskanal** einzutragen, empfängt stattdessen ihre Seite.
+
+**Nichts in den Protokollen nach einem Druck?** Die Zeile wird geschrieben,
+wenn ein Telegramm ankommt: Drücke die Fernbedienung und lies dann
+die Protokolle der Integration erneut. Steht immer noch nichts da, ist das
+Telegramm nie angekommen, und dafür gibt es nur drei Gründe:
+
+- **der Empfang ist nicht eingerichtet.** Klicke auf **Verbindung
+  testen**: Die Zeile _Empfang_ sagt, welches Protokoll empfangen wird und
+  wohin die Telegramme gesendet werden — oder warum nicht;
+- **die Fernbedienung spricht ein anderes Protokoll.** Die Box empfängt nur
+  eines auf einmal, das deiner angegebenen Geräte (siehe „Der Empfangskanal“).
+  Ein Wandsender verwendet normalerweise das Protokoll des Rollladens, den er
+  steuert; ist deiner von einer anderen Marke, trage seine `pid` lange
+  genug in das Feld **Empfangskanal** ein, um ihn zu finden;
+- **das Telegramm wurde gehört, aber als zu zweifelhaft bewertet, um
+  veröffentlicht zu werden.** Funk ist verrauscht, und die Box bewertet jedes
+  Telegramm, das sie dekodiert. Schalte **Detaillierte Protokolle
+  (Debug)** ein: Diese Telegramme werden dort ebenfalls aufgezeichnet, mit ihrer
+  `pid`, ihrer `addr` und dem Grund, warum sie nicht weiterkamen.
+
+#### Was ein Druck in die Protokolle schreibt
+
+Jede dieser Zeilen wird **einmal pro Sender** geschrieben — eine gedrückt
+gehaltene Fernbedienung sendet jede halbe Sekunde ein Telegramm, und ein
+Protokoll, das scrollt, liest niemand. Der Zähler wird **bei jedem Speichern
+der Konfiguration** zurückgesetzt: Du hast etwas geändert, weil es nicht
+funktionierte, und genau der nächste Druck ist der, auf den du achtest.
+
+Nach dem Speichern schreibt ein Druck also genau eine Zeile, und welche Zeile
+es ist, sagt, wo das Telegramm stehen geblieben ist:
+
+```text
+Heard pid 25455, addr 94311 -> "Baie vitrée" followed it: level 0 (down).
+Heard a frame on a channel no device declares: pid 14177, addr 3359265281.
+Heard pid 14177, addr 3359265281 for "Baie vitrée", but no note the service could decode
+Ignored a radio frame (unreliable, graded 2): pid 25455, addr 94311, carrying level 100 (up).
+```
+
+Die erste ist die einzige, die sagt, dass es funktioniert — und sie verdient
+es, zweimal gelesen zu werden, bevor man der Integration einen Rollladen
+vorwirft, der sich nicht bewegt hat: Das Telegramm wurde gehört,
+weitergeleitet und befolgt, was bleibt, liegt zwischen dem Befehl und dem
+Motor. Gar keine Zeile heißt, dass kein Telegramm angekommen ist; siehe die
+drei Gründe oben.
+
+#### Ist das wirklich meine Fernbedienung?
+
+Ein gehörter Sender ist kein Beweis, dass es der in deiner Hand ist: 433 MHz ist
+ein öffentliches Band, und die Nachbarschaft ist auch darauf. Drücke deine
+fünfmal, führe dann **Verbindung testen** aus und lies den Zähler des
+Senders unter _Gehört_:
+
+```text
+pid 14177, addr 3359265281 (5 frames, last one 3 s ago, no decoded note)
+```
+
+Fünf Telegramme und „vor 3 s“ ist deine Fernbedienung. Ein Zähler, der sich
+nicht bewegt, während du drückst, gehört jemand anderem, und ihn zuzuordnen
+gibt die Fernbedienung eines Fremden bei deinem Rollladen an.
+
+### Was die Box tatsächlich gehört hat
+
+Jede Prüfung oben beantwortet „können die Telegramme hereinkommen?“. Die Zeile
+_Gehört_ von **Verbindung testen** beantwortet die nächste Frage, die einzige,
+die zählt, sobald eine Fernbedienung zugeordnet ist: **Sind sie es, und hat
+sich etwas bewegt?**
+
+Die Integration merkt sich die Sender, die sie hört, die neuesten zuerst, mit
+der Zahl der Telegramme, die jeder gesendet hat, wie lange das her ist, wozu
+sie dekodiert wurden und was die Geräte daraus gemacht haben:
+
+```text
+Heard: 1 emitter heard: pid 14177 "Profalux", addr 3359265281 (3 frames, last one 4 s ago,
+no decoded note) — declared on Living room shutter, but its frames carry no
+order to replay (a protocol the service only partially decodes): the position
+cannot follow.
+```
+
+Die `pid` wird **benannt**, sobald der Dienst mit seiner Protokolltabelle
+geantwortet hat: Das ist die zuverlässigste Antwort auf „welches Protokoll
+spricht meine Fernbedienung?“. Die auf das Plastik gedruckte Marke sagt es
+nicht immer — ein unter einem Namen verkaufter Rollladen kann das Funkmodul
+eines anderen Herstellers tragen —, während der Name hier der Decoder ist, der
+das Telegramm tatsächlich dekodiert hat.
+
+Die möglichen Befunde pro Sender:
+
+| Befund                                          | Was er bedeutet                                                                                                 |
+| ----------------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
+| `befolgt von <Gerät>`                           | es funktioniert: Diese Telegramme steuern das Gerät tatsächlich                                                 |
+| `kein Gerät gibt ihn an`                        | der Sender wird gehört, ist aber nichts zugeordnet — **Fernbedienung zuordnen**                                 |
+| `das nicht angibt`                              | ein Sensor wurde gut dekodiert, zu Messwerten, die in seinen `features` fehlen: Füge sie hinzu                  |
+| `das mit dem dekodierten Befehl nichts anfängt` | der Befehl ist dekodiert, aber dieser Gerätetyp reagiert nicht darauf — prüfe seinen Typ                        |
+| `tragen keinen wiederholbaren Befehl`           | das Telegramm erreicht sein Gerät und trägt nichts zu wiederholen (Rolling Code)                                |
+| `seit der Konfigurationsänderung nicht gehört`  | seine Telegramme wurden unter der vorherigen Konfiguration beurteilt: drücken, dann die Aktion erneut ausführen |
+
+Die Zeile nennt **jede** verschiedene Note, die ein Sender gesagt hat, nicht
+nur sein letztes Telegramm — das unterscheidet eine Fernbedienung, deren Tasten
+der Dienst dekodiert (`Noten: level 100 (up); level 0 (down); state stop`), von
+einer, bei der jede Taste zum selben Befehl dekodiert wird. Das zweite ist ein
+`befolgt von`, das nichts bewegt: Ein STOP, wiederholt an einem Rollladen, der
+sich nicht bewegt, ändert einen Zustand, keinen Prozentwert. Der Bericht sagt
+das jetzt und schlägt die Prüfung vor: Drücke Öffnen, dann Schließen, und
+führe die Aktion erneut aus. Ändert sich die Note nicht, dekodiert der
+AirSend-Dienst die Tasten dieser Fernbedienung nicht, und die Position kann
+nicht folgen.
+
+Die Echos deiner eigenen Befehle sind keine Sender: Sie werden am Ende der Zeile
+getrennt gezählt (`Dazu 3 Echos deiner eigenen Befehle`). Das ist der Beweis,
+dass die Telegramme einen Weg zurück haben, auch wenn sonst nichts gehört wird.
+
+Das Verzeichnis wird geleert, wenn die Integration neu startet: „kein
+Funktelegramm seit dem Start der Integration“ heißt „nichts seitdem“, nicht
+„nie“. Drücke die Fernbedienung und führe die Aktion erneut aus.
+
+#### Drei Arten von Stille, die sich ähneln
+
+„Nichts gehört“ umfasst drei sehr unterschiedliche Probleme, und die Zeile
+_Gehört_ unterscheidet sie jetzt:
+
+| Was sie sagt                                           | Was los ist                                                                                    |
+| ------------------------------------------------------ | ---------------------------------------------------------------------------------------------- |
+| `kein Funktelegramm seit dem Start der Integration`    | gar nichts kommt herein: weder die Telegramme des Hauses noch die Echos deiner eigenen Befehle |
+| `kein Telegramm eines anderen Senders, aber N Echos`   | der Weg funktioniert — die Box hört auf dem empfangenen Protokoll nur nichts anderes           |
+| `N Telegramme empfangen und vor jedem Gerät verworfen` | der Funk funktioniert: Die Telegramme selbst waren nicht verwertbar                            |
+
+Daher der Test, wenn die Zeile „kein Funktelegramm“ sagt: **Steuere ein
+Gerät aus Gladys** und führe die Aktion erneut aus. Alles, was die
+Integration sendet, kommt zu ihr zurück, also muss das Echo dieses Befehls im
+Zähler erscheinen.
+
+- das Echo kommt zurück → der Weg ist in Ordnung, und es ist das **empfangene
+  Protokoll**, das nicht das deiner Fernbedienung ist. Lies die Zeile
+  _Empfang_ erneut: Sie sagt, welcher Kanal abonniert ist und welche Geräte er
+  abdeckt. Eine 868-MHz-Fernbedienung (Profalux, Somfy io) wird nie auf Kanal
+  `1` gehört, der 433 MHz ist;
+- auch das Echo kommt nicht zurück → das Problem liegt vor dem Funk: Der
+  AirSend-Dienst sendet nichts an die Integration. Prüfe die Zeile
+  _Empfang_ (hat die Box das Abonnement angenommen?) und die Zeile _Lokal_
+  (antwortet der Dienst?), dann die detaillierten Protokolle.
+
+### Detaillierte Protokolle
+
+Der Funk ist der eine Teil dieser Integration, den niemand beobachten kann:
+Eine Fernbedienung, die nie erscheint, ist entweder ungehört, als
+unzuverlässig verworfen oder gehört und nicht dekodierbar — und nur die
+Debug-Protokolle unterscheiden diese drei.
+
+Das Feld **Detaillierte Protokolle (Debug)** auf dem Bildschirm Konfiguration
+schaltet sie ein. Es wirkt sofort, ohne Neustart: Häkchen setzen, Fernbedienung
+drücken, Protokolle lesen, Häkchen entfernen. Es ist ausführlich und nicht
+dafür gedacht, eingeschaltet zu bleiben.
+
+Das **Passwort** deiner `sp://`-Verbindungszeichenfolge wird nie protokolliert,
+auf keiner Stufe: Der Rest der Zeichenfolge — die Adresse, `gw`, `rhost` — wird
+auf Debug-Stufe protokolliert, das Passwort nur durch seine Länge ersetzt
+(siehe „Nie abtippen“).
+
+Wenn du lieber die Umgebungsvariable des Containers verwendest, funktioniert
+`LOG_LEVEL` weiterhin und hat weiterhin Vorrang: Der Schalter hebt die Stufe
+auf Debug, solange er eingeschaltet ist, und gibt dein `LOG_LEVEL` zurück, wenn
+du ihn ausschaltest.
+
+Die Protokollzeilen werden in der Zeitzone des Feldes **Zeitzone der
+Protokolle** gestempelt (Standard `Europe/Paris`), damit sie dieselbe Uhrzeit
+wie das Dashboard-Widget zeigen: `[2026-09-28T14:02:05.123+02:00] [INFO] …`.
+Jeder IANA-Name funktioniert (`Europe/Berlin`, `America/Montreal`…); leer
+gelassen wird die `TZ` des Containers verwendet, oder UTC.
+
+### Wenn du den AirSend-Dienst anderswo betreibst
+
+Der AirSend Web Service sendet die Telegramme von dem Rechner, auf dem er
+läuft. Wenn die Integration ihn selbst ausführt (Standard), sendet er sie
+direkt an die Integration. Ein **auf einem anderen Rechner** laufender Dienst
+hat keine Möglichkeit, die Integration zu erreichen; die Telegramme müssen
+daher über eine öffentliche URL gehen, die Gladys Plus bereitstellt:
+Verknüpfe dein Gladys-Plus-Konto und füge deinen Open-API-Schlüssel im
+Block **Gladys-Plus-Webhooks** des Bildschirms Konfiguration ein.
+
+## Aktionen
+
+- **Verbindung testen** — prüft den lokalen Kanal, sagt, welches Protokoll
+  empfangen wird, **was die Box tatsächlich gehört hat** und welche Geräte
+  gelesen wurden. Der schnellste Weg, eine falsch eingegebene
+  Verbindungszeichenfolge, eine nicht gelesene Geräteliste oder eine
+  zugeordnete Fernbedienung zu erkennen, deren Telegramme keinen Befehl
+  tragen.
+- **Fernbedienung zuordnen** — drücke die Fernbedienung, wähle das
+  Gerät, das sie steuert: Die Aktion schreibt die wieder einzufügende
+  Geräteliste, Fernbedienung inklusive (siehe „Der Wandsender“).
+- **Funkprotokoll suchen** — durchsucht die Protokolle, die der AirSend-Dienst
+  kennt, nach Marke oder nach `pid`, sagt, wie jedes dekodiert wird und welches
+  gerade empfangen wird: Hierher kommt die `pid` für **Empfangskanal** (siehe
+  „Auf 868 MHz empfangen“).
+- **Gerät identifizieren** — wähle ein Gerät, und es erhält einen PING.
+  Nicht jedes 433-MHz-Gerät reagiert darauf.
+
+## Szenen und Dashboard (Gladys 5.1+)
+
+Diese erfordern **Gladys 5.1 oder neuer**; ein älteres Gladys behält die
+vorherige Version der Integration.
+
+### Szenen-Auslöser
+
+Im Szeneneditor, unter **Integrationen**:
+
+- **Eine Funkfernbedienung wird gedrückt** — ein bei einem Gerät angegebener
+  Wandsender, Schlüsselanhänger oder Funktaster wurde gehört (die `remotes`
+  eines Geräts, eine Fernbedienung vom Typ `1`, eine einem Taster vom Typ
+  `4096` zugeordnete Ersatzfernbedienung). Filtere nach dem Gerät, das sie
+  steuert, und nach dem Befehl (`up`, `down`, `stop`, `favorite`, `on`, `off`,
+  `toggle`). Die Szene kann `device_name`, `order`, `pid` und `addr` lesen.
+  Befehle von Gladys selbst lösen ihn nie aus, eine Szene kann sich also nicht
+  selbst in einer Schleife auslösen. Eine gedrückt gehaltene Fernbedienung ist
+  ein Druck, wie lange auch immer, nicht ein Ereignis pro Telegramm — und auch
+  ein Klick auf der Funktion `click` einer Fernbedienung vom Typ `1`, welche
+  Taste auch immer (Stopp und _my_ eingeschlossen). Diese Funktion kann, wie
+  die Messwerte eines Funksensors, auch über die eigenen Geräte-Auslöser von
+  Gladys eine Szene starten.
+- **Ein Funkbefehl ist fehlgeschlagen** — die Box hat einen Befehl von Gladys
+  nicht gesendet: nicht erreichbar, Verbindungszeichenfolge abgelehnt, Box
+  belegt… Die Szene kann `device_name`, `reason` (`NETWORK`, `SECURITY`,
+  `BUSY`, `HTTP_401`, `UNREACHABLE`…) und `message` lesen. Ein Ereignis pro
+  Gerät und Grund pro Minute: gemacht für eine Benachrichtigung. Nur der
+  Funkbefehl selbst: Eine abgelehnte Wiederholung, während der Befehl
+  hinausging, oder ein Zustand, den Gladys abgelehnt hat, nachdem der Befehl
+  gesendet war, löst ihn nicht aus.
+
+### Szenen-Aktionen
+
+- **Bekannte Position eines Rollladens setzen** — teilt der Integration mit, wo
+  ein zeitgesteuerter Rollladen wirklich steht (0-100 %), **ohne ihn zu
+  bewegen**: nach einem Stromausfall, einer von Hand gedrehten Kurbel, einem
+  von einem Hindernis gestoppten Motor.
+- **Funkempfang neu aktivieren** — abonniert die Box sofort erneut. Nützlich
+  direkt nachdem die Box wieder eingeschaltet wurde (sie vergisst ihr
+  Abonnement). Gibt den empfangenen Kanal als `channel` zurück.
+
+### Das Widget „AirSend-Funk“
+
+Füge es einem Dashboard hinzu: der Zustand des AirSend-Dienstes, das
+Protokoll, das die Box empfängt, das zuletzt gehörte Telegramm, die Echos der
+Befehle von Gladys, die verworfenen Telegramme, Temperatur und Helligkeit der
+Box, wenn sie `sensors: true` hat, und die zuletzt gehörten Sender mit dem, was
+aus ihnen wurde (befolgt, unbekannt, verworfen…). Seine Schaltfläche **Empfang
+neu aktivieren** tut dasselbe wie die Szenen-Aktion. Die Einstellung
+**Angezeigte Sender** (0 bis 8) legt die Länge der Liste fest.
+
+## Gut zu wissen
+
+- 433 MHz ist für die meisten Geräte ein **Einweg**-Protokoll: Nichts
+  bestätigt, dass ein Befehl empfangen wurde, und Gladys zeigt den Wert, den
+  sie gesendet hat. Der Empfang (oben) macht aus dieser Annahme einen echten
+  Zustand, und das Messen eines Rollladens (oben) gibt ihm eine Position.
+- Die Sensoren werden von der **Box selbst** gelesen, über den lokalen Kanal.
+- Der integrierte Dienst erreicht deine Box **aus dem Container der
+  Integration**, über dein LAN: Das `rhost=<IPv4>` der Verbindungszeichenfolge
+  ist die Adresse, die er anwählt, und sie muss vom Gladys-Host aus routbar
+  sein.
+- Den `type` eines Geräts in der Liste zu ändern, erzeugt ein neues Gerät in
+  Gladys (die Kennung ändert sich) — außer zwischen `4098` und `4099`, die sie
+  teilen.
+
+## Fehlerbehebung
+
+| Symptom                                        | Was zu prüfen ist                                                                                                                             |
+| ---------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| `Invalid connection string`                    | **Verbindung testen**: Es zeigt die `sp://`-Zeichenfolge ohne Passwort                                                                        |
+| `Invalid input`                                | Der `channel` des Geräts (`id`/`pid` und `source`/`addr`)                                                                                     |
+| `no radio channel` in den Protokollen          | Der Eintrag trägt keinen Kanal: Er braucht `channel.id` oder das Paar `pid`/`addr`                                                            |
+| `no radio confirmation`                        | Normal bei Geräten ohne Rückmeldung: Setze `wait: false`                                                                                      |
+| Kein Gerät im Tab Entdecken                    | **Verbindung testen**: Die Geräteliste wurde wahrscheinlich nicht gelesen                                                                     |
+| Die Box ist nicht erreichbar                   | Der Teil `?gw=0&rhost=<IPv4>` der Verbindungszeichenfolge                                                                                     |
+| `Integrierter AirSend-Dienst nicht verfügbar`  | Die Protokolle der Integration: Der Dienst protokolliert dort seinen eigenen Start                                                            |
+| Die Box antwortet von Hand, aber nicht hier    | Die IPv4 von `rhost=` muss **aus dem Container** erreichbar sein, nicht nur von deinem Rechner                                                |
+| Du musst mehrmals klicken                      | Erhöhe **Befehlswiederholungen** auf `2` oder `3`, oder das eigene `repeat` des Geräts                                                        |
+| Ein Befehl braucht eine Sekunde zum Senden     | `gw=1` in der Verbindungszeichenfolge: Schalte **Internet gateway** auf airsend.cloud aus                                                     |
+| Ein Befehl ist nach langer Pause langsam       | Die Protokolle sagen, wo die Zeit geblieben ist — siehe [Der erste Befehl nach einer langen Pause](#der-erste-befehl-nach-einer-langen-pause) |
+| Ein Rollladen zeigt keine Position             | Miss ihn: `travel_up` / `travel_down`, dann einmal vollständig öffnen oder schließen                                                          |
+| Die Position driftet mit der Zeit              | Miss die Fahrzeit neu und öffne den Rollladen einmal am Tag vollständig, um ihn neu zu synchronisieren                                        |
+| Kein Telegramm von einer 868-MHz-Fernbedienung | **Verbindung testen**: Kanal `1` ist 433 MHz. Gib das Gerät oder seine `pid` an                                                               |
+| Fernbedienung zugeordnet, nichts bewegt sich   | **Verbindung testen**, Zeile _Gehört_: Sie sagt, ob die Telegramme einen Befehl tragen                                                        |
+| `unreliable, graded N` in den Protokollen      | Ein zu niedrig bewertetes Telegramm: **Unzuverlässige Telegramme akzeptieren**, oder die Box näher stellen                                    |
+| `did not carry the order` in den Protokollen   | Der Name, den diese Zeile dem Fehler gibt — siehe [Wenn die Box Nein sagt](#wenn-die-box-nein-sagt)                                           |
+| Ein Telegramm mit `pid` und ohne `addr`        | Das Protokoll wird nicht dekodiert: Trage diese `pid` (`generisch` für 1) in **Empfangskanal** ein                                            |
+
+Die Integration protokolliert alles, was sie tut: Lies die Protokolle der
+Integration in der Gladys-Oberfläche (Tab **Protokolle**, oder `docker logs`
+auf dem Host) und setze für alle Details in ihrer Konfiguration das
+Häkchen bei **Detaillierte Protokolle (Debug)**.

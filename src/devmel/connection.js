@@ -13,6 +13,7 @@ import { channelToType, planListening } from './listening.js';
 import { describeEmitter } from './heard.js';
 import { hearsChannel } from '../devices/index.js';
 import { ordersOf } from '../capabilities/scenes.js';
+import { localize, pick } from '../i18n.js';
 
 /**
  * The AirSend boxes to talk to when listening for radio frames.
@@ -65,7 +66,7 @@ export function boxDevices(config) {
  * after the wrong field, where the bind itself used to name the service.
  *
  * @param {object} config normalized configuration
- * @returns {{ en: string, fr: string }}
+ * @returns {{ en: string, fr: string, de: string, es: string }}
  */
 export function noBoxFix(config) {
   if (!config.effectiveServiceUrl) {
@@ -76,11 +77,19 @@ export function noBoxFix(config) {
       fr:
         'aucun service AirSend pour le joindre (le service intégré est désactivé et aucune URL ' +
         "de service n'est renseignée)",
+      de:
+        'kein AirSend Web Service, um sie zu erreichen (der integrierte ist ausgeschaltet und ' +
+        'keine Dienst-URL ist eingetragen)',
+      es:
+        'ningún AirSend Web Service para llegar a ella (el integrado está desactivado y no se ha ' +
+        'indicado ninguna URL de servicio)',
     };
   }
   return {
     en: 'paste the sp:// connection string first',
     fr: "collez d'abord la chaîne de connexion sp://",
+    de: 'füge zuerst die sp://-Verbindungszeichenfolge ein',
+    es: 'pegue primero la cadena de conexión sp://',
   };
 }
 
@@ -111,10 +120,14 @@ export async function describeConnection(client, config, service = null) {
         ? {
             en: 'Not configured yet: paste the sp:// connection string exported by airsend.cloud.',
             fr: 'Pas encore configuré : collez la chaîne de connexion sp:// exportée depuis airsend.cloud.',
+            de: 'Noch nicht konfiguriert: Füge die von airsend.cloud exportierte sp://-Verbindungszeichenfolge ein.',
+            es: 'Aún sin configurar: pegue la cadena de conexión sp:// exportada desde airsend.cloud.',
           }
         : {
             en: 'Not configured yet: fill in the AirSend Web Service URL and its connection string.',
             fr: "Pas encore configuré : renseignez l'URL du service AirSend et sa chaîne de connexion.",
+            de: 'Noch nicht konfiguriert: Trage die URL des AirSend Web Service und seine Verbindungszeichenfolge ein.',
+            es: 'Aún sin configurar: indique la URL del AirSend Web Service y su cadena de conexión.',
           },
     };
   }
@@ -129,6 +142,8 @@ export async function describeConnection(client, config, service = null) {
       message: {
         en: `Connection string: ${problem.en}`,
         fr: `Chaîne de connexion : ${problem.fr}`,
+        de: `Verbindungszeichenfolge: ${pick('de', problem)}`,
+        es: `Cadena de conexión: ${pick('es', problem)}`,
       },
     };
   }
@@ -142,6 +157,8 @@ export async function describeConnection(client, config, service = null) {
       message: {
         en: `Built-in AirSend service unavailable: ${serviceError}`,
         fr: `Service AirSend intégré indisponible : ${serviceError}`,
+        de: `Integrierter AirSend-Dienst nicht verfügbar: ${serviceError}`,
+        es: `Servicio AirSend integrado no disponible: ${serviceError}`,
       },
     };
   }
@@ -155,6 +172,8 @@ export async function describeConnection(client, config, service = null) {
       message: {
         en: `AirSend Web Service unreachable: ${err.message}`,
         fr: `Service AirSend injoignable : ${err.message}`,
+        de: `AirSend Web Service nicht erreichbar: ${err.message}`,
+        es: `AirSend Web Service inaccesible: ${err.message}`,
       },
     };
   }
@@ -183,17 +202,27 @@ export async function testConnection(
   heard = null,
   table = null,
 ) {
-  const en = [];
-  const fr = [];
+  // One multi-language object per line of the report, joined per language at
+  // the end: the lines are the same in every language, only their words move.
+  const lines = [];
 
   const where = config.embeddedService
-    ? { en: 'built-in service', fr: 'service intégré' }
-    : { en: 'service', fr: 'service' };
+    ? {
+        en: 'built-in service',
+        fr: 'service intégré',
+        de: 'integrierter AirSend-Dienst',
+        es: 'servicio AirSend integrado',
+      }
+    : { en: 'service', fr: 'service', de: 'AirSend-Dienst', es: 'servicio AirSend' };
 
   const serviceError = embeddedServiceError(config, service);
   if (serviceError) {
-    en.push(`Service: the built-in AirSend service is not running (${serviceError}).`);
-    fr.push(`Service : le service AirSend intégré ne tourne pas (${serviceError}).`);
+    lines.push({
+      en: `Service: the built-in AirSend service is not running (${serviceError}).`,
+      fr: `Service : le service AirSend intégré ne tourne pas (${serviceError}).`,
+      de: `Dienst: Der integrierte AirSend-Dienst läuft nicht (${serviceError}).`,
+      es: `Servicio: el servicio AirSend integrado no está en marcha (${serviceError}).`,
+    });
   }
 
   // The string itself, password removed. It is the one thing a 401 never says
@@ -202,54 +231,103 @@ export async function testConnection(
   // mistakes it catches are ones no check can name (the address of the other
   // box, a gw=1 nobody asked for).
   if (config.spurl) {
-    en.push(`Connection string: ${describeSpurl(config.spurl)}`);
-    fr.push(`Chaîne de connexion : ${describeSpurl(config.spurl)}`);
+    const shown = describeSpurl(config.spurl);
+    lines.push({
+      en: `Connection string: ${shown}`,
+      fr: `Chaîne de connexion : ${shown}`,
+      de: `Verbindungszeichenfolge: ${shown}`,
+      es: `Cadena de conexión: ${shown}`,
+    });
   }
   for (const { name, spurl } of otherSpurls(config)) {
-    en.push(`Connection string of "${name}": ${describeSpurl(spurl)}`);
-    fr.push(`Chaîne de connexion de « ${name} » : ${describeSpurl(spurl)}`);
+    const shown = describeSpurl(spurl);
+    lines.push({
+      en: `Connection string of "${name}": ${shown}`,
+      fr: `Chaîne de connexion de « ${name} » : ${shown}`,
+      de: `Verbindungszeichenfolge von „${name}“: ${shown}`,
+      es: `Cadena de conexión de «${name}»: ${shown}`,
+    });
   }
   for (const problem of config.spurlProblems ?? []) {
-    en.push(`Connection string: ${problem.en}`);
-    fr.push(`Chaîne de connexion : ${problem.fr}`);
+    lines.push({
+      en: `Connection string: ${problem.en}`,
+      fr: `Chaîne de connexion : ${problem.fr}`,
+      de: `Verbindungszeichenfolge: ${pick('de', problem)}`,
+      es: `Cadena de conexión: ${pick('es', problem)}`,
+    });
   }
 
   if (config.effectiveServiceUrl && config.spurl) {
+    const url = config.effectiveServiceUrl;
     try {
       await client.pingLocal();
-      en.push(`Local: AirSend ${where.en} reachable at ${config.effectiveServiceUrl}.`);
-      fr.push(`Local : ${where.fr} AirSend joignable sur ${config.effectiveServiceUrl}.`);
+      lines.push({
+        en: `Local: AirSend ${where.en} reachable at ${url}.`,
+        fr: `Local : ${where.fr} AirSend joignable sur ${url}.`,
+        de: `Lokal: ${where.de} erreichbar unter ${url}.`,
+        es: `Local: ${where.es} accesible en ${url}.`,
+      });
     } catch (err) {
-      en.push(`Local: unreachable (${err.message}).`);
-      fr.push(`Local : injoignable (${err.message}).`);
+      lines.push({
+        en: `Local: unreachable (${err.message}).`,
+        fr: `Local : injoignable (${err.message}).`,
+        de: `Lokal: nicht erreichbar (${err.message}).`,
+        es: `Local: inaccesible (${err.message}).`,
+      });
     }
   } else if (!config.effectiveServiceUrl) {
-    en.push('Local: disabled (no AirSend service, built-in one turned off).');
-    fr.push('Local : désactivé (aucun service AirSend, service intégré désactivé).');
+    lines.push({
+      en: 'Local: disabled (no AirSend service, built-in one turned off).',
+      fr: 'Local : désactivé (aucun service AirSend, service intégré désactivé).',
+      de: 'Lokal: deaktiviert (kein AirSend-Dienst, der integrierte ist ausgeschaltet).',
+      es: 'Local: desactivado (ningún servicio AirSend, el integrado está desactivado).',
+    });
   } else {
-    en.push('Local: no connection string yet (the sp:// URL exported by airsend.cloud).');
-    fr.push(
-      "Local : pas encore de chaîne de connexion (l'URL sp:// exportée depuis airsend.cloud).",
-    );
+    lines.push({
+      en: 'Local: no connection string yet (the sp:// URL exported by airsend.cloud).',
+      fr: "Local : pas encore de chaîne de connexion (l'URL sp:// exportée depuis airsend.cloud).",
+      de: 'Lokal: noch keine Verbindungszeichenfolge (die von airsend.cloud exportierte sp://-URL).',
+      es: 'Local: aún no hay cadena de conexión (la URL sp:// exportada desde airsend.cloud).',
+    });
   }
 
-  en.push(`Listening: ${describeListening(config, listen, 'en')}`);
-  fr.push(`Écoute : ${describeListening(config, listen, 'fr')}`);
+  lines.push(
+    localize(
+      (language) =>
+        `${pick(language, REPORT_LABELS.listening)}${describeListening(config, listen, language)}`,
+    ),
+  );
 
   // Omitted rather than apologized for when no registry was handed over: the
   // running integration always passes one, and a report line about a missing
   // internal is a line that helps nobody.
   if (typeof heard?.list === 'function') {
     const now = Date.now();
-    en.push(`Heard: ${describeHeard(config, heard.list(), 'en', now, heard, table)}`);
-    fr.push(`Entendu : ${describeHeard(config, heard.list(), 'fr', now, heard, table)}`);
+    const entries = heard.list();
+    lines.push(
+      localize(
+        (language) =>
+          `${pick(language, REPORT_LABELS.heard)}` +
+          describeHeard(config, entries, language, now, heard, table),
+      ),
+    );
   }
 
-  en.push(`Devices: ${summarize(config, 'en')}`);
-  fr.push(`Appareils : ${summarize(config, 'fr')}`);
+  lines.push(
+    localize(
+      (language) => `${pick(language, REPORT_LABELS.devices)}${summarize(config, language)}`,
+    ),
+  );
 
-  return { en: en.join('\n'), fr: fr.join('\n') };
+  return localize((language) => lines.map((line) => pick(language, line)).join('\n'));
 }
+
+/** The names of the report lines, colon included (French spaces it). */
+const REPORT_LABELS = {
+  listening: { en: 'Listening: ', fr: 'Écoute : ', de: 'Empfang: ', es: 'Escucha: ' },
+  heard: { en: 'Heard: ', fr: 'Entendu : ', de: 'Gehört: ', es: 'Oído: ' },
+  devices: { en: 'Devices: ', fr: 'Appareils : ', de: 'Geräte: ', es: 'Dispositivos: ' },
+};
 
 /**
  * What the radio listener is doing. Worth its own line, and the longest one of
@@ -262,43 +340,66 @@ function describeListening(config, listen, language) {
   // it would listen to is still the answer to the question being asked.
   const plan = listen?.plan ?? planListening(config);
   if (!plan.enabled) {
-    return language === 'fr'
-      ? "désactivée (canal d'écoute à 0)."
-      : 'disabled (listening channel set to 0).';
+    return pick(language, {
+      en: 'disabled (listening channel set to 0).',
+      fr: "désactivée (canal d'écoute à 0).",
+      de: 'deaktiviert (Empfangskanal auf 0).',
+      es: 'desactivada (canal de escucha en 0).',
+    });
   }
 
   const channel = describeChannel(plan, language);
   const coverage = describeCoverage(plan, language);
 
   if (listen?.error) {
-    return language === 'fr'
-      ? `${channel} : le boîtier a refusé l'abonnement (${listen.error}).`
-      : `${channel}: the box refused the subscription (${listen.error}).`;
+    return pick(language, {
+      en: `${channel}: the box refused the subscription (${listen.error}).`,
+      fr: `${channel} : le boîtier a refusé l'abonnement (${listen.error}).`,
+      de: `${channel}: Die Box hat das Abonnement abgelehnt (${listen.error}).`,
+      es: `${channel}: la pasarela rechazó la suscripción (${listen.error}).`,
+    });
   }
   if (listen?.url) {
-    return language === 'fr'
-      ? `${channel}, trames poussées vers ${listen.url}.${coverage}`
-      : `${channel}, frames pushed to ${listen.url}.${coverage}`;
+    return pick(language, {
+      en: `${channel}, frames pushed to ${listen.url}.${coverage}`,
+      fr: `${channel}, trames poussées vers ${listen.url}.${coverage}`,
+      de: `${channel}, Telegramme werden an ${listen.url} gesendet.${coverage}`,
+      es: `${channel}, tramas enviadas a ${listen.url}.${coverage}`,
+    });
   }
   // No box to bind through: the route is not what is missing, the connection
   // string (or the service) is — and sending the user after Gladys Plus would
   // be the wrong half.
   if (boxDevices(config).length === 0) {
-    const fix = noBoxFix(config);
-    return language === 'fr'
-      ? `${channel} : aucun boîtier à qui demander l'écoute — ${fix.fr}.`
-      : `${channel}: no AirSend box to listen through — ${fix.en}.`;
+    const fix = pick(language, noBoxFix(config));
+    return pick(language, {
+      en: `${channel}: no AirSend box to listen through — ${fix}.`,
+      fr: `${channel} : aucun boîtier à qui demander l'écoute — ${fix}.`,
+      de: `${channel}: keine AirSend-Box, über die empfangen werden kann — ${fix}.`,
+      es: `${channel}: ninguna pasarela AirSend a la que pedir la escucha — ${fix}.`,
+    });
   }
   // No route at all. With the bundled service that never happens (the loopback
   // callback is always there); with a service of the user's own it does, and
   // the relay is then the only way back in.
-  return language === 'fr'
-    ? `${channel} : aucune route pour les trames. Un service AirSend que vous ` +
-        'faites tourner ailleurs ne peut pas joindre cette intégration directement : ' +
-        'liez Gladys Plus pour recevoir les trames.'
-    : `${channel}: no route for the frames. An AirSend service you run ` +
-        'elsewhere cannot reach this integration directly: link Gladys Plus to ' +
-        'receive them.';
+  return pick(language, {
+    en:
+      `${channel}: no route for the frames. An AirSend service you run ` +
+      'elsewhere cannot reach this integration directly: link Gladys Plus to ' +
+      'receive them.',
+    fr:
+      `${channel} : aucune route pour les trames. Un service AirSend que vous ` +
+      'faites tourner ailleurs ne peut pas joindre cette intégration directement : ' +
+      'liez Gladys Plus pour recevoir les trames.',
+    de:
+      `${channel}: kein Weg für die Telegramme. Ein AirSend-Dienst, den du ` +
+      'anderswo betreibst, kann diese Integration nicht direkt erreichen: Verknüpfe ' +
+      'Gladys Plus, um sie zu empfangen.',
+    es:
+      `${channel}: ninguna ruta para las tramas. Un servicio AirSend que ejecuta ` +
+      'en otro lugar no puede llegar directamente a esta integración: vincule Gladys ' +
+      'Plus para recibirlas.',
+  });
 }
 
 /** The protocol being listened to, named when the service knows its name. */
@@ -308,13 +409,19 @@ function describeChannel(plan, language) {
   // deduction made without a single device is just the generic decoder.
   const deduced = plan.deduced && plan.covered.length + plan.uncovered.length > 0;
   const how = deduced
-    ? language === 'fr'
-      ? ' (déduit de vos appareils)'
-      : ' (deduced from your devices)'
+    ? pick(language, {
+        en: ' (deduced from your devices)',
+        fr: ' (déduit de vos appareils)',
+        de: ' (aus deinen Geräten abgeleitet)',
+        es: ' (deducido de sus dispositivos)',
+      })
     : '';
-  return language === 'fr'
-    ? `canal ${plan.channel}${name}${how}`
-    : `channel ${plan.channel}${name}${how}`;
+  return pick(language, {
+    en: `channel ${plan.channel}${name}${how}`,
+    fr: `canal ${plan.channel}${name}${how}`,
+    de: `Kanal ${plan.channel}${name}${how}`,
+    es: `canal ${plan.channel}${name}${how}`,
+  });
 }
 
 /**
@@ -331,34 +438,66 @@ function describeCoverage(plan, language) {
     // Nothing declared: the generic 433 MHz decoder is what is left, and
     // saying so is the whole point — it hears nothing at all of an 868 MHz
     // protocol, which is the shape of "my remote never shows up".
-    return language === 'fr'
-      ? " Aucun appareil radio déclaré : c'est l'écoute générique 433 MHz par défaut, " +
-          'sourde aux protocoles 868 MHz (Profalux, Somfy io). Déclarez un appareil sur ' +
-          "ce protocole, ou renseignez son pid dans le canal d'écoute."
-      : ' No radio device declared: this is the default generic 433 MHz listening, ' +
-          'deaf to 868 MHz protocols (Profalux, Somfy io). Declare a device on that ' +
-          'protocol, or fill in its pid as the listening channel.';
+    return pick(language, {
+      en:
+        ' No radio device declared: this is the default generic 433 MHz listening, ' +
+        'deaf to 868 MHz protocols (Profalux, Somfy io). Declare a device on that ' +
+        'protocol, or fill in its pid as the listening channel.',
+      fr:
+        " Aucun appareil radio déclaré : c'est l'écoute générique 433 MHz par défaut, " +
+        'sourde aux protocoles 868 MHz (Profalux, Somfy io). Déclarez un appareil sur ' +
+        "ce protocole, ou renseignez son pid dans le canal d'écoute.",
+      de:
+        ' Kein Funkgerät angegeben: Das ist der standardmäßige generische 433-MHz-Empfang, ' +
+        'taub für 868-MHz-Protokolle (Profalux, Somfy io). Gib ein Gerät mit diesem ' +
+        'Protokoll an oder trage seine pid als Empfangskanal ein.',
+      es:
+        ' Ningún dispositivo de radio declarado: es la escucha genérica de 433 MHz por ' +
+        'defecto, sorda a los protocolos de 868 MHz (Profalux, Somfy io). Declare un ' +
+        'dispositivo con ese protocolo o indique su pid como canal de escucha.',
+    });
   }
   const heard = names(plan.covered);
   const extra = `${describeEchoOnly(plan, language)}${describeUnheardRemotes(plan, language)}`;
   if (plan.uncovered.length === 0) {
-    return language === 'fr'
-      ? ` Appareils entendus : ${heard}.${extra}`
-      : ` Devices heard: ${heard}.${extra}`;
+    return pick(language, {
+      en: ` Devices heard: ${heard}.${extra}`,
+      fr: ` Appareils entendus : ${heard}.${extra}`,
+      de: ` Gehörte Geräte: ${heard}.${extra}`,
+      es: ` Dispositivos oídos: ${heard}.${extra}`,
+    });
   }
   const deaf = names(plan.uncovered);
   if (plan.covered.length === 0) {
-    return language === 'fr'
-      ? ` Aucun appareil déclaré n'émet sur ce protocole : ${deaf} ne ` +
-          "seront pas entendus. Videz le canal d'écoute pour le déduire de vos appareils."
-      : ` No declared device speaks this protocol: ${deaf} will not be heard. ` +
-          'Clear the listening channel to deduce it from your devices.';
+    return pick(language, {
+      en:
+        ` No declared device speaks this protocol: ${deaf} will not be heard. ` +
+        'Clear the listening channel to deduce it from your devices.',
+      fr:
+        ` Aucun appareil déclaré n'émet sur ce protocole : ${deaf} ne ` +
+        "seront pas entendus. Videz le canal d'écoute pour le déduire de vos appareils.",
+      de:
+        ` Kein angegebenes Gerät sendet mit diesem Protokoll: ${deaf} werden nicht ` +
+        'gehört. Leere den Empfangskanal, um ihn aus deinen Geräten abzuleiten.',
+      es:
+        ` Ningún dispositivo declarado emite con este protocolo: ${deaf} no se ` +
+        'oirán. Vacíe el canal de escucha para deducirlo de sus dispositivos.',
+    });
   }
-  return language === 'fr'
-    ? ` Appareils entendus : ${heard}. Le boîtier n'écoute qu'un protocole à la ` +
-        `fois : ${deaf} ne seront pas entendus.${extra}`
-    : ` Devices heard: ${heard}. The box listens to one protocol at a time: ` +
-        `${deaf} will not be heard.${extra}`;
+  return pick(language, {
+    en:
+      ` Devices heard: ${heard}. The box listens to one protocol at a time: ` +
+      `${deaf} will not be heard.${extra}`,
+    fr:
+      ` Appareils entendus : ${heard}. Le boîtier n'écoute qu'un protocole à la ` +
+      `fois : ${deaf} ne seront pas entendus.${extra}`,
+    de:
+      ` Gehörte Geräte: ${heard}. Die Box empfängt nur ein Protokoll auf einmal: ` +
+      `${deaf} werden nicht gehört.${extra}`,
+    es:
+      ` Dispositivos oídos: ${heard}. La pasarela solo escucha un protocolo a la vez: ` +
+      `${deaf} no se oirán.${extra}`,
+  });
 }
 
 /**
@@ -374,16 +513,30 @@ function describeEchoOnly(plan, language) {
   if (!plan.echoOnly) {
     return '';
   }
-  return language === 'fr'
-    ? " Aucun de ces appareils n'émet de lui-même : volets, interrupteurs et lampes reçoivent " +
-        'les ordres, ils ne parlent pas. Sur ce canal le boîtier n’entendra que l’écho des ordres ' +
-        'de Gladys. Une télécommande murale, elle, a son propre protocole et sa propre adresse : ' +
-        'appuyez dessus, puis relancez cette action — si rien n’apparaît dans « Entendu », c’est ' +
-        "que le boîtier n'écoute pas SON protocole."
-    : ' None of them emits by itself: shutters, switches and lamps are talked to, they do not ' +
-        'talk. On this channel the box will only ever hear the echo of Gladys own orders. A wall ' +
-        'remote has its own protocol and its own address: press it, then run this action again — ' +
-        'if nothing shows up under "Heard", the box is not listening to ITS protocol.';
+  return pick(language, {
+    en:
+      ' None of them emits by itself: shutters, switches and lamps are talked to, they do not ' +
+      'talk. On this channel the box will only ever hear the echo of Gladys own orders. A wall ' +
+      'remote has its own protocol and its own address: press it, then run this action again — ' +
+      'if nothing shows up under "Heard", the box is not listening to ITS protocol.',
+    fr:
+      " Aucun de ces appareils n'émet de lui-même : volets, interrupteurs et lampes reçoivent " +
+      'les ordres, ils ne parlent pas. Sur ce canal le boîtier n’entendra que l’écho des ordres ' +
+      'de Gladys. Une télécommande murale, elle, a son propre protocole et sa propre adresse : ' +
+      'appuyez dessus, puis relancez cette action — si rien n’apparaît dans « Entendu », c’est ' +
+      "que le boîtier n'écoute pas SON protocole.",
+    de:
+      ' Keines davon sendet von selbst: Rollläden, Schalter und Lampen empfangen Befehle, sie ' +
+      'sprechen nicht. Auf diesem Kanal hört die Box nur das Echo der Befehle von Gladys. Ein ' +
+      'Wandsender hat sein eigenes Protokoll und seine eigene Adresse: Drücke ihn und ' +
+      'führe diese Aktion erneut aus — erscheint unter „Gehört“ nichts, empfängt die Box ' +
+      'nicht SEIN Protokoll.',
+    es:
+      ' Ninguno emite por sí mismo: persianas, interruptores y lámparas reciben órdenes, no ' +
+      'hablan. En este canal la pasarela solo oirá el eco de las órdenes de Gladys. Un mando de ' +
+      'pared tiene su propio protocolo y su propia dirección: púlselo y vuelva a ejecutar esta ' +
+      'acción — si no aparece nada en «Oído», la pasarela no escucha SU protocolo.',
+  });
 }
 
 /**
@@ -403,15 +556,23 @@ function describeUnheardRemotes(plan, language) {
   const more = unheard.length > 5 ? ` (+${unheard.length - 5})` : '';
   // The value to type, spelled out: "their pid" is 1 for a remote of the
   // generic decoder, and the field reads 1 as "deduce".
-  const typed = (lang) =>
-    [...new Set(unheard.map(({ remote }) => channelToType(remote.id, lang)))].join(
-      lang === 'fr' ? ' ou ' : ' or ',
-    );
-  return language === 'fr'
-    ? ` Télécommandes déclarées sur un autre protocole, donc jamais entendues : ${listed}${more}. ` +
-        `Renseignez ${typed('fr')} dans le canal d'écoute pour écouter le leur à la place.`
-    : ` Remotes declared on another protocol, so never heard: ${listed}${more}. Fill in ` +
-        `${typed('en')} as the listening channel to listen to theirs instead.`;
+  const typed = [...new Set(unheard.map(({ remote }) => channelToType(remote.id, language)))].join(
+    pick(language, { en: ' or ', fr: ' ou ', de: ' oder ', es: ' o ' }),
+  );
+  return pick(language, {
+    en:
+      ` Remotes declared on another protocol, so never heard: ${listed}${more}. Fill in ` +
+      `${typed} as the listening channel to listen to theirs instead.`,
+    fr:
+      ` Télécommandes déclarées sur un autre protocole, donc jamais entendues : ${listed}${more}. ` +
+      `Renseignez ${typed} dans le canal d'écoute pour écouter le leur à la place.`,
+    de:
+      ` Fernbedienungen mit einem anderen Protokoll, daher nie gehört: ${listed}${more}. ` +
+      `Trage ${typed} als Empfangskanal ein, um stattdessen ihres zu empfangen.`,
+    es:
+      ` Mandos declarados con otro protocolo, por lo que nunca se oyen: ${listed}${more}. ` +
+      `Indique ${typed} como canal de escucha para escuchar el suyo en su lugar.`,
+  });
 }
 
 /**
@@ -469,10 +630,15 @@ function describeHeard(config, entries, language, now = Date.now(), tally = null
     .map((entry) => describeHeardEmitter(config, entry, now, language, table))
     .join(language === 'fr' ? ' ; ' : '; ');
   const more = entries.length > HEARD_SHOWN ? ` (+${entries.length - HEARD_SHOWN})` : '';
-  const plural = entries.length > 1 ? 's' : '';
-  return language === 'fr'
-    ? `${entries.length} émetteur${plural} entendu${plural} : ${listed}${more}.${echoes(tally, language)}`
-    : `${entries.length} emitter${plural} heard: ${listed}${more}.${echoes(tally, language)}`;
+  const count = entries.length;
+  const plural = count > 1;
+  const tail = `${listed}${more}.${echoes(tally, language)}`;
+  return pick(language, {
+    en: `${count} emitter${plural ? 's' : ''} heard: ${tail}`,
+    fr: `${count} émetteur${plural ? 's' : ''} entendu${plural ? 's' : ''} : ${tail}`,
+    de: `${count} Sender gehört: ${tail}`,
+    es: `${count} emisor${plural ? 'es' : ''} oído${plural ? 's' : ''}: ${tail}`,
+  });
 }
 
 /**
@@ -489,11 +655,21 @@ function echoes(tally, language) {
   if (own === 0) {
     return '';
   }
-  return language === 'fr'
-    ? ` Plus ${own} écho${own > 1 ? 's' : ''} de vos propres ordres : la route des trames ` +
-        'fonctionne.'
-    : ` Plus ${own} echo${own > 1 ? 'es' : ''} of your own orders: the route the frames take ` +
-        'works.';
+  const plural = own > 1;
+  return pick(language, {
+    en:
+      ` Plus ${own} echo${plural ? 'es' : ''} of your own orders: the route the frames take ` +
+      'works.',
+    fr:
+      ` Plus ${own} écho${plural ? 's' : ''} de vos propres ordres : la route des trames ` +
+      'fonctionne.',
+    de:
+      ` Dazu ${own} Echo${plural ? 's' : ''} deiner eigenen Befehle: Der Weg der Telegramme ` +
+      'funktioniert.',
+    es:
+      ` Además, ${own} eco${plural ? 's' : ''} de sus propias órdenes: la ruta de las tramas ` +
+      'funciona.',
+  });
 }
 
 /**
@@ -519,38 +695,80 @@ function describeSilence(tally, language) {
 
   if (dropped > 0) {
     const plural = dropped > 1 ? 's' : '';
-    return language === 'fr'
-      ? `${dropped} trame${plural} reçue${plural} et écartée${plural} avant tout appareil ` +
-          `(dernier motif : ${tally.lastDrop}). La radio fonctionne : ce sont les trames ` +
-          "elles-mêmes qui n'étaient pas exploitables."
-      : `${dropped} frame${plural} arrived and ${dropped > 1 ? 'were' : 'was'} dropped before ` +
-          `any device (last reason: ${tally.lastDrop}). The radio works: it is the frames ` +
-          'themselves that were not usable.';
+    const last = tally.lastDrop;
+    return pick(language, {
+      en:
+        `${dropped} frame${plural} arrived and ${dropped > 1 ? 'were' : 'was'} dropped before ` +
+        `any device (last reason: ${last}). The radio works: it is the frames ` +
+        'themselves that were not usable.',
+      fr:
+        `${dropped} trame${plural} reçue${plural} et écartée${plural} avant tout appareil ` +
+        `(dernier motif : ${last}). La radio fonctionne : ce sont les trames ` +
+        "elles-mêmes qui n'étaient pas exploitables.",
+      de:
+        `${dropped} Telegramm${dropped > 1 ? 'e' : ''} empfangen und vor jedem Gerät ` +
+        `verworfen (letzter Grund: ${last}). Der Funk funktioniert: Die Telegramme selbst ` +
+        'waren nicht verwertbar.',
+      es:
+        `${dropped} trama${plural} recibida${plural} y descartada${plural} antes de llegar a ` +
+        `ningún dispositivo (último motivo: ${last}). La radio funciona: son las propias ` +
+        'tramas las que no eran utilizables.',
+    });
   }
   if (own > 0) {
-    return language === 'fr'
-      ? `aucune trame d'un autre émetteur, mais ${own} écho${own > 1 ? 's' : ''} de vos propres ` +
-          'ordres est bien revenu : la route des trames fonctionne, et le boîtier n’entend rien ' +
-          "d'autre sur le protocole écouté. Vérifiez la ligne Écoute ci-dessus : c'est le " +
-          'protocole de votre télécommande qu’il doit écouter.'
-      : `no frame from any other emitter, but ${own} echo${own > 1 ? 'es' : ''} of our own ` +
-          'orders did come back: the route works, and the box hears nothing else on the protocol ' +
-          'it listens to. Check the Listening line above: it must be the protocol of your remote.';
+    const plural = own > 1;
+    return pick(language, {
+      en:
+        `no frame from any other emitter, but ${own} echo${plural ? 'es' : ''} of our own ` +
+        'orders did come back: the route works, and the box hears nothing else on the protocol ' +
+        'it listens to. Check the Listening line above: it must be the protocol of your remote.',
+      fr:
+        `aucune trame d'un autre émetteur, mais ${own} écho${plural ? 's' : ''} de vos propres ` +
+        'ordres est bien revenu : la route des trames fonctionne, et le boîtier n’entend rien ' +
+        "d'autre sur le protocole écouté. Vérifiez la ligne Écoute ci-dessus : c'est le " +
+        'protocole de votre télécommande qu’il doit écouter.',
+      de:
+        `kein Telegramm eines anderen Senders, aber ${own} Echo${plural ? 's' : ''} deiner ` +
+        'eigenen Befehle kam zurück: Der Weg funktioniert, und die Box hört auf dem ' +
+        'empfangenen Protokoll nichts anderes. Prüfe die Zeile Empfang oben: Es muss das ' +
+        'Protokoll deiner Fernbedienung sein.',
+      es:
+        `ninguna trama de otro emisor, pero ${own} eco${plural ? 's' : ''} de sus propias ` +
+        `órdenes sí ha${plural ? 'n' : ''} vuelto: la ruta funciona, y la pasarela no oye nada ` +
+        'más en el protocolo que escucha. Compruebe la línea Escucha de arriba: debe ser el ' +
+        'protocolo de su mando.',
+    });
   }
   if (seen > 0) {
-    return language === 'fr'
-      ? `${seen} trame(s) reçue(s), aucune exploitable.`
-      : `${seen} frame(s) arrived, none of them usable.`;
+    return pick(language, {
+      en: `${seen} frame(s) arrived, none of them usable.`,
+      fr: `${seen} trame(s) reçue(s), aucune exploitable.`,
+      de: `${seen} Telegramm(e) empfangen, keines verwertbar.`,
+      es: `${seen} trama(s) recibida(s), ninguna utilizable.`,
+    });
   }
-  return language === 'fr'
-    ? 'aucune trame radio depuis le démarrage de l’intégration. Appuyez sur la télécommande, ' +
-        'puis relancez cette action. Si rien n’apparaît, actionnez un appareil depuis Gladys : ' +
-        "l'écho de cet ordre doit, lui, revenir — s'il ne revient pas non plus, c'est la route " +
-        'des trames qui est en cause, pas la télécommande (voir la ligne Écoute ci-dessus).'
-    : 'no radio frame since the integration started. Press the remote, then run this action ' +
-        'again. If nothing shows up, drive a device from Gladys: the echo of that order should ' +
-        'come back — if it does not either, the problem is the route the frames take, not the ' +
-        'remote (see the Listening line above).';
+  return pick(language, {
+    en:
+      'no radio frame since the integration started. Press the remote, then run this action ' +
+      'again. If nothing shows up, drive a device from Gladys: the echo of that order should ' +
+      'come back — if it does not either, the problem is the route the frames take, not the ' +
+      'remote (see the Listening line above).',
+    fr:
+      'aucune trame radio depuis le démarrage de l’intégration. Appuyez sur la télécommande, ' +
+      'puis relancez cette action. Si rien n’apparaît, actionnez un appareil depuis Gladys : ' +
+      "l'écho de cet ordre doit, lui, revenir — s'il ne revient pas non plus, c'est la route " +
+      'des trames qui est en cause, pas la télécommande (voir la ligne Écoute ci-dessus).',
+    de:
+      'kein Funktelegramm seit dem Start der Integration. Drücke die Fernbedienung und ' +
+      'führe diese Aktion erneut aus. Erscheint nichts, steuere ein Gerät aus Gladys: ' +
+      'Das Echo dieses Befehls sollte zurückkommen — kommt auch das nicht, liegt das Problem ' +
+      'beim Weg der Telegramme, nicht bei der Fernbedienung (siehe die Zeile Empfang oben).',
+    es:
+      'ninguna trama de radio desde que se inició la integración. Pulse el mando y vuelva a ' +
+      'ejecutar esta acción. Si no aparece nada, accione un dispositivo desde Gladys: el eco de ' +
+      'esa orden debería volver — si tampoco vuelve, el problema es la ruta de las tramas, no ' +
+      'el mando (vea la línea Escucha de arriba).',
+  });
 }
 
 /** Why its last frame went nowhere, when something did throw it away. */
@@ -558,9 +776,12 @@ function dropped(entry, language) {
   if (!entry.dropped) {
     return '';
   }
-  return language === 'fr'
-    ? `, trame écartée : ${entry.dropped}`
-    : `, frame dropped: ${entry.dropped}`;
+  return pick(language, {
+    en: `, frame dropped: ${entry.dropped}`,
+    fr: `, trame écartée : ${entry.dropped}`,
+    de: `, Telegramm verworfen: ${entry.dropped}`,
+    es: `, trama descartada: ${entry.dropped}`,
+  });
 }
 
 /** One emitter of the registry, and what the devices made of its frames. */
@@ -588,13 +809,22 @@ export function describeFate(config, entry, language) {
   // the documented last resort once X is listened to): the frames are then
   // followed like any other, and advising the channel already set was wrong.
   if ((entry.source === null || entry.source === undefined) && claimants.length === 0) {
-    return language === 'fr'
-      ? `le boîtier n'a pas décodé ce protocole (aucune adresse)${dropped(entry, language)} : ` +
-          `renseignez ${channelToType(entry.id, 'fr')} comme canal d'écoute pour qu'il l'écoute ` +
-          'sur son propre décodeur'
-      : `the box did not decode this protocol (no address)${dropped(entry, language)}: set the ` +
-          `listening channel to ${channelToType(entry.id, 'en')} so it listens on that ` +
-          "protocol's own decoder";
+    const why = dropped(entry, language);
+    const typed = channelToType(entry.id, language);
+    return pick(language, {
+      en:
+        `the box did not decode this protocol (no address)${why}: set the ` +
+        `listening channel to ${typed} so it listens on that protocol's own decoder`,
+      fr:
+        `le boîtier n'a pas décodé ce protocole (aucune adresse)${why} : ` +
+        `renseignez ${typed} comme canal d'écoute pour qu'il l'écoute sur son propre décodeur`,
+      de:
+        `die Box hat dieses Protokoll nicht dekodiert (keine Adresse)${why}: Trage ` +
+        `${typed} als Empfangskanal ein, damit sie es mit seinem eigenen Decoder empfängt`,
+      es:
+        `la pasarela no decodificó este protocolo (sin dirección)${why}: indique ${typed} ` +
+        'como canal de escucha para que lo escuche con su propio decodificador',
+    });
   }
   // What its frames did was established under the previous configuration (see
   // HeardChannels.forgetVerdicts): a remote heard before it was attached was
@@ -604,60 +834,114 @@ export function describeFate(config, entry, language) {
   // "Accept unreliable frames" contradicted the attach answer just followed.
   if (entry.stale && claimants.length > 0) {
     const claimed = names(claimants);
-    return language === 'fr'
-      ? `déclaré sur ${claimed}, pas entendu depuis le changement de configuration : ` +
-          "appuyez dessus pour voir s'il est suivi"
-      : `declared on ${claimed}, not heard since the configuration changed: press it to see ` +
-          'whether it is followed';
+    return pick(language, {
+      en:
+        `declared on ${claimed}, not heard since the configuration changed: press it to see ` +
+        'whether it is followed',
+      fr:
+        `déclaré sur ${claimed}, pas entendu depuis le changement de configuration : ` +
+        "appuyez dessus pour voir s'il est suivi",
+      de:
+        `angegeben bei ${claimed}, seit der Konfigurationsänderung nicht gehört: Drücke ` +
+        'ihn, um zu sehen, ob er befolgt wird',
+      es:
+        `declarado en ${claimed}, no oído desde el cambio de configuración: púlselo para ver ` +
+        'si se sigue',
+    });
   }
   // Dropped on the way in: no device ever saw it, so nothing below applies.
   // Worth naming — an emitter the box hears loud and clear and grades badly is
   // a radio problem (distance, interference), not a configuration one.
   if (entry.dropped) {
-    return language === 'fr'
-      ? `sa dernière trame a été écartée avant tout appareil (${entry.dropped}) : « Accepter ` +
-          'les trames peu fiables » les laisse passer'
-      : `its last frame was dropped before any device (${entry.dropped}): "Accept unreliable ` +
-          'frames" lets them through';
+    return pick(language, {
+      en:
+        `its last frame was dropped before any device (${entry.dropped}): "Accept unreliable ` +
+        'frames" lets them through',
+      fr:
+        `sa dernière trame a été écartée avant tout appareil (${entry.dropped}) : « Accepter ` +
+        'les trames peu fiables » les laisse passer',
+      de:
+        `sein letztes Telegramm wurde vor jedem Gerät verworfen (${entry.dropped}): ` +
+        '„Unzuverlässige Telegramme akzeptieren“ lässt sie durch',
+      es:
+        `su última trama se descartó antes de llegar a ningún dispositivo (${entry.dropped}): ` +
+        '«Aceptar tramas poco fiables» las deja pasar',
+    });
   }
   if (claimants.length === 0) {
-    return language === 'fr'
-      ? 'aucun appareil ne le déclare : « Rattacher une télécommande » écrit la ligne'
-      : 'no device declares it: "Attach a remote" writes the line for you';
+    return pick(language, {
+      en: 'no device declares it: "Attach a remote" writes the line for you',
+      fr: 'aucun appareil ne le déclare : « Rattacher une télécommande » écrit la ligne',
+      de: 'kein Gerät gibt ihn an: „Fernbedienung zuordnen“ schreibt die Zeile für dich',
+      es: 'ningún dispositivo lo declara: «Asociar un mando» le escribe la línea',
+    });
   }
   const claimed = names(claimants);
   if (entry.understood) {
-    return language === 'fr'
-      ? `suivi par ${claimed}${describeOneNote(entry, claimants, language)}`
-      : `followed by ${claimed}${describeOneNote(entry, claimants, language)}`;
+    const oneNote = describeOneNote(entry, claimants, language);
+    return pick(language, {
+      en: `followed by ${claimed}${oneNote}`,
+      fr: `suivi par ${claimed}${oneNote}`,
+      de: `befolgt von ${claimed}${oneNote}`,
+      es: `seguido por ${claimed}${oneNote}`,
+    });
   }
   // Decoded fine, into readings the device does not declare (a weather sensor
   // pasted from the airsend.cloud export, which carries no `features`).
   if (entry.undeclared?.length > 0) {
     const features = entry.undeclared.map((feature) => `"${feature}"`).join(', ');
-    return language === 'fr'
-      ? `déclaré sur ${claimed}, qui ne déclare pas ce qu'il a décodé : ajoutez ${features} ` +
-          'à ses « features »'
-      : `declared on ${claimed}, which does not declare what it decoded: add ${features} to ` +
-          'its "features"';
+    return pick(language, {
+      en:
+        `declared on ${claimed}, which does not declare what it decoded: add ${features} to ` +
+        'its "features"',
+      fr:
+        `déclaré sur ${claimed}, qui ne déclare pas ce qu'il a décodé : ajoutez ${features} ` +
+        'à ses « features »',
+      de:
+        `angegeben bei ${claimed}, das nicht angibt, was dekodiert wurde: Füge ${features} ` +
+        'zu seinen „features“ hinzu',
+      es:
+        `declarado en ${claimed}, que no declara lo que se decodificó: añada ${features} a ` +
+        'sus «features»',
+    });
   }
   // Decoded to an order all the same (a TOGGLE heard by a switch): the
   // protocol is fine, the device type or the remote attached is not, and
   // pointing at partial decoding sent the user after the wrong fix.
   if (ordersOf(entry.readings).length > 0) {
-    return language === 'fr'
-      ? `déclaré sur ${claimed}, qui ne fait rien de l'ordre décodé : vérifiez le type ` +
-          'déclaré sur airsend.cloud (une télécommande qui envoie TOGGLE commande un Bouton, ' +
-          'type 4096), ou que la bonne télécommande est rattachée'
-      : `declared on ${claimed}, which does nothing with the order decoded: check the type ` +
-          'declared on airsend.cloud (a remote sending TOGGLE drives a Button, type 4096), or ' +
-          'that the right remote is attached';
+    return pick(language, {
+      en:
+        `declared on ${claimed}, which does nothing with the order decoded: check the type ` +
+        'declared on airsend.cloud (a remote sending TOGGLE drives a Button, type 4096), or ' +
+        'that the right remote is attached',
+      fr:
+        `déclaré sur ${claimed}, qui ne fait rien de l'ordre décodé : vérifiez le type ` +
+        'déclaré sur airsend.cloud (une télécommande qui envoie TOGGLE commande un Bouton, ' +
+        'type 4096), ou que la bonne télécommande est rattachée',
+      de:
+        `angegeben bei ${claimed}, das mit dem dekodierten Befehl nichts anfängt: Prüfe ` +
+        'den auf airsend.cloud angegebenen Typ (eine Fernbedienung, die TOGGLE sendet, steuert ' +
+        'einen Taster, Typ 4096) oder ob die richtige Fernbedienung zugeordnet ist',
+      es:
+        `declarado en ${claimed}, que no hace nada con la orden decodificada: compruebe el ` +
+        'tipo declarado en airsend.cloud (un mando que envía TOGGLE controla un Botón, tipo ' +
+        '4096) o que el mando asociado sea el correcto',
+    });
   }
-  return language === 'fr'
-    ? `déclaré sur ${claimed}, mais ses trames ne portent aucun ordre rejouable (protocole ` +
-        'seulement partiellement décodé) : la position ne peut pas suivre'
-    : `declared on ${claimed}, but its frames carry no order to replay (a protocol the service ` +
-        'only partially decodes): the position cannot follow';
+  return pick(language, {
+    en:
+      `declared on ${claimed}, but its frames carry no order to replay (a protocol the service ` +
+      'only partially decodes): the position cannot follow',
+    fr:
+      `déclaré sur ${claimed}, mais ses trames ne portent aucun ordre rejouable (protocole ` +
+      'seulement partiellement décodé) : la position ne peut pas suivre',
+    de:
+      `angegeben bei ${claimed}, aber seine Telegramme tragen keinen wiederholbaren Befehl ` +
+      '(ein Protokoll, das der Dienst nur teilweise dekodiert): Die Position kann nicht folgen',
+    es:
+      `declarado en ${claimed}, pero sus tramas no llevan ninguna orden reproducible (un ` +
+      'protocolo que el servicio solo decodifica en parte): la posición no puede seguir',
+  });
 }
 
 /**
@@ -683,13 +967,25 @@ function describeOneNote(entry, claimants, language) {
     return '';
   }
   const note = [...entry.notes][0];
-  return language === 'fr'
-    ? `, mais toutes ses trames portent le même ordre (${note}) : appuyez sur Ouvrir, puis sur ` +
-        'Fermer, et relancez cette action. Si la note ne change pas, le service AirSend ne ' +
-        'décode pas les boutons de cette télécommande — la position ne pourra pas suivre'
-    : `, but every one of its frames carries the same order (${note}): press Open, then Close, ` +
-        'and run this action again. If the note does not change, the AirSend service does not ' +
-        'decode the buttons of that remote — the position cannot follow';
+  return pick(language, {
+    en:
+      `, but every one of its frames carries the same order (${note}): press Open, then Close, ` +
+      'and run this action again. If the note does not change, the AirSend service does not ' +
+      'decode the buttons of that remote — the position cannot follow',
+    fr:
+      `, mais toutes ses trames portent le même ordre (${note}) : appuyez sur Ouvrir, puis sur ` +
+      'Fermer, et relancez cette action. Si la note ne change pas, le service AirSend ne ' +
+      'décode pas les boutons de cette télécommande — la position ne pourra pas suivre',
+    de:
+      `, aber jedes seiner Telegramme trägt denselben Befehl (${note}): Drücke Öffnen, ` +
+      'dann Schließen, und führe diese Aktion erneut aus. Ändert sich die Note nicht, ' +
+      'dekodiert der AirSend-Dienst die Tasten dieser Fernbedienung nicht — die Position kann ' +
+      'nicht folgen',
+    es:
+      `, pero todas sus tramas llevan la misma orden (${note}): pulse Abrir, luego Cerrar, y ` +
+      'vuelva a ejecutar esta acción. Si la nota no cambia, el servicio AirSend no decodifica ' +
+      'los botones de ese mando — la posición no podrá seguir',
+  });
 }
 
 /**
@@ -711,16 +1007,23 @@ function embeddedServiceError(config, service) {
 function summarize(config, language) {
   const devices = config.devmelDevices;
   if (devices.length === 0) {
-    return language === 'fr'
-      ? 'aucun appareil lu (vérifiez la liste collée).'
-      : 'no device parsed (check the pasted list).';
+    return pick(language, {
+      en: 'no device parsed (check the pasted list).',
+      fr: 'aucun appareil lu (vérifiez la liste collée).',
+      de: 'kein Gerät gelesen (prüfe die eingefügte Liste).',
+      es: 'ningún dispositivo leído (compruebe la lista pegada).',
+    });
   }
   const names = devices
     .slice(0, 5)
     .map((device) => device.name)
     .join(', ');
   const more = devices.length > 5 ? ` (+${devices.length - 5})` : '';
-  return language === 'fr'
-    ? `${devices.length} lu(s) : ${names}${more}.`
-    : `${devices.length} parsed: ${names}${more}.`;
+  const count = devices.length;
+  return pick(language, {
+    en: `${count} parsed: ${names}${more}.`,
+    fr: `${count} lu(s) : ${names}${more}.`,
+    de: `${count} gelesen: ${names}${more}.`,
+    es: `${count} leído(s): ${names}${more}.`,
+  });
 }

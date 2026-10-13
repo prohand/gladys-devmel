@@ -361,6 +361,35 @@ test('the radio widget fits the core vocabulary and budget, empty or full', () =
   }
 });
 
+test('every text of the radio widget is written in en, fr, de and es', () => {
+  const heard = new HeardChannels({ now: () => 5000 });
+  heard.record({ id: 300, source: 42 }, { readings: [], claimed: true, timestamp: 5000 });
+  heard.record({ id: 300 }, { readings: [], claimed: false, timestamp: 6000 });
+
+  const content = widgetOf({ heard, settings: { emitters: 8 } });
+
+  // Any object holding an `en` key is a text the core renders in the reader's
+  // language: missing one, it shows English on a German or Spanish dashboard.
+  const texts = [];
+  const walk = (node) => {
+    if (Array.isArray(node)) {
+      node.forEach(walk);
+    } else if (node && typeof node === 'object') {
+      if (typeof node.en === 'string') {
+        texts.push(node);
+      } else {
+        Object.values(node).forEach(walk);
+      }
+    }
+  };
+  walk(content);
+  assert.ok(texts.length > 10);
+  for (const text of texts) {
+    assert.deepEqual(Object.keys(text).sort(), ['de', 'en', 'es', 'fr'], JSON.stringify(text));
+  }
+  assert.deepEqual(validateWidgetContent(content), []);
+});
+
 test('the radio widget lists the emitters heard, and what became of them', () => {
   const heard = new HeardChannels({ now: () => 5000 });
   heard.record({ id: 300, source: 42 }, { readings: [], claimed: true, timestamp: 5000 });
