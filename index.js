@@ -348,6 +348,8 @@ gladys.onWidgetAction(RADIO_WIDGET, async (actionKey) => {
   return {
     en: `Listening re-armed on channel ${channel}.`,
     fr: `Écoute réarmée sur le canal ${channel}.`,
+    de: `Empfang auf Kanal ${channel} neu aktiviert.`,
+    es: `Escucha rearmada en el canal ${channel}.`,
   };
 });
 
@@ -400,6 +402,8 @@ async function initializeOrReport(readConfig, what) {
       .setConnectionStatus(false, {
         en: 'Initialization failed, check the integration logs.',
         fr: "L'initialisation a échoué, consultez les logs de l'intégration.",
+        de: 'Die Initialisierung ist fehlgeschlagen, prüfen Sie die Protokolle der Integration.',
+        es: 'La inicialización ha fallado, consulte los registros de la integración.',
       })
       .catch(() => {});
   }

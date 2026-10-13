@@ -7,7 +7,7 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { decoderOf, indexChannels, planListening } from '../src/devmel/listening.js';
+import { channelToType, decoderOf, indexChannels, planListening } from '../src/devmel/listening.js';
 import { normalizeConfig } from '../src/config.js';
 
 // A shutter, a light and a sensor, each on its own protocol.
@@ -294,4 +294,15 @@ test('listening is off only when the user turns it off', () => {
   assert.equal(planListening(configWith([SHUTTER], { listen_channel: 0 }), TABLE).enabled, false);
   assert.equal(planListening(configWith([SHUTTER], { listen_channel: '' }), TABLE).enabled, true);
   assert.equal(planListening(normalizeConfig(), TABLE).enabled, true);
+});
+
+test('the word advised for the generic decoder is one the field reads, in every language', () => {
+  // Every message that tells the user what to type for pid 1 names the word in
+  // the reader's language: that word has to bring them back to pid 1.
+  for (const language of ['en', 'fr', 'de', 'es']) {
+    const word = channelToType(1, language).replace(/["«»„“\s]/g, '');
+    assert.equal(normalizeConfig({ listen_channel: word }).listen_channel, 1, language);
+  }
+  assert.equal(channelToType(1, 'it'), channelToType(1, 'en'), 'English for any other language');
+  assert.equal(channelToType(25455, 'de'), '25455');
 });

@@ -22,6 +22,7 @@
 // -----------------------------------------------------------------------------
 
 import { DEVICE_TYPES, GENERIC_433_CHANNEL } from '../config.js';
+import { localize, pick } from '../i18n.js';
 
 /** How many protocols a search spells out before it counts the rest. */
 export const SHOWN = 12;
@@ -59,7 +60,7 @@ export function matchProtocols(channels, search) {
  * @param {object} options.config normalized configuration
  * @param {?object} [options.plan] what listening decided (see listening.js)
  * @param {string} [options.search] the field the user filled
- * @returns {{en: string, fr: string}}
+ * @returns {{en: string, fr: string, de: string, es: string}}
  */
 export function findProtocol({ table, config, plan = null, search = '' }) {
   const channels = [...(table?.values?.() ?? [])];
@@ -71,6 +72,13 @@ export function findProtocol({ table, config, plan = null, search = '' }) {
       fr:
         "Le service AirSend n'a pas répondu la liste de ses protocoles. Lancez d'abord " +
         '« Tester la connexion » : rien ne peut être cherché tant que le service est injoignable.',
+      de:
+        'Der AirSend-Dienst hat seine Protokollliste nicht geliefert. Führen Sie zuerst ' +
+        '„Verbindung testen“ aus: Solange der Dienst nicht erreichbar ist, kann nichts gesucht ' +
+        'werden.',
+      es:
+        'El servicio AirSend no ha devuelto su lista de protocolos. Ejecute primero «Probar la ' +
+        'conexión»: no se puede buscar nada mientras el servicio sea inaccesible.',
     };
   }
 
@@ -85,63 +93,104 @@ export function findProtocol({ table, config, plan = null, search = '' }) {
         `Aucun des ${channels.length} protocoles connus du service ne correspond à « ${typed} ». ` +
         "Cherchez par marque (somfy, nice, faac, bubendorff), ou par le pid affiché dans l'appli " +
         'AirSend.',
+      de:
+        `Keines der ${channels.length} Protokolle, die der Dienst kennt, passt zu „${typed}“. ` +
+        'Suchen Sie nach Marke (somfy, nice, faac, bubendorff) oder nach der pid, die die ' +
+        'AirSend-App anzeigt.',
+      es:
+        `Ninguno de los ${channels.length} protocolos que conoce el servicio coincide con ` +
+        `«${typed}». Busque por marca (somfy, nice, faac, bubendorff) o por el pid que muestra ` +
+        'la app AirSend.',
     };
   }
 
   const listed = matches.slice(0, SHOWN);
   const more = matches.length - listed.length;
-  return {
-    en: [
-      heading(matches.length, channels.length, typed, 'en'),
-      ...listed.map((channel) => describeProtocol(channel, config, plan, 'en')),
-      ...(more > 0 ? [`(+${more} more — narrow the search down.)`] : []),
-      footer('en'),
+  return localize((language) =>
+    [
+      heading(matches.length, channels.length, typed, language),
+      ...listed.map((channel) => describeProtocol(channel, config, plan, language)),
+      ...(more > 0
+        ? [
+            pick(language, {
+              en: `(+${more} more — narrow the search down.)`,
+              fr: `(+${more} autres — affinez la recherche.)`,
+              de: `(+${more} weitere — grenzen Sie die Suche ein.)`,
+              es: `(+${more} más — afine la búsqueda.)`,
+            }),
+          ]
+        : []),
+      footer(language),
     ].join('\n'),
-    fr: [
-      heading(matches.length, channels.length, typed, 'fr'),
-      ...listed.map((channel) => describeProtocol(channel, config, plan, 'fr')),
-      ...(more > 0 ? [`(+${more} autres — affinez la recherche.)`] : []),
-      footer('fr'),
-    ].join('\n'),
-  };
+  );
 }
 
 function heading(found, known, typed, language) {
   if (!typed) {
-    return language === 'fr'
-      ? `${known} protocoles connus du service AirSend. Tapez une marque ou un pid pour ` +
-          'chercher ; en voici les premiers :'
-      : `${known} protocols known by the AirSend service. Type a brand or a pid to search; ` +
-          'here are the first ones:';
+    return pick(language, {
+      en:
+        `${known} protocols known by the AirSend service. Type a brand or a pid to search; ` +
+        'here are the first ones:',
+      fr:
+        `${known} protocoles connus du service AirSend. Tapez une marque ou un pid pour ` +
+        'chercher ; en voici les premiers :',
+      de:
+        `Der AirSend-Dienst kennt ${known} Protokolle. Geben Sie eine Marke oder eine pid ` +
+        'ein, um zu suchen; hier die ersten:',
+      es:
+        `${known} protocolos conocidos por el servicio AirSend. Escriba una marca o un pid ` +
+        'para buscar; estos son los primeros:',
+    });
   }
   const plural = found > 1;
-  return language === 'fr'
-    ? `${found} protocole${plural ? 's' : ''} pour « ${typed} » :`
-    : `${found} protocol${plural ? 's' : ''} for "${typed}":`;
+  return pick(language, {
+    en: `${found} protocol${plural ? 's' : ''} for "${typed}":`,
+    fr: `${found} protocole${plural ? 's' : ''} pour « ${typed} » :`,
+    de: `${found} Protokoll${plural ? 'e' : ''} für „${typed}“:`,
+    es: `${found} protocolo${plural ? 's' : ''} para «${typed}»:`,
+  });
 }
 
 /** One protocol: its pid, its name, how it is decoded, and who already uses it. */
 function describeProtocol(channel, config, plan, language) {
   const id = Number(channel.id);
-  const name = channel.name ? `${channel.name}` : language === 'fr' ? 'sans nom' : 'unnamed';
+  const name = channel.name
+    ? `${channel.name}`
+    : pick(language, { en: 'unnamed', fr: 'sans nom', de: 'ohne Namen', es: 'sin nombre' });
   const parts = [decoding(channel, language)];
 
   if (plan?.enabled && Number(plan.channel) === id) {
-    parts.push(language === 'fr' ? 'écouté actuellement' : 'listened to right now');
+    parts.push(
+      pick(language, {
+        en: 'listened to right now',
+        fr: 'écouté actuellement',
+        de: 'wird gerade empfangen',
+        es: 'escuchado ahora mismo',
+      }),
+    );
   }
   const users = devicesOn(config, id);
   if (users.length > 0) {
+    const listed = users.join(', ');
     parts.push(
-      language === 'fr' ? `déclaré sur ${users.join(', ')}` : `declared on ${users.join(', ')}`,
+      pick(language, {
+        en: `declared on ${listed}`,
+        fr: `déclaré sur ${listed}`,
+        de: `angegeben bei ${listed}`,
+        es: `declarado en ${listed}`,
+      }),
     );
   }
   // The one protocol whose pid does not select it: `1` in that field has always
   // meant "deduce it", so the generic decoder is asked for by name instead.
   if (id === GENERIC_433_CHANNEL) {
     parts.push(
-      language === 'fr'
-        ? 'à demander en tapant « générique », pas 1'
-        : 'ask for it by typing "generic", not 1',
+      pick(language, {
+        en: 'ask for it by typing "generic", not 1',
+        fr: 'à demander en tapant « générique », pas 1',
+        de: 'durch Eingabe von „generisch“ anzufordern, nicht 1',
+        es: 'se pide escribiendo «genérico», no 1',
+      }),
     );
   }
   return `- pid ${id} — ${name} (${parts.join(', ')})`;
@@ -156,19 +205,35 @@ function decoding(channel, language) {
   const decoder = Number(channel.getDecoder);
 
   if (decoder === GENERIC_433_CHANNEL && id !== GENERIC_433_CHANNEL) {
-    return language === 'fr'
-      ? 'décodé par le canal 1, générique 433 MHz'
-      : 'decoded by channel 1, generic 433 MHz';
+    return pick(language, {
+      en: 'decoded by channel 1, generic 433 MHz',
+      fr: 'décodé par le canal 1, générique 433 MHz',
+      de: 'dekodiert von Kanal 1, generisch 433 MHz',
+      es: 'decodificado por el canal 1, genérico 433 MHz',
+    });
   }
   if (!Number.isFinite(decoder) || decoder <= 0) {
-    return language === 'fr'
-      ? 'seulement partiellement décodé : ses trames arrivent, sans ordre rejouable'
-      : 'only partially decoded: its frames arrive, with no order to replay';
+    return pick(language, {
+      en: 'only partially decoded: its frames arrive, with no order to replay',
+      fr: 'seulement partiellement décodé : ses trames arrivent, sans ordre rejouable',
+      de: 'nur teilweise dekodiert: Seine Telegramme kommen an, ohne wiederholbaren Befehl',
+      es: 'solo decodificado en parte: sus tramas llegan, sin orden reproducible',
+    });
   }
   if (decoder !== id) {
-    return language === 'fr' ? `décodé par le canal ${decoder}` : `decoded by channel ${decoder}`;
+    return pick(language, {
+      en: `decoded by channel ${decoder}`,
+      fr: `décodé par le canal ${decoder}`,
+      de: `dekodiert von Kanal ${decoder}`,
+      es: `decodificado por el canal ${decoder}`,
+    });
   }
-  return language === 'fr' ? 'décodé par lui-même' : 'decodes itself';
+  return pick(language, {
+    en: 'decodes itself',
+    fr: 'décodé par lui-même',
+    de: 'dekodiert sich selbst',
+    es: 'se decodifica a sí mismo',
+  });
 }
 
 /** The declared devices that speak a protocol, by their own channel or a remote. */
@@ -190,12 +255,23 @@ function devicesOn(config, id) {
 }
 
 function footer(language) {
-  return language === 'fr'
-    ? 'Mettez le pid voulu dans le champ Canal d’écoute pour écouter ce protocole — le boîtier ' +
-        "n'en écoute qu'un à la fois. Videz le champ pour revenir à la déduction à partir de vos " +
-        'appareils.'
-    : 'Put the pid you want in the Listening channel field to listen to that protocol — the box ' +
-        'listens to one at a time. Empty the field to go back to deducing it from your devices.';
+  return pick(language, {
+    en:
+      'Put the pid you want in the Listening channel field to listen to that protocol — the box ' +
+      'listens to one at a time. Empty the field to go back to deducing it from your devices.',
+    fr:
+      'Mettez le pid voulu dans le champ Canal d’écoute pour écouter ce protocole — le boîtier ' +
+      "n'en écoute qu'un à la fois. Videz le champ pour revenir à la déduction à partir de vos " +
+      'appareils.',
+    de:
+      'Tragen Sie die gewünschte pid in das Feld Empfangskanal ein, um dieses Protokoll zu ' +
+      'empfangen — die Box empfängt nur eines auf einmal. Leeren Sie das Feld, um wieder aus ' +
+      'Ihren Geräten abzuleiten.',
+    es:
+      'Ponga el pid que desee en el campo Canal de escucha para escuchar ese protocolo — la ' +
+      'pasarela solo escucha uno a la vez. Vacíe el campo para volver a deducirlo de sus ' +
+      'dispositivos.',
+  });
 }
 
 /** Lowercase, accent-free, trimmed: how a search is compared. */

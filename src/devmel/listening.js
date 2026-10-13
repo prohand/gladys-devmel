@@ -27,6 +27,7 @@
 // -----------------------------------------------------------------------------
 
 import { DEVICE_TYPES, GENERIC_433_CHANNEL } from '../config.js';
+import { pick } from '../i18n.js';
 
 /**
  * Device types that speak on their own.
@@ -85,11 +86,18 @@ export function channelName(channelId, table) {
  * back to the very deduction that left their remote unheard.
  *
  * @param {number} channel the pid to listen to
- * @param {string} [language] 'fr', or English
+ * @param {string} [language] a key of LANGUAGES (src/i18n.js); English otherwise
  */
 export function channelToType(channel, language = 'en') {
   if (Number(channel) === GENERIC_433_CHANNEL) {
-    return language === 'fr' ? '« générique »' : '"generic"';
+    // The word in the reader's language: the field reads all of them (see
+    // GENERIC_WORDS in src/config.js).
+    return pick(language, {
+      en: '"generic"',
+      fr: '« générique »',
+      de: '„generisch“',
+      es: '«genérico»',
+    });
   }
   return String(channel);
 }

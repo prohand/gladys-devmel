@@ -212,12 +212,16 @@ export async function identifyDevice(gladys, externalId, context) {
     return {
       en: 'This device cannot signal itself.',
       fr: 'Cet appareil ne peut pas se signaler.',
+      de: 'Dieses Gerät kann sich nicht bemerkbar machen.',
+      es: 'Este dispositivo no puede señalizarse.',
     };
   }
   await found.blueprint.identify(gladys, { ...context, device: found.device });
   return {
     en: `A PING was sent to "${found.device.name}".`,
     fr: `Un PING a été envoyé à « ${found.device.name} ».`,
+    de: `Ein PING wurde an „${found.device.name}“ gesendet.`,
+    es: `Se ha enviado un PING a «${found.device.name}».`,
   };
 }
 

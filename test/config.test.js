@@ -282,7 +282,7 @@ test('the generic 433 MHz decoder is asked for by name, since 1 is taken', () =>
   // before the deduction existed. Reading it as a choice would take the ears
   // off every installation that ever filled that field; so the deliberate
   // choice gets a word, and the number keeps the meaning it always had.
-  for (const typed of ['generic', 'Générique', ' GENERIC433 ', '433mhz']) {
+  for (const typed of ['generic', 'Générique', 'Generisch', 'genérico', ' GENERIC433 ', '433mhz']) {
     assert.equal(normalizeConfig({ listen_channel: typed }).listen_channel, 1, typed);
   }
   assert.equal(normalizeConfig({ listen_channel: '1' }).listen_channel, null);

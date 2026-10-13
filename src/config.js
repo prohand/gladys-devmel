@@ -163,6 +163,8 @@ export function normalizeConfig(raw = {}) {
       config.spurlProblems.push({
         en: `on "${name}", ${problem.en}`,
         fr: `sur « ${name} », ${problem.fr}`,
+        de: `bei „${name}“: ${problem.de}`,
+        es: `en «${name}», ${problem.es}`,
       });
     }
   }
@@ -553,7 +555,7 @@ function buildPlatformId(device) {
  * not thereby declared valid: only the box can say that.
  *
  * @param {string} spurl the string as the user pasted it
- * @returns {Array<{en: string, fr: string}>} what to fix, empty when nothing
+ * @returns {Array<{en: string, fr: string, de: string, es: string}>} what to fix, empty when nothing
  *   obvious is wrong
  */
 export function checkSpurl(spurl) {
@@ -568,6 +570,8 @@ export function checkSpurl(spurl) {
     problems.push({
       en: 'it must start with sp:// — paste the string exported by airsend.cloud whole.',
       fr: 'elle doit commencer par sp:// — collez telle quelle la chaîne exportée par airsend.cloud.',
+      de: 'sie muss mit sp:// beginnen — fügen Sie die von airsend.cloud exportierte Zeichenfolge vollständig ein.',
+      es: 'debe empezar por sp:// — pegue entera la cadena exportada por airsend.cloud.',
     });
     return problems;
   }
@@ -585,12 +589,20 @@ export function checkSpurl(spurl) {
       fr:
         `elle contient un caractère qui ne peut pas s’y trouver (U+${codePoint(stray)}). ` +
         'Recopiez la chaîne depuis airsend.cloud, dans un champ vidé au préalable.',
+      de:
+        `sie enthält ein Zeichen, das darin nicht vorkommen kann (U+${codePoint(stray)}). ` +
+        'Kopieren Sie die Zeichenfolge erneut von airsend.cloud in ein zuvor geleertes Feld.',
+      es:
+        `contiene un carácter que no puede estar en ella (U+${codePoint(stray)}). Vuelva a ` +
+        'copiar la cadena desde airsend.cloud, en un campo vaciado antes.',
     });
   }
   if (/\s/.test(raw)) {
     problems.push({
       en: 'it contains a space: the string is one unbroken run of characters.',
       fr: 'elle contient une espace : la chaîne est d’un seul tenant.',
+      de: 'sie enthält ein Leerzeichen: Die Zeichenfolge ist eine durchgehende Zeichenkette.',
+      es: 'contiene un espacio: la cadena va toda seguida, sin cortes.',
     });
   }
 
@@ -602,6 +614,8 @@ export function checkSpurl(spurl) {
     problems.push({
       en: 'no password: the string reads sp://<password>@<address>.',
       fr: 'pas de mot de passe : la chaîne s’écrit sp://<motdepasse>@<adresse>.',
+      de: 'kein Passwort: Die Zeichenfolge lautet sp://<passwort>@<adresse>.',
+      es: 'sin contraseña: la cadena se escribe sp://<contraseña>@<dirección>.',
     });
     return problems;
   }
@@ -609,6 +623,8 @@ export function checkSpurl(spurl) {
     problems.push({
       en: 'the password is empty, before the @.',
       fr: 'le mot de passe est vide, avant le @.',
+      de: 'das Passwort vor dem @ ist leer.',
+      es: 'la contraseña está vacía, antes de la @.',
     });
   }
 
@@ -617,6 +633,8 @@ export function checkSpurl(spurl) {
     problems.push({
       en: 'no box address after the @.',
       fr: 'pas d’adresse de boîtier après le @.',
+      de: 'keine Adresse der Box nach dem @.',
+      es: 'no hay dirección de la pasarela después de la @.',
     });
     return problems;
   }
@@ -628,6 +646,8 @@ export function checkSpurl(spurl) {
     problems.push({
       en: `the address "${host}" opens a bracket it never closes.`,
       fr: `l’adresse « ${host} » ouvre un crochet qu’elle ne referme jamais.`,
+      de: `die Adresse „${host}“ öffnet eine eckige Klammer, die sie nie schließt.`,
+      es: `la dirección «${host}» abre un corchete que nunca cierra.`,
     });
     return problems;
   }
@@ -645,6 +665,14 @@ export function checkSpurl(spurl) {
         `« ${literal} » n’est pas une adresse IPv6 valide. Recopiez-la depuis airsend.cloud ` +
         'plutôt que de la retaper — une adresse lien-local s’écrit fe80::… , avec DEUX ' +
         'deux-points après fe80.',
+      de:
+        `„${literal}“ ist keine gültige IPv6-Adresse. Kopieren Sie sie von airsend.cloud, ` +
+        'statt sie neu einzutippen — eine Link-Local-Adresse schreibt sich fe80::… , mit ZWEI ' +
+        'Doppelpunkten nach fe80.',
+      es:
+        `«${literal}» no es una dirección IPv6 válida. Cópiela desde airsend.cloud en lugar ` +
+        'de volver a escribirla — una dirección de enlace local se escribe fe80::… , con DOS ' +
+        'signos de dos puntos después de fe80.',
     });
   }
   return problems;
@@ -778,8 +806,16 @@ function toListenChannel(value) {
   return number > 0 ? Math.trunc(number) : 0;
 }
 
-/** How the generic 433 MHz decoder is asked for by name, in both languages. */
-const GENERIC_WORDS = new Set(['generic', 'generique', 'generic433', '433mhz', 'generic 433']);
+/** How the generic 433 MHz decoder is asked for by name, in every language. */
+const GENERIC_WORDS = new Set([
+  'generic',
+  'generique',
+  'generisch',
+  'generico',
+  'generic433',
+  '433mhz',
+  'generic 433',
+]);
 
 /** Lowercase, accent-free, trimmed: nobody types "générique" the same way twice. */
 function normalizeWord(value) {

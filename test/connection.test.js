@@ -743,3 +743,39 @@ test('a reconnection to Gladys keeps the verdicts: only a configuration change f
   assert.match(report.en, /followed by Baie vitree/);
   assert.doesNotMatch(report.en, /not heard since the configuration changed/);
 });
+
+test('test_connection answers in German and Spanish too, line for line', async () => {
+  const config = normalizeConfig({ spurl: SPURL, devices: DEVICES });
+  const listen = {
+    url: 'http://127.0.0.1:33864/',
+    error: null,
+    plan: planListening(config, indexChannels([{ id: 25455, name: 'Somfy RTS' }])),
+  };
+  const heard = new HeardChannels();
+
+  const report = await testConnection(fakeClient(), config, RUNNING, listen, heard);
+
+  assert.deepEqual(Object.keys(report), ['en', 'fr', 'de', 'es']);
+  const lines = report.en.split('\n').length;
+  for (const language of ['fr', 'de', 'es']) {
+    assert.equal(report[language].split('\n').length, lines, language);
+  }
+  assert.match(report.de, /^Verbindungszeichenfolge: sp:\/\//m);
+  assert.match(report.de, /Empfang: Kanal 25455 "Somfy RTS" \(aus Ihren Geräten abgeleitet\)/);
+  assert.match(report.de, /Gehört: kein Funktelegramm seit dem Start der Integration/);
+  assert.match(report.de, /Geräte: 1 gelesen: Baie vitree\./);
+  assert.match(report.es, /Escucha: canal 25455 "Somfy RTS" \(deducido de sus dispositivos\)/);
+  assert.match(report.es, /Oído: ninguna trama de radio desde que se inició la integración/);
+  assert.match(report.es, /Dispositivos: 1 leído\(s\): Baie vitree\./);
+});
+
+test('the connection status carries every language, a connection string problem included', async () => {
+  const config = normalizeConfig({ spurl: 'sp://pass@fe80:2:3?gw=0&rhost=192.168.1.50' });
+
+  const status = await describeConnection(fakeClient(), config, RUNNING);
+
+  assert.equal(status.connected, false);
+  assert.deepEqual(Object.keys(status.message), ['en', 'fr', 'de', 'es']);
+  assert.match(status.message.de, /^Verbindungszeichenfolge: „fe80:2:3“ ist keine gültige IPv6/);
+  assert.match(status.message.es, /^Cadena de conexión: «fe80:2:3» no es una dirección IPv6/);
+});
