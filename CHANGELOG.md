@@ -6,6 +6,8 @@ All notable changes to this integration are documented here. The format follows
 
 ## [Unreleased]
 
+## [3.1.0] - 2026-10-13
+
 ### Added
 
 - German and Spanish translations (configuration screen, messages, widgets, documentation).
@@ -322,7 +324,8 @@ First public release.
 
 - Compute the position of a shutter from its travel time
 
-[Unreleased]: https://github.com/prohand/gladys-devmel/compare/v3.0.1...HEAD
+[Unreleased]: https://github.com/prohand/gladys-devmel/compare/v3.1.0...HEAD
+[3.1.0]: https://github.com/prohand/gladys-devmel/compare/v3.0.1...v3.1.0
 [3.0.1]: https://github.com/prohand/gladys-devmel/compare/v3.0.0...v3.0.1
 [3.0.0]: https://github.com/prohand/gladys-devmel/compare/v2.2.4...v3.0.0
 [2.2.4]: https://github.com/prohand/gladys-devmel/compare/v2.2.3...v2.2.4
