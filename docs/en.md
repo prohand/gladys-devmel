@@ -7,6 +7,8 @@ back (Somfy RTS, Chacon DiO, Nice, FAAC, Bubendorff…).
 
 ## Before you start
 
+**Gladys 5.3 or later** is required.
+
 Your devices are paired in the **AirSend mobile app** or on
 [airsend.cloud](https://airsend.cloud), not in Gladys: this integration
 replays the radio orders they already know. Get them working there first.
@@ -977,8 +979,8 @@ provides: link your Gladys Plus account and paste your Open API key in the
 
 ## Scenes and dashboard (Gladys 5.1+)
 
-These need **Gladys 5.1 or later**; an older Gladys keeps the previous version
-of the integration.
+They came with Gladys 5.1; the integration itself now needs **Gladys 5.3 or
+later**.
 
 ### Scene triggers
 
@@ -1019,6 +1021,11 @@ dropped, the box temperature and light when it has `sensors: true`, and the
 last emitters heard with what became of them (followed, unknown, dropped…). Its
 **Re-arm listening** button does the same as the scene action. The
 **Emitters shown** setting (0 to 8) sets the length of the list.
+
+When a shutter has a position (travel times, or type `4099`), a **Recalibrate a
+shutter** button opens a short form: pick the shutter, type where it really is
+(0 = closed, 100 = open). It does what the "Set the known position of a
+shutter" scene action does, from the dashboard: the shutter does not move.
 
 ## Good to know
 

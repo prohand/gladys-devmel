@@ -17,15 +17,28 @@
 import { DEVICE_TYPES } from '../config.js';
 import { boxDevices, describeFate } from '../devmel/connection.js';
 import { describeAgo, describeEmitter } from '../devmel/heard.js';
-import { hearsChannel } from '../devices/index.js';
+import { hearsChannel, positionedShutters } from '../devices/index.js';
 import { idsFor } from '../devices/helpers.js';
 import { localize, pick } from '../i18n.js';
 
 /** Key of the manifest widget. Never renamed: dashboards store it. */
 export const RADIO_WIDGET = 'radio';
 
-/** The one widget action: re-arm the listening subscription. */
-export const WIDGET_ACTIONS = { REARM: 'rearm' };
+/**
+ * The widget actions: re-arm the listening subscription, and set the known
+ * position of a shutter (a form behind the tap, Gladys 5.2+ widget fields).
+ * Never renamed: they are relayed back by key.
+ */
+export const WIDGET_ACTIONS = { REARM: 'rearm', SET_KNOWN_POSITION: 'set_known_position' };
+
+/** Choices of the shutter select of the recalibration form: a form, not a catalog. */
+const MAX_SHUTTER_OPTIONS = 50;
+
+/** The content budget of the core: 8 components at most. */
+const MAX_COMPONENTS = 8;
+
+/** Option labels of a widget form hold 40 characters. */
+const OPTION_LABEL_LENGTH = 40;
 
 /** How many emitters the list shows when the instance says nothing. */
 export const DEFAULT_EMITTERS = 5;
@@ -175,7 +188,70 @@ export function buildRadioWidget({
     },
   );
 
+  // Last, and only within the 8 components of the budget: the core would drop
+  // an overflowing component in content order, and the setup notice, the
+  // status and the re-arm button matter more on a box that is not set up yet.
+  const recalibrate = recalibrateButton(gladys, config);
+  if (recalibrate && components.length < MAX_COMPONENTS) components.push(recalibrate);
+
   return { ttl_seconds: 60, components };
+}
+
+/**
+ * "Recalibrate a shutter": the `set_known_position` scene action, on the
+ * dashboard. The tap opens a form (which shutter, where it really is) that the
+ * core validates before relaying it. Absent when no shutter has a position.
+ */
+function recalibrateButton(gladys, config) {
+  const shutters = positionedShutters(gladys, config).slice(0, MAX_SHUTTER_OPTIONS);
+  if (shutters.length === 0) return null;
+  return {
+    type: 'button',
+    label: {
+      en: 'Recalibrate a shutter',
+      fr: 'Recaler un volet',
+      de: 'Rollladen neu setzen',
+      es: 'Recalibrar persiana',
+    },
+    icon: 'sliders',
+    style: 'secondary',
+    action: {
+      key: WIDGET_ACTIONS.SET_KNOWN_POSITION,
+      fields: [
+        {
+          key: 'device',
+          type: 'select',
+          label: { en: 'Shutter', fr: 'Volet', de: 'Rollladen', es: 'Persiana' },
+          required: true,
+          default: shutters[0].externalId,
+          options: shutters.map(({ externalId, name }) => {
+            const text = name.length > OPTION_LABEL_LENGTH ? `${name.slice(0, 39)}…` : name;
+            return { value: externalId, label: { en: text, fr: text, de: text, es: text } };
+          }),
+        },
+        {
+          key: 'position',
+          type: 'number',
+          label: {
+            en: 'Real position (%)',
+            fr: 'Position réelle (%)',
+            de: 'Tatsächliche Position (%)',
+            es: 'Posición real (%)',
+          },
+          description: {
+            en: '0 = closed, 100 = open. The shutter does not move.',
+            fr: '0 = fermé, 100 = ouvert. Le volet ne bouge pas.',
+            de: '0 = geschlossen, 100 = offen. Der Rollladen bewegt sich nicht.',
+            es: '0 = cerrada, 100 = abierta. La persiana no se mueve.',
+          },
+          required: true,
+          min: 0,
+          max: 100,
+          default: 100,
+        },
+      ],
+    },
+  };
 }
 
 /** What is missing before anything can work, or null when nothing is. */

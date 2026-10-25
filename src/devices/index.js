@@ -226,6 +226,24 @@ export async function identifyDevice(gladys, externalId, context) {
 }
 
 /**
+ * The shutters whose known position can be set (timed ones and type 4099), in
+ * the order of the configuration: the choices of the widget's recalibration
+ * form.
+ *
+ * @returns {Array<{ externalId: string, name: string }>}
+ */
+export function positionedShutters(gladys, config) {
+  const found = [];
+  for (const device of config.devmelDevices) {
+    const blueprint = findBlueprintByType(device.rtype);
+    if (typeof blueprint?.hasPosition === 'function' && blueprint.hasPosition(device)) {
+      found.push({ externalId: idsFor(gladys, blueprint.key, device).device, name: device.name });
+    }
+  }
+  return found;
+}
+
+/**
  * Handler of the `set_known_position` scene action: say where a shutter is,
  * without sending it anything. Throws when the device has no position to set —
  * the scene then logs the failure of that one action and carries on.

@@ -311,6 +311,11 @@ export const shutter = {
    * `set_known_position` scene action, the same idea as the "set known
    * position" of the time-based covers of Home Assistant.
    */
+  /** Whether the shutter has a position to recalibrate (timed, or type 4099). */
+  hasPosition(device) {
+    return hasPosition(device);
+  },
+
   async setKnownPosition(gladys, { device, position }) {
     reframe(device);
     if (!hasPosition(device)) {

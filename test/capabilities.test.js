@@ -21,7 +21,7 @@ import {
   SCENE_TRIGGERS,
   SceneEvents,
 } from '../src/capabilities/scenes.js';
-import { buildRadioWidget } from '../src/capabilities/widget.js';
+import { buildRadioWidget, WIDGET_ACTIONS } from '../src/capabilities/widget.js';
 import { captureLogs } from './helpers/captureLogs.js';
 import { createFakeGladys } from './helpers/fakeGladys.js';
 
@@ -359,6 +359,32 @@ test('the radio widget fits the core vocabulary and budget, empty or full', () =
   ]) {
     assert.deepEqual(validateWidgetContent(content), []);
   }
+});
+
+test('the radio widget offers a form to recalibrate the shutters that have a position', () => {
+  const content = widgetOf();
+  const button = content.components.find(
+    (c) => c.type === 'button' && c.action?.key === WIDGET_ACTIONS.SET_KNOWN_POSITION,
+  );
+  assert.ok(button, 'the recalibration button is there');
+  const [device, position] = button.action.fields;
+  // Only the timed shutter: the plug and the garage button have no position.
+  assert.deepEqual(
+    device.options.map((option) => option.value),
+    ['shutter:300-3'],
+  );
+  assert.equal(device.default, 'shutter:300-3');
+  assert.deepEqual([position.min, position.max], [0, 100]);
+  assert.deepEqual(validateWidgetContent(content), []);
+
+  // No shutter with a position, no button.
+  const { gladys } = setup();
+  const bare = buildRadioWidget({
+    gladys,
+    config: normalizeConfig({ spurl: SPURL }),
+    service: { status: () => ({ running: true }) },
+  });
+  assert.ok(!bare.components.some((c) => c.action?.key === WIDGET_ACTIONS.SET_KNOWN_POSITION));
 });
 
 test('every text of the radio widget is written in en, fr, de and es', () => {

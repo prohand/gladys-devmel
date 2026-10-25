@@ -9,6 +9,7 @@ Built on the official
 [JavaScript integration template](https://github.com/GladysAssistant/integration-template-js)
 and the SDK
 [`@gladysassistant/integration-sdk`](https://github.com/GladysAssistant/integration-sdk-js).
+Requires **Gladys 5.3.0 or later**.
 
 User documentation: [English](./docs/en.md) · [Français](./docs/fr.md) · [Deutsch](./docs/de.md) ·
 [Español](./docs/es.md).
@@ -34,7 +35,7 @@ resynchronized on every end stop. See
 Since Gladys 5.1 it also extends the scene editor and the dashboard
 (`src/capabilities/`): a **remote pressed** and an **order failed** trigger, a
 **set the known position of a shutter** and a **re-arm listening** action, and
-an **AirSend radio** widget. See
+an **AirSend radio** widget (with a form to recalibrate a shutter). See
 [the user documentation](./docs/en.md#scenes-and-dashboard-gladys-51).
 
 Devices are not discovered over the air: they are the ones the user paired in

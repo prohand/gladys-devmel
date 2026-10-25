@@ -339,8 +339,24 @@ gladys.onWidgetGet(RADIO_WIDGET, async ({ settings }) =>
   }),
 );
 
-gladys.onWidgetAction(RADIO_WIDGET, async (actionKey) => {
+gladys.onWidgetAction(RADIO_WIDGET, async (actionKey, _params, { values } = {}) => {
   logger.info(`Widget action ${actionKey}`);
+  if (actionKey === WIDGET_ACTIONS.SET_KNOWN_POSITION) {
+    // The form of the button, validated by the core. A core too old to know
+    // widget forms relays the action without values: refuse it, never guess.
+    if (!values?.device) {
+      throw new Error('Pick a shutter and its position in the form of the button');
+    }
+    const name =
+      findDeviceByExternalId(gladys, config, values.device)?.device.name ?? values.device;
+    const known = await setKnownPosition(gladys, config, values.device, values.position);
+    return {
+      en: `"${name}" is now known to be at ${known} %.`,
+      fr: `« ${name} » est désormais connu à ${known} %.`,
+      de: `„${name}“ steht jetzt bekanntermaßen auf ${known} %.`,
+      es: `Ahora se sabe que «${name}» está al ${known} %.`,
+    };
+  }
   if (actionKey !== WIDGET_ACTIONS.REARM) {
     throw new Error(`Unknown widget action ${actionKey}`);
   }

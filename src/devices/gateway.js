@@ -61,7 +61,8 @@ export const gateway = {
       external_id: ids.device,
       // `refresh` is in seconds: Gladys wants one of its own ticks, in
       // milliseconds (anything else rejects the whole discovery and empties
-      // the Discovery tab), and only polls a device carrying `should_poll`.
+      // the Discovery tab). Gladys 5.3+ sets `should_poll` itself from
+      // `poll_frequency`; older cores only polled a device carrying it.
       should_poll: true,
       poll_frequency: gladysPollFrequency(device.refresh),
       features: [

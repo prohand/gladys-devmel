@@ -7,6 +7,8 @@ antworten (Somfy RTS, Chacon DiO, Nice, FAAC, Bubendorff…).
 
 ## Bevor du beginnst
 
+**Gladys 5.3 oder neuer** ist erforderlich.
+
 Deine Geräte werden in der **AirSend-App** oder auf
 [airsend.cloud](https://airsend.cloud) angelernt, nicht in Gladys: Diese
 Integration wiederholt die Funkbefehle, die sie bereits kennen. Bringe sie
@@ -1075,8 +1077,8 @@ Block **Gladys-Plus-Webhooks** des Bildschirms Konfiguration ein.
 
 ## Szenen und Dashboard (Gladys 5.1+)
 
-Diese erfordern **Gladys 5.1 oder neuer**; ein älteres Gladys behält die
-vorherige Version der Integration.
+Sie kamen mit Gladys 5.1; die Integration selbst erfordert jetzt **Gladys 5.3
+oder neuer**.
 
 ### Szenen-Auslöser
 
@@ -1123,6 +1125,12 @@ Box, wenn sie `sensors: true` hat, und die zuletzt gehörten Sender mit dem, was
 aus ihnen wurde (befolgt, unbekannt, verworfen…). Seine Schaltfläche **Empfang
 neu aktivieren** tut dasselbe wie die Szenen-Aktion. Die Einstellung
 **Angezeigte Sender** (0 bis 8) legt die Länge der Liste fest.
+
+Hat ein Rollladen eine Position (Laufzeiten oder Typ `4099`), öffnet die
+Schaltfläche **Rollladen neu setzen** ein kurzes Formular: Wähle den Rollladen
+und gib an, wo er wirklich steht (0 = geschlossen, 100 = offen). Sie tut
+dasselbe wie die Szenen-Aktion „Bekannte Position eines Rollladens setzen“,
+vom Dashboard aus: Der Rollladen bewegt sich nicht.
 
 ## Gut zu wissen
 
