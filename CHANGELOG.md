@@ -6,6 +6,8 @@ All notable changes to this integration are documented here. The format follows
 
 ## [Unreleased]
 
+## [3.2.0] - 2026-10-25
+
 ### Added
 
 - "AirSend radio" widget: a **Recalibrate a shutter** button opens a form (shutter, real
@@ -339,7 +341,8 @@ First public release.
 
 - Compute the position of a shutter from its travel time
 
-[Unreleased]: https://github.com/prohand/gladys-devmel/compare/v3.1.1...HEAD
+[Unreleased]: https://github.com/prohand/gladys-devmel/compare/v3.2.0...HEAD
+[3.2.0]: https://github.com/prohand/gladys-devmel/compare/v3.1.1...v3.2.0
 [3.1.1]: https://github.com/prohand/gladys-devmel/compare/v3.1.0...v3.1.1
 [3.1.0]: https://github.com/prohand/gladys-devmel/compare/v3.0.1...v3.1.0
 [3.0.1]: https://github.com/prohand/gladys-devmel/compare/v3.0.0...v3.0.1
