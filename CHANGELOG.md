@@ -6,6 +6,17 @@ All notable changes to this integration are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- "AirSend radio" widget: a **Recalibrate a shutter** button opens a form (shutter, real
+  position) to set the known position of a timed shutter from the dashboard, without moving it.
+- Catalog search keywords (Somfy RTS, Chacon DiO, 433/868 MHz, Bubendorff…).
+
+### Changed
+
+- Gladys 5.3.0 or newer is now required.
+- `@gladysassistant/integration-sdk` updated to 0.16.0.
+
 ## [3.1.1] - 2026-10-23
 
 - Maintenance release, no functional change.

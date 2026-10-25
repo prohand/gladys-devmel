@@ -217,6 +217,10 @@ const CATEGORIES = [
   'notifications',
   'assistants',
   'services',
+  'transport',
+  'vehicles',
+  'servers',
+  'leisure',
 ];
 
 test('the categories stay inside the vocabulary the store indexes', () => {
@@ -232,11 +236,37 @@ test('the categories stay inside the vocabulary the store indexes', () => {
   }
 });
 
+/** Whether the minimum of `gladys_version` is at least major.minor. */
+function floorAtLeast(wantedMajor, wantedMinor) {
+  const [major, minor] = manifest.gladys_version.replace(/^>=/, '').split('.').map(Number);
+  return major > wantedMajor || (major === wantedMajor && minor >= wantedMinor);
+}
+
 test('the Gladys floor covers every field the manifest declares', () => {
   // Older cores reject a manifest field they do not know: `categories` needs
-  // 4.86, and the widgets and scene declarations need 5.1.
-  const [major, minor] = manifest.gladys_version.replace(/^>=/, '').split('.').map(Number);
-  assert.ok(major > 5 || (major === 5 && minor >= 1), `got ${manifest.gladys_version}`);
+  // 4.86, the widgets and scene declarations 5.1, `keywords`, `countries` and
+  // `music` 5.3.
+  assert.ok(floorAtLeast(5, 1), `got ${manifest.gladys_version}`);
+  if (['keywords', 'countries', 'music'].some((field) => field in manifest)) {
+    assert.ok(
+      floorAtLeast(5, 3),
+      `keywords/countries/music need 5.3.0, got ${manifest.gladys_version}`,
+    );
+  }
+});
+
+test('the search keywords follow the store rules', () => {
+  const { keywords } = manifest;
+  assert.ok(Array.isArray(keywords) && keywords.length >= 1 && keywords.length <= 10);
+  const normalized = keywords.map((keyword) => keyword.trim().toLowerCase());
+  assert.equal(new Set(normalized).size, keywords.length, 'keywords must be unique');
+  for (const keyword of normalized) {
+    assert.ok(keyword.length >= 2 && keyword.length <= 30, `keyword "${keyword}"`);
+  }
+});
+
+test('AirSend works in any country: no countries restriction', () => {
+  assert.equal(manifest.countries, undefined);
 });
 
 test('every widget and scene action is handled in index.js', () => {

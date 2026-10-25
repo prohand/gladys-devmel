@@ -7,6 +7,8 @@ que responden (Somfy RTS, Chacon DiO, Nice, FAAC, Bubendorff…).
 
 ## Antes de empezar
 
+Se necesita **Gladys 5.3 o posterior**.
+
 Sus dispositivos se emparejan en la **app móvil AirSend** o en
 [airsend.cloud](https://airsend.cloud), no en Gladys: esta integración
 reproduce las órdenes de radio que ya conocen. Haga que funcionen allí
@@ -1032,8 +1034,8 @@ Configuración.
 
 ## Escenas y panel (Gladys 5.1+)
 
-Requieren **Gladys 5.1 o posterior**; un Gladys más antiguo conserva la
-versión anterior de la integración.
+Llegaron con Gladys 5.1; la integración en sí necesita ahora **Gladys 5.3 o
+posterior**.
 
 ### Activadores de escenas
 
@@ -1078,6 +1080,12 @@ descartadas, la temperatura y la luminosidad de la pasarela cuando tiene
 (seguido, desconocido, descartado…). Su botón **Rearmar la escucha** hace lo
 mismo que la acción de escena. El ajuste **Emisores mostrados** (0 a 8) fija la
 longitud de la lista.
+
+Cuando una persiana tiene posición (tiempos de recorrido, o tipo `4099`), un
+botón **Recalibrar persiana** abre un breve formulario: elija la persiana e
+indique dónde está realmente (0 = cerrada, 100 = abierta). Hace lo mismo que la
+acción de escena «Fijar la posición conocida de una persiana», desde el panel:
+la persiana no se mueve.
 
 ## Conviene saber
 

@@ -8,7 +8,7 @@ A Gladys Assistant **external integration** (Node 22+, ESM, no build step, one r
 dependency: `@gladysassistant/integration-sdk`) for a **Devmel AirSend / AirSend Duo** radio
 gateway and the 433/868 MHz equipment it drives: shutters (with or without position), switches,
 dimmable lights, gates, buttons, radio sensors and wall remotes (Somfy RTS, Chacon DiO, Nice,
-FAAC, Bubendorff…). Gladys 5.1+ adds scene triggers (remote pressed, order failed), scene actions
+FAAC, Bubendorff…). Requires Gladys 5.3+. Scene triggers (remote pressed, order failed), scene actions
 (set a shutter's known position, re-arm listening) and an "AirSend radio" widget.
 
 Devices are not discovered over the air: the user pastes the JSON exported from airsend.cloud
@@ -74,8 +74,9 @@ src/capabilities/       Gladys 5.1 scenes and widget
   webhook relayed by Gladys Plus (service elsewhere). Both hand the same payload to the same
   handler.
 - **Polling**: Gladys `poll_frequency` is an enum in ms (1000, 2000, 10000, 15000, 30000,
-  60000); any other value rejects the WHOLE discovery batch, and Gladys only polls a device that
-  also carries `should_poll: true`. The configured `poll_frequency` / per-device `refresh` are
+  60000); any other value rejects the WHOLE discovery batch. Gladys 5.3+ sets `should_poll`
+  itself when `poll_frequency` is present; older cores only polled a device that also carried
+  `should_poll: true`, so it stays published. The configured `poll_frequency` / per-device `refresh` are
   seconds and must never be published as is.
 - **Transport badge** per device: `local` when the box answered, `unreachable` otherwise.
 - **Every feature declares `min`/`max`** (NOT NULL in Gladys), button/switch/light on/off
@@ -86,7 +87,8 @@ src/capabilities/       Gladys 5.1 scenes and widget
 ### Manifest
 
 `test/manifest.test.js` keeps `gladys-assistant-integration.json` (config schema, actions,
-webhook, 5.1 capabilities) in sync with `DEFAULT_CONFIG` and the handlers.
+webhook, 5.1 capabilities, 5.3 `keywords`, categories vocabulary, `gladys_version >=5.3.0`) in
+sync with `DEFAULT_CONFIG` and the handlers.
 
 ## Testing
 

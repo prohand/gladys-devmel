@@ -8,6 +8,8 @@ Bubendorff…).
 
 ## Avant de commencer
 
+Il faut **Gladys 5.3 ou plus récent**.
+
 Vos appareils s'appairent dans l'**application mobile AirSend** ou sur
 [airsend.cloud](https://airsend.cloud), pas dans Gladys : cette intégration
 rejoue les ordres radio qu'ils connaissent déjà. Faites-les d'abord
@@ -1037,8 +1039,8 @@ votre clé Open API dans le bloc **Webhooks** de l'écran de configuration.
 
 ## Scènes et tableau de bord (Gladys 5.1+)
 
-Il faut **Gladys 5.1 ou plus récent** ; un Gladys plus ancien garde la version
-précédente de l'intégration.
+Ils sont arrivés avec Gladys 5.1 ; l'intégration elle-même demande désormais
+**Gladys 5.3 ou plus récent**.
 
 ### Déclencheurs de scène
 
@@ -1081,6 +1083,12 @@ Ajoutez-le à un tableau de bord : l'état du service AirSend, le protocole
 les derniers émetteurs entendus avec ce qu'ils sont devenus (suivi, inconnu,
 écarté…). Son bouton **Réarmer l'écoute** fait la même chose que l'action de
 scène. Le réglage **Émetteurs affichés** (0 à 8) règle la longueur de la liste.
+
+Quand un volet a une position (temps de course, ou type `4099`), un bouton
+**Recaler un volet** ouvre un court formulaire : choisissez le volet, indiquez
+où il est vraiment (0 = fermé, 100 = ouvert). Il fait la même chose que
+l'action de scène « Recaler la position d'un volet », depuis le tableau de
+bord : le volet ne bouge pas.
 
 ## Bon à savoir
 
