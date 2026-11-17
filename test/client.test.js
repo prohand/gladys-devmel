@@ -906,6 +906,23 @@ test('a fresh configuration forgets what the old box taught us', async () => {
   assert.equal(client.warmAfter, WARM_AFTER_MS);
 });
 
+test('a box with no sensor refusing the warm-up read is not logged as a failure', async () => {
+  // A plain AirSend has no sensor: it answers the read with UNSUPPORTED every
+  // four minutes, and "Could not keep the link warm" sent a user looking for a
+  // fault in a link that was answering in 0.2 s.
+  const tick = { at: 0 };
+  const client = clientOnClock(tick);
+  stubFetch(() => jsonResponse(200, { type: 0x106 }));
+  tick.at += WARM_AFTER_MS;
+
+  const lines = captureLogs(() => client.keepWarm(BOX), 'debug');
+
+  assert.equal(await lines.result, true);
+  const all = lines.of('DEBUG').join('\n');
+  assert.doesNotMatch(all, /Could not keep the link/);
+  assert.match(all, /refused the sensor read.*UNSUPPORTED.*warm all the same/);
+});
+
 test('the first contact with a box, slow by nature, does not shorten the interval', async () => {
   // Nothing had reached the box since start-up: that wake builds the session,
   // and its slowness says nothing about how fast the link goes cold.

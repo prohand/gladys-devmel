@@ -301,6 +301,9 @@ export async function setKnownPosition(gladys, config, externalId, position) {
  * @param {object} [scenes] where the scene triggers are fired, same reason
  * @param {object} [client] the AirSend driver, told when a remote gave a device
  *   a newer order than the one it is still repeating (see `client.supersede`)
+ * @param {object} [options]
+ * @param {?object} [options.plan] the listening currently bound (listening.js),
+ *   so the advice on a dropped frame never asks for what is already done
  * @returns {Promise<number>} how many devices acted on a frame
  */
 export async function applyEvents(
@@ -311,6 +314,7 @@ export async function applyEvents(
   orders = sentOrders,
   scenes = sceneEvents,
   client = null,
+  { plan = null } = {},
 ) {
   if (!Array.isArray(events)) {
     return 0;
@@ -386,7 +390,7 @@ export async function applyEvents(
       if (dropped?.copyOfPress) {
         logger.debug(`${line} Another copy of the same press was usable.`);
       } else if (registry.announce(dropped, 'dropped')) {
-        logger.info(`${line} ${adviseOnDropped(event, unusable)}`);
+        logger.info(`${line} ${adviseOnDropped(event, unusable, plan)}`);
       } else {
         logger.debug(line);
       }
@@ -796,11 +800,22 @@ async function firePresses(gladys, scenes, device, pressed, channel) {
  * inside. The fix is upstream, in the listening channel, and saying so here is
  * cheaper than a debug session.
  */
-function adviseOnDropped(event, reason) {
+function adviseOnDropped(event, reason, plan = null) {
   if (!String(reason).startsWith('unreliable')) {
     return '';
   }
   if (event?.channel?.source === undefined) {
+    // Already listening to that very decoder: asking for it again sent a user
+    // round in circles (pid 1 heard while bound to "generic", advice: type
+    // "generic"). What is left is a frame the decoder caught and could not
+    // read — a neighbour's device, interference — which nothing here fixes.
+    if (plan?.enabled && Number(plan.channel) === Number(event?.channel?.id)) {
+      return (
+        `Listening is already on ${channelToType(plan.channel)}: the box caught a frame it could ` +
+        "not decode, usually a neighbour's device or interference. Nothing to change. If one of " +
+        'your remotes does nothing, press it closer to the box and run "Test the connection".'
+      );
+    }
     return (
       `The box picked up protocol ${event?.channel?.id} without decoding it (no address, no ` +
       'grade it trusts). Set the listening channel to ' +

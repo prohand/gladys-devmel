@@ -254,6 +254,7 @@ async function handleRadioEvents(events, route) {
     sentOrders,
     sceneEvents,
     client,
+    { plan: listenState.plan },
   );
   logger.debug(`${route}: ${events?.length ?? 0} event(s), ${applied} device(s) updated`);
   if (JSON.stringify([...client.transports]) !== badges) {

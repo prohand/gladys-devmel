@@ -1961,6 +1961,30 @@ test('a dropped frame of the generic channel asks for "generic", not for pid 1',
   assert.doesNotMatch(lines.of('INFO')[0], /listening channel to (1|that pid)\b/);
 });
 
+test('a dropped frame of the protocol already listened to does not ask for it again', async () => {
+  // Reported on the forum: listening deduced on generic 433 MHz (pid 1), a
+  // pid 1 frame dropped, and the advice was to set listening to "generic".
+  const { gladys, config } = setup();
+  const lines = captureLogs(
+    async () =>
+      applyEvents(
+        gladys,
+        config,
+        [{ type: 3, reliability: 0, channel: { id: 1 }, thingnotes: { notes: [] } }],
+        new HeardChannels(),
+        new SentOrders(),
+        undefined,
+        null,
+        { plan: { enabled: true, channel: 1 } },
+      ),
+    'debug',
+  );
+  await lines.result;
+  assert.match(lines.of('INFO')[0], /Listening is already on "generic"/);
+  assert.match(lines.of('INFO')[0], /Nothing to change/);
+  assert.doesNotMatch(lines.of('INFO')[0], /Set the listening channel/);
+});
+
 test('accepting unreliable frames lets a badly graded frame through', async () => {
   const gladys = createFakeGladys();
   const devices = JSON.stringify({
