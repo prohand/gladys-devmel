@@ -611,8 +611,18 @@ export class AirSendClient {
         this.transferLocal(device, [queryNote(QUERY_TYPES.TEMPERATURE)], { wait: true }),
       );
     } catch (err) {
-      logger.debug(`Could not keep the link to "${device.name}" warm: ${err.message}`);
-      telling = telling && answeredItself(err);
+      // A box with no sensor (the plain AirSend) refuses the read with
+      // UNSUPPORTED every four minutes. That refusal IS the answer the read
+      // was for, and logging it as a failure sent a user hunting for a fault
+      // in a link that was working.
+      const answered = answeredItself(err);
+      logger.debug(
+        answered
+          ? `The box "${device.name}" refused the sensor read used to keep its link warm ` +
+              `(${describeFailure(err.eventType).name}): it answered, so the link is warm all the same`
+          : `Could not keep the link to "${device.name}" warm: ${err.message}`,
+      );
+      telling = telling && answered;
     }
     // Only a box that answered, after a real silence, says how fast its link
     // goes cold. The first contact builds the session and is slow whatever the
