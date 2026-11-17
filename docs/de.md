@@ -588,6 +588,31 @@ Rollladen steht, schickt ihn auch in Gladys in seine Lieblingsposition. Das
 setzt einen gemessenen Rollladen voraus (`travel_up` / `travel_down`): Ohne
 Fahrzeiten sagt nichts, ob er sich bewegt, und ein STOP bleibt ein STOP.
 
+### Rollladengruppen
+
+Eine Gruppe („Rollläden Süd", „Alle Rollläden") ist auf airsend.cloud ein
+eigener Sender: eine eigene Adresse, die mit jedem Motor der Gruppe gekoppelt
+ist. Tragen Sie diese Adresse in die `remotes` jedes Rollladens der Gruppe ein,
+und der Rollladen folgt den Befehlen der Gruppe. Eine Gruppe von Gruppen
+funktioniert genauso: „Rollläden Süd" führt „Alle Rollläden" in ihren `remotes`.
+
+Umgekehrt zeigt die Gruppe in Gladys, was ihre Rollläden zeigen, ohne etwas
+zu funken:
+
+- alle offen: die Gruppe ist offen; alle geschlossen: sie ist geschlossen;
+- sonst (einige offen, andere geschlossen, einer auf halber Höhe gestoppt):
+  die Gruppe wird als **gestoppt** angezeigt, weder offen noch geschlossen;
+- eine Gruppe mit Position (mit Laufzeiten oder Typ `4099`) zeigt den
+  **Durchschnitt** der Positionen ihrer Rollläden, wenn jeder eine hat. Stehen
+  ihre Rollläden nicht alle an derselben Stelle, fährt ihre nächste
+  Positionierung zuerst an einen Endanschlag.
+
+Nur Rollläden zählen, nie die Gruppen dazwischen. Die Gruppe wird zwei Sekunden
+nach der letzten Änderung ihrer Rollläden neu berechnet, damit sie nicht
+„gestoppt" anzeigt, während jeder dem Befehl der Gruppe folgt. Eine Gruppe
+zeigt nichts an, solange nicht jeder ihrer Rollläden einmal einen Zustand
+gezeigt hat.
+
 ## Den Funk empfangen
 
 Die AirSend-Box kann jedes Telegramm weiterleiten, das sie hört — ein von Hand

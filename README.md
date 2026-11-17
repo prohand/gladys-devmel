@@ -135,6 +135,7 @@ them.
 │     ├─ button.js                   #   push button
 │     ├─ switchDevice.js             #   on/off
 │     ├─ shutter.js                  #   shutters, with or without position
+│     ├─ shutterGroups.js            #   a group shows what its shutters show
 │     └─ light.js                    #   dimmable light
 ├─ docs/                             # user documentation, re-hosted by Gladys
 ├─ gladys-assistant-integration.json # manifest (config schema, actions, webhook…)

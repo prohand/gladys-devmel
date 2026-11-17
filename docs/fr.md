@@ -567,6 +567,31 @@ aussi à sa position favorite dans Gladys. Il faut pour cela un volet minuté
 (`travel_up` / `travel_down`) : sans temps de course, rien ne dit s'il bouge, et
 un STOP reste un STOP.
 
+### Les groupes de volets
+
+Un groupe (« Volets sud », « Tous les volets ») est un émetteur à part sur
+airsend.cloud : sa propre adresse, appairée avec chaque moteur du groupe.
+Ajoutez cette adresse aux `remotes` de chaque volet du groupe, et le volet suit
+les ordres du groupe. Un groupe de groupes marche pareil : « Volets sud » liste
+« Tous les volets » dans ses `remotes`.
+
+En retour, le groupe affiche dans Gladys ce qu'affichent ses volets, sans rien
+envoyer sur la radio :
+
+- tous ouverts : le groupe est ouvert ; tous fermés : il est fermé ;
+- sinon (certains ouverts, d'autres fermés, un arrêté à mi-course) : le groupe
+  est affiché **arrêté**, ni ouvert ni fermé ;
+- un groupe avec position (chronométré, ou type `4099`) affiche la **moyenne**
+  des positions de ses volets, quand chacun en a une. Si ses volets ne sont pas
+  tous au même endroit, sa prochaine mise en position passe d'abord par une
+  butée.
+
+Seuls les volets comptent, jamais les groupes intermédiaires. Le groupe est
+recalculé deux secondes après que ses volets ont fini de changer, pour ne pas
+afficher « arrêté » le temps que chacun suive l'ordre du groupe. Un groupe
+n'affiche rien tant que chacun de ses volets n'a pas affiché un état une
+première fois.
+
 ## Écouter la radio
 
 Le boîtier AirSend peut retransmettre chaque trame qu'il entend — une

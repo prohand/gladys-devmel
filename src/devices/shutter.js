@@ -37,6 +37,7 @@ import {
 import { DIRECTIONS, ShutterTravel } from '../devmel/travel.js';
 import { failureReason, PRESS_WINDOW_MS, sceneEvents } from '../capabilities/scenes.js';
 import { idsFor, publishState, sendNotes } from './helpers.js';
+import { ShutterGroups } from './shutterGroups.js';
 
 const KEY = 'shutter';
 
@@ -61,6 +62,15 @@ export const shutter = {
 
   /** Where `order_failed` is fired from, held here for the same reason. */
   scenes: sceneEvents,
+
+  /**
+   * The groups of shutters, and what Gladys was shown for each shutter (see
+   * shutterGroups.js). Its timers are the travel's, so the tests drive both.
+   */
+  groups: new ShutterGroups({
+    clock: () => shutter.travel,
+    refresh: (gladys, group) => refreshGroup(gladys, group),
+  }),
 
   buildDevice(gladys, device) {
     const ids = idsFor(gladys, KEY, device);
@@ -117,13 +127,14 @@ export const shutter = {
    */
   async restoreStates(gladys, { device, features }) {
     reframe(device);
-    if (!hasPosition(device) || shutter.travel.isMoving(device)) {
-      return false;
-    }
     const ids = idsFor(gladys, KEY, device);
     const stored = features?.find(
       (feature) => feature.external_id === ids.feature(FEATURE.POSITION),
     )?.last_value;
+    rememberStored(device, ids, features);
+    if (!hasPosition(device) || shutter.travel.isMoving(device)) {
+      return false;
+    }
     if (!shutter.travel.knows(device)) {
       if (Number.isFinite(stored)) {
         shutter.travel.set(device, stored);
@@ -135,7 +146,7 @@ export const shutter = {
     if (position === null || position === stored) {
       return false;
     }
-    await publishState(gladys, ids.feature(FEATURE.STATE), toShutterState(position));
+    await showState(gladys, device, ids, toShutterState(position));
     await publishPosition(gladys, device, ids, position);
     return true;
   },
@@ -159,7 +170,7 @@ export const shutter = {
       return;
     }
     const ids = idsFor(gladys, KEY, device);
-    await publishState(gladys, ids.feature(FEATURE.STATE), toShutterState(position));
+    await showState(gladys, device, ids, toShutterState(position));
     await publishPosition(gladys, device, ids, position);
   },
 
@@ -278,9 +289,10 @@ export const shutter = {
     const direction = superseded ? null : shutter.travel.resume(device, since);
     if (direction !== null) {
       logger.info(`"${device.name}" was not stopped: it runs on to its end stop`);
-      await publishState(
+      await showState(
         gladys,
-        ids.feature(FEATURE.STATE),
+        device,
+        ids,
         direction === DIRECTIONS.UP ? SHUTTER_STATE.OPEN : SHUTTER_STATE.CLOSED,
       );
       return true;
@@ -290,9 +302,10 @@ export const shutter = {
     }
     const position = shutter.travel.positionOf(device);
     logger.info(`"${device.name}" did not move: its travel is taken back`);
-    await publishState(
+    await showState(
       gladys,
-      ids.feature(FEATURE.STATE),
+      device,
+      ids,
       position === null ? SHUTTER_STATE.STOP : toShutterState(position),
     );
     if (position !== null) {
@@ -327,7 +340,7 @@ export const shutter = {
     const known = clampLevel(position);
     shutter.travel.set(device, known);
     logger.info(`"${device.name}" is known to be at ${known} %`);
-    await publishState(gladys, ids.feature(FEATURE.STATE), toShutterState(known));
+    await showState(gladys, device, ids, toShutterState(known));
     await publishPosition(gladys, device, ids, known);
     return known;
   },
@@ -339,6 +352,7 @@ export const shutter = {
    * out and Gladys kept the position it started from.
    */
   async settle() {
+    shutter.groups.cancel();
     await Promise.all(driving.values());
     await shutter.travel.settle();
   },
@@ -388,7 +402,7 @@ async function goTo(
         }
         const arrived = toShutterState(position);
         if (arrived !== announced) {
-          await publishState(gladys, ids.feature(FEATURE.STATE), arrived);
+          await showState(gladys, device, ids, arrived);
         }
       },
     });
@@ -400,7 +414,7 @@ async function goTo(
   const state = announced ?? (moving ? null : toShutterState(destination));
   if (state !== null) {
     try {
-      await publishState(gladys, ids.feature(FEATURE.STATE), state);
+      await showState(gladys, device, ids, state);
     } catch (error) {
       logger.warn(`State of "${device.name}" not published: ${error.message}`);
     }
@@ -559,7 +573,7 @@ async function freeze(gladys, device, ids, { sent = false } = {}) {
     return;
   }
   const position = shutter.travel.stop(device, { sent });
-  await publishState(gladys, ids.feature(FEATURE.STATE), SHUTTER_STATE.STOP);
+  await showState(gladys, device, ids, SHUTTER_STATE.STOP);
   if (wasMoving && position !== null) {
     await publishPosition(gladys, device, ids, position);
   }
@@ -585,7 +599,7 @@ async function goToFavorite(gladys, device, ids) {
 /** The shutter went somewhere nobody can tell: unknown until its next end stop. */
 async function goSomewhere(gladys, device, ids) {
   shutter.travel.set(device, null);
-  await publishState(gladys, ids.feature(FEATURE.STATE), SHUTTER_STATE.STOP);
+  await showState(gladys, device, ids, SHUTTER_STATE.STOP);
 }
 
 function hasFavorite(device) {
@@ -656,7 +670,97 @@ async function publishPosition(gladys, device, ids, position) {
   if (!hasPosition(device)) {
     return;
   }
+  shutter.groups.record(gladys, device, { position });
   await publishState(gladys, ids.feature(FEATURE.POSITION), position);
+}
+
+/**
+ * Publish the state of a shutter, and remember it: the groups the shutter is
+ * in show what their shutters show (see shutterGroups.js). Remembered before
+ * it is published — a state Gladys refused is still where the motor went.
+ */
+async function showState(gladys, device, ids, state) {
+  shutter.groups.record(gladys, device, { state });
+  await publishState(gladys, ids.feature(FEATURE.STATE), state);
+}
+
+/**
+ * What Gladys kept for a shutter at the last run: what its groups start from.
+ * Without it, a group showed nothing until every one of its shutters had
+ * moved once since the start.
+ */
+function rememberStored(device, ids, features) {
+  const valueOf = (key) =>
+    features?.find((feature) => feature.external_id === ids.feature(key))?.last_value;
+  const known = {};
+  const state = valueOf(FEATURE.STATE);
+  if (Number.isFinite(state) && shutter.groups.shownFor(device).state === undefined) {
+    known.state = state;
+  }
+  const position = valueOf(FEATURE.POSITION);
+  if (
+    hasPosition(device) &&
+    Number.isFinite(position) &&
+    shutter.groups.shownFor(device).position === undefined
+  ) {
+    known.position = position;
+  }
+  shutter.groups.remember(device, known);
+}
+
+/**
+ * Show a group what its shutters show, once they are quiet (see
+ * shutterGroups.js). Nothing goes on the air: the shutters are already where
+ * they are.
+ *
+ * Its travel is brought along. Every shutter raised one by one left the
+ * travel of "Everything" at the bottom, where its last order had sent it, and
+ * "Everything to 50 %" then sent an UP to shutters already at the top. Shutters
+ * that are not all in the same place leave it with no position at all: the
+ * next positioning of the group runs to an end stop first, the one place every
+ * shutter of the group is known to reach together.
+ *
+ * Never a group that moves, or is being driven somewhere, under an order of
+ * its own: its travel says where it goes, and setting it would cancel the
+ * STOP that ends the movement.
+ */
+async function refreshGroup(gladys, group) {
+  if (shutter.travel.isMoving(group) || driving.has(group.platformId)) {
+    return;
+  }
+  const { state, position, together } = shutter.groups.aggregate(group);
+  if (state === undefined) {
+    return;
+  }
+  const ids = idsFor(gladys, KEY, group);
+  const shown = shutter.groups.shownFor(group);
+  // Shown: the average. Travelled from: only a position they all share.
+  const where = position ?? positionOfState(state);
+  const from = together === undefined ? positionOfState(state) : together;
+  if (shutter.travel.tracks(group) && shutter.travel.positionOf(group) !== from) {
+    shutter.travel.set(group, from);
+  }
+  try {
+    if (shown.state !== state) {
+      logger.debug(`"${group.name}" shows what its shutters show: ${describe(state)}`);
+      shutter.groups.remember(group, { state });
+      await publishState(gladys, ids.feature(FEATURE.STATE), state);
+    }
+    if (hasPosition(group) && where !== null && shown.position !== where) {
+      shutter.groups.remember(group, { position: where });
+      await publishState(gladys, ids.feature(FEATURE.POSITION), where);
+    }
+  } catch (err) {
+    logger.warn(`State of the group "${group.name}" not published: ${err.message}`);
+  }
+}
+
+/** Where shutters that all show this state are, when nothing better is known. */
+function positionOfState(state) {
+  if (state === SHUTTER_STATE.OPEN) {
+    return 100;
+  }
+  return state === SHUTTER_STATE.CLOSED ? 0 : null;
 }
 
 function toRadioState(state, invert) {
