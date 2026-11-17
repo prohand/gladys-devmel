@@ -534,6 +534,29 @@ while the shutter is still sends it to its favourite position in Gladys too.
 That takes a timed shutter (`travel_up` / `travel_down`): without travel times
 nothing says whether it is moving, and a STOP stays a STOP.
 
+### Shutter groups
+
+A group ("South shutters", "All shutters") is an emitter of its own on
+airsend.cloud: its own address, paired with every motor of the group. Add that
+address to the `remotes` of each shutter of the group, and the shutter follows
+the group's orders. A group of groups works the same way: "South shutters"
+lists "All shutters" in its `remotes`.
+
+The other way round, the group shows in Gladys what its shutters show, without
+sending anything on the radio:
+
+- all open: the group is open; all closed: it is closed;
+- anything else (some open, some closed, one stopped half-way): the group is
+  shown **stopped**, neither open nor closed;
+- a group with a position (timed, or type `4099`) shows the **average**
+  position of its shutters, when each has one. If its shutters are not all in
+  the same place, its next positioning goes through an end stop first.
+
+Only shutters count, never the groups in between. The group is recomputed two
+seconds after its shutters are done changing, so it is not shown "stopped"
+while each one follows the group's order. A group shows nothing until each of
+its shutters has shown a state once.
+
 ## Listening to the radio
 
 The AirSend box can forward every frame it hears — a wall remote pressed by

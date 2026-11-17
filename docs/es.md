@@ -568,6 +568,30 @@ Gladys a su posición favorita. Eso requiere una persiana cronometrada
 (`travel_up` / `travel_down`): sin tiempos de recorrido nada dice si se está
 moviendo, y un STOP sigue siendo un STOP.
 
+### Grupos de persianas
+
+Un grupo («Persianas sur», «Todas las persianas») es un emisor propio en
+airsend.cloud: su propia dirección, emparejada con cada motor del grupo. Añada
+esa dirección a los `remotes` de cada persiana del grupo, y la persiana sigue
+las órdenes del grupo. Un grupo de grupos funciona igual: «Persianas sur» lista
+«Todas las persianas» en sus `remotes`.
+
+A la inversa, el grupo muestra en Gladys lo que muestran sus persianas, sin
+enviar nada por radio:
+
+- todas abiertas: el grupo está abierto; todas cerradas: está cerrado;
+- si no (unas abiertas, otras cerradas, una parada a media altura): el grupo se
+  muestra **parado**, ni abierto ni cerrado;
+- un grupo con posición (cronometrado, o tipo `4099`) muestra la **media** de
+  las posiciones de sus persianas, cuando cada una tiene una. Si sus persianas
+  no están todas en el mismo sitio, su siguiente posicionamiento pasa primero
+  por un tope.
+
+Solo cuentan las persianas, nunca los grupos intermedios. El grupo se recalcula
+dos segundos después de que sus persianas dejen de cambiar, para no mostrarlo
+«parado» mientras cada una sigue la orden del grupo. Un grupo no muestra nada
+hasta que cada una de sus persianas haya mostrado un estado una primera vez.
+
 ## Escuchar la radio
 
 La pasarela AirSend puede reenviar cada trama que oye — un mando de pared

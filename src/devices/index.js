@@ -141,6 +141,20 @@ export async function replayDeviceStates(gladys, gladysDevice, context) {
 }
 
 /**
+ * Tell the device modules which devices the configuration holds, where one of
+ * them needs the others: a group of shutters shows what its shutters show
+ * (see shutterGroups.js). Called on every configuration applied.
+ *
+ * @returns {number} how many groups of shutters were found
+ */
+export function configureDevices(config) {
+  shutter.groups.configure(
+    config.devmelDevices.filter((device) => shutter.types.includes(device.rtype)),
+  );
+  return shutter.groups.membersOf.size;
+}
+
+/**
  * Settle what the device modules have under way, then drop every timer they
  * hold (integration shutdown): a shutter driven to a position gets its STOP
  * now, and Gladys the position it is left at (see `ShutterTravel.settle`).

@@ -61,6 +61,9 @@ src/capabilities/       Gladys 5.1 scenes and widget
 - **The radio carries orders, never positions.** A shutter given `travel_up` / `travel_down` has
   its position computed (`travel.js`) from Gladys orders and from orders heard on the air, and
   resynchronized at every end stop.
+- **A group shows what its shutters show**: a shutter listing a group's address in its `remotes`
+  is a member; the group's state (all open / all closed / else stopped) and average position are
+  computed from its shutters (`shutterGroups.js`), never sent on the air.
 - **Everything transmitted comes back** (transfer answer + the box hearing itself):
   `orders.js` remembers what was sent so the echo is not replayed — that bug once sent a shutter
   positioned at 40 % to the top.

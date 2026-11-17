@@ -23,6 +23,7 @@ import { AirSendClient } from './src/devmel/client.js';
 import {
   applyEvents,
   buildDiscoveredDevices,
+  configureDevices,
   findDeviceByExternalId,
   identifyDevice,
   publishTransportEntries,
@@ -479,6 +480,10 @@ async function initialize(rawConfig) {
 
   client.configure(config);
   logger.info(`${config.devmelDevices.length} Devmel device(s) configured`);
+  const groups = configureDevices(config);
+  if (groups > 0) {
+    logger.info(`${groups} group(s) of shutters show what their shutters show`);
+  }
 
   // publishDiscoveredDevices is idempotent (upsert by external_id). A Gladys
   // that refuses it does not make the box any less reachable: what only
